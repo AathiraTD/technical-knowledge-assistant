@@ -1,0 +1,55 @@
+flowchart TD
+    subgraph QUERY["Query time"]
+        Q["User question"]
+        CLARIFY["Clarify gate<br/>underspecified? -> state assumptions"]
+        POLICY["Policy gate<br/>price / stock / competitor / compliance / health?"]
+        Q --> CLARIFY --> POLICY
+    end
+
+    subgraph RETRIEVE["Retrieval"]
+        SIM["Similarity search<br/>per-document cap in top-k"]
+        THRESH{"Best score<br/>vs threshold?"}
+        POLICY -->|not routed| SIM --> THRESH
+    end
+
+    subgraph ROUTER["Deterministic router — 5 paths"]
+        direction TB
+        ROUTE["Route<br/>fixed referral text<br/>(no retrieval)"]
+        EXTR["Extract<br/>one dominant doc<br/>quote verbatim + cite"]
+        COMPOSE["Compose<br/>>=2 docs above threshold<br/>LLM synthesises with numbered markers"]
+        DEFER["Cited hand-off<br/>top passage itself says 'contact us'"]
+        REFUSE["Refuse<br/>nothing above threshold,<br/>or a guardrail check fails"]
+    end
+
+    POLICY -->|policy pattern matched| ROUTE
+    THRESH -->|one doc dominates, factual| EXTR
+    THRESH -->|multi-doc, synthesis-shaped| COMPOSE
+    THRESH -->|top passage defers| DEFER
+    THRESH -->|below threshold| REFUSE
+
+    COMPOSE --> MODEL["Local LLM<br/>context-only prompt, temperature zero"]
+
+    subgraph GUARD["Guardrails — post-generation checks"]
+        CITE["Citation-marker check<br/>marker must point at a retrieved passage"]
+        NUM["Numbers-verbatim check<br/>figure must appear word-for-word in cited passage"]
+        QUAL["Qualifier/caveat travels with its number"]
+        MODEL --> CITE --> NUM --> QUAL
+    end
+
+    subgraph MODE["Audience filter"]
+        FLAG{"Staff or public mode?"}
+        FLAG -->|staff, on refuse| CAND["Show nearest candidates + scores"]
+        FLAG -->|public, on refuse| HANDOFF["Hand off to technical team"]
+    end
+    SIM -. audience-tagged filter .-> FLAG
+    REFUSE --> FLAG
+
+    subgraph OUT["Output — CLI"]
+        REPLY["Answer / Sources / Refusal-or-Handoff<br/>(brief's exact format, doc name + URL)"]
+    end
+    ROUTE --> REPLY
+    EXTR --> REPLY
+    QUAL --> REPLY
+    DEFER --> REPLY
+    CAND --> REPLY
+    HANDOFF --> REPLY

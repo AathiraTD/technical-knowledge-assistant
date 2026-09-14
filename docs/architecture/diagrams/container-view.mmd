@@ -1,0 +1,75 @@
+flowchart TD
+    classDef person fill:#fff7ed,stroke:#fb923c,color:#9a3412,stroke-width:2px
+    classDef website fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
+    classDef crm fill:#fdf4ff,stroke:#d946ef,color:#86198f,stroke-width:2px
+    classDef llmClass fill:#f5f3ff,stroke:#a78bfa,color:#5b21b6,stroke-width:2px
+    classDef receiver fill:#fefce8,stroke:#facc15,color:#854d0e,stroke-width:2px
+    classDef cache fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-width:2px
+    classDef queue fill:#fff1f2,stroke:#fb7185,color:#9f1239,stroke-width:2px
+    classDef dlq fill:#fef2f2,stroke:#f87171,color:#991b1b,stroke-width:2px
+    classDef worker fill:#f0fdfa,stroke:#2dd4bf,color:#115e59,stroke-width:2px
+    classDef vectordb fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
+    classDef metadb fill:#f0f9ff,stroke:#38bdf8,color:#0c4a6e,stroke-width:2px
+    classDef core fill:#eef2ff,stroke:#818cf8,color:#3730a3,stroke-width:2px
+    classDef cli fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
+
+    USER(("Customer, trade, or staff<br/>[Person]<br/>Asks product questions"))
+    WEBN[["Lime Green website<br/>[Software System]<br/>Pages, FAQs, KB articles, datasheets"]]
+    CRMN[["CRM<br/>[Software System]<br/>Future source — customer & enquiry records"]]
+    LLMN[["Local LLM<br/>[Software System]<br/>Ollama — composes from retrieved passages only"]]
+
+    subgraph APP["TECHNICAL KNOWLEDGE ASSISTANT"]
+        direction TB
+
+        subgraph INDEX["🔴 PRODUCTION — Indexing path<br/>(queue justified by multiple sources, not website size)"]
+            direction TB
+            RECVN["Change Receiver<br/>[Container: webhook / poller]<br/>Detects published or changed content"]
+            CACHEN["Content Cache<br/>[Container: disk store]<br/>Stores raw changed content before indexing"]
+            QUEUEN["Indexing Queue<br/>[Container: message queue]<br/>Buffers jobs from every source"]
+            WORKN["Indexing Worker<br/>[Container: Python, async]<br/>Chunks + embeds changed docs<br/>retries with backoff in-process"]
+            DLQN["Dead-Letter Queue<br/>[Container: message queue]<br/>Holds jobs that exceed the retry limit"]
+            RECVN --> CACHEN --> QUEUEN --> WORKN
+            WORKN -->|"after retry limit"| DLQN
+        end
+
+        subgraph DATA["Retrieval data"]
+            direction TB
+            VECN[("Vector Index<br/>[Container: vector database]<br/>Embeddings for semantic retrieval")]
+            METAN[("Metadata Store<br/>[Container: document database]<br/>Source, chunk refs, indexing status")]
+        end
+
+        subgraph QA["Question-answering path — MVP and production"]
+            direction TB
+            CLIN["CLI<br/>[Container: Python]<br/>Displays answer, sources, or a cited refusal"]
+            ENGN["Answer Engine<br/>[Container: Python]<br/>Retrieves passages, verifies citations,<br/>answers or refuses"]
+            CLIN --> ENGN
+        end
+    end
+
+    WEBN -->|"webhook on publish,<br/>or polled with conditional GET"| RECVN
+    CRMN -.->|"webhook / export<br/>(future source)"| RECVN
+    USER --> CLIN
+    WORKN -->|"writes embeddings"| VECN
+    WORKN -->|"writes metadata"| METAN
+    ENGN -.->|"retrieves passages"| VECN
+    ENGN -.->|"reads citations"| METAN
+    ENGN -->|"composes from<br/>retrieved passages"| LLMN
+
+    class USER person
+    class WEBN website
+    class CRMN crm
+    class LLMN llmClass
+    class RECVN receiver
+    class CACHEN cache
+    class QUEUEN queue
+    class DLQN dlq
+    class WORKN worker
+    class VECN vectordb
+    class METAN metadb
+    class ENGN core
+    class CLIN cli
+
+    style APP fill:#fafafa,stroke:#334155,stroke-width:2px
+    style INDEX fill:#fff1f2,stroke:#e11d48,stroke-width:3px,stroke-dasharray:6 4
+    style DATA fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px
+    style QA fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
