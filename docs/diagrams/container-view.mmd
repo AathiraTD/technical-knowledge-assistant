@@ -12,8 +12,8 @@ C4Container
 
     Container_Boundary(assistant, "Technical Knowledge Assistant") {
         Container_Boundary(indexing, "Indexing path") {
-            Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
-            ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
+            Container(receiver, "Refresh trigger", "Scheduled CLI", "Revalidates with ETag and Last-Modified; compares content hashes")
+            ContainerQueue(queue, "Indexing queue", "Local durable SQLite jobs", "Buffers jobs, retries with backoff, and dead-letters failures")
             Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
             ContainerDb(cache, "Source document store", "Versioned filesystem — ships with the submission", "Original HTML and PDFs as fetched, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history")
         }
@@ -27,7 +27,7 @@ C4Container
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
                 Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out; canonical for the transcript and the harness")
-                Container(ui, "Web UI", "Streamlit", "A thin page over the same library, for the demonstration")
+                Container(ui, "Web UI", "Python stdlib HTTP server", "A thin page over the same library, for the demonstration")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
@@ -41,7 +41,7 @@ C4Container
         }
     }
 
-    Rel_D(website, indexer, "Crawled once by sitemap")
+    Rel_D(website, indexer, "Sitemap discovery and conditional refresh")
     Rel_D(website, receiver, "Sitemap last-modified")
     Rel_D(staff, queue, "New or changed documents")
     Rel_R(receiver, queue, "Enqueues changed URLs")
@@ -83,7 +83,7 @@ C4Container
     UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
 
     UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
-    UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(queue, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")

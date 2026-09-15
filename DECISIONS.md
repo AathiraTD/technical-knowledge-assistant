@@ -22,10 +22,11 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 12 | Audience and data model | Three audiences, eight classification axes, filtered at retrieval in code |
 | 13 | Second source | Staff-knowledge capture justifies the queue; CRM is a channel, not a corpus |
 | 14 | Caching | Production only, keyed on template, slots, audience and index version |
-| 15 | Interface | CLI canonical; a thin Streamlit UI over the same library |
+| 15 | Interface | CLI canonical; a thin standard-library HTTP UI over the same library |
 | 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
 | 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
 | 18 | Delta ingestion | Unchanged documents are not reprocessed; changed ones keep the version they replaced; withdrawn ones are deactivated, never deleted |
+| 19 | Controlled knowledge release | Immutable originals, validated publication, pinned readers, real backend parity and durable ingestion jobs |
 
 ---
 
@@ -64,7 +65,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | | Assessment path | Deployment path |
 |---|---|---|
 | Store | SQLite — standard library, one file, ships in the repository | PostgreSQL + pgvector |
-| Similarity | Cosine in numpy after loading; a single matrix multiply over six to eight hundred chunks | `<=>` inside the query, with an HNSW index |
+| Similarity | Cosine in numpy after loading current vectors | Exact `<=>` search over current allowed rows; ANN requires measurement |
 | Service required | None | Postgres |
 | Schema | `db/schema.sqlite.sql` | `db/schema.postgres.sql` |
 
@@ -76,7 +77,7 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 **Prove it.** Both schemas execute. The partial unique index refuses a second active version of the same document — an attempt to activate version 2 while version 1 is live raises an integrity error from the database, not from application code. Index build time and mean query latency are printed in the transcript header.
 
-**Where it breaks.** The assessment adapter is one file and one process: no concurrent writers, and the index is rebuilt rather than updated in place. The Postgres adapter is written against the same interface but is exercised far less than the SQLite one, because the submission runs on SQLite — so treat its test coverage as the weaker of the two and say so rather than implying parity. Raw HTML and PDFs stay on a versioned filesystem in both paths: Postgres holds identity, history and chunks, never the bytes, because a 29 MB blob column buys nothing that a path and a content hash do not.
+**Current implementation and limits.** Both adapters run the contract and ingestion lifecycle tests. SQLite uses WAL and serializes writers; PostgreSQL serializes publication with a transaction advisory lock. Both reject stale parent snapshots and retain history on rebuild. Readers pin one release per answer. Raw evidence stays on a versioned filesystem, so source archives and the database must be backed up together. Decision 19 records the validation and concurrency rationale.
 
 ## 4. Framework: hand-rolled, not LangChain or LlamaIndex
 
@@ -326,7 +327,7 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Alternatives.** Command line only. FastAPI with a single HTML page. A chat widget.
 
-**Why this one.** The answer engine is a library by design — question and audience set in; answer, sources, status and diagnostics out — so a second surface is a wrapper, not a rewrite, and building one demonstrates the property the production channel adapters depend on rather than asserting it. Streamlit is one dependency and one command on the assessors' machine. The command line stays canonical because the evidence lives there: the transcript and the evaluation harness run through it, so a UI failure must not cost the evidence.
+**Why this one.** The answer engine is a library by design — question and audience set in; answer, sources, status and diagnostics out — so a second surface is a wrapper, not a rewrite, and building one demonstrates the property the production channel adapters depend on rather than asserting it. The implemented UI uses Python's standard-library HTTP server, avoiding a UI framework dependency; Streamlit was the earlier proposal. The command line stays canonical because the evidence lives there: the transcript and the evaluation harness run through it, so a UI failure must not cost the evidence.
 
 **Where it breaks.** One more dependency that has to install cleanly from a clean clone. The UI is single-user and single-turn like everything else. If it misbehaves on the assessors' machine, the command line and the transcript still stand.
 
@@ -454,7 +455,29 @@ Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo w
 
 `tests/test_delta_lifecycle.py` runs the same four-run sequence against a small staged corpus in about a second, and the contract suite exercises the same behaviour against every adapter.
 
-**Where it breaks.** A chunking change moves every passage boundary without moving a single content hash, so a delta would correctly conclude that nothing needs reprocessing and be wrong. That is what `--rebuild` is for, and forgetting it is the most likely way to get a stale index. Name harvesting is also deliberately outside the delta: it is a full pass over the cached pages every run, because it costs about a second and carrying the lists forward would leave a withdrawn colour in the vocabulary that check 5 trusts.
+**Update, decision 19.** Model, dimension and chunking-version changes now trigger reprocessing automatically. `--rebuild` remains an explicit override and preserves prior versions. Failed extraction cannot replace a good version, and failed sources block a configuration change. Name harvesting remains a full pass over validated pages, because stale names would undermine the checks.
+
+## 19. Controlled knowledge releases and operational evidence
+
+**Why it exists.** The presentations require controlled, current and auditable knowledge. Delta ingestion alone did not establish that: cached pages were never revalidated, URL files overwrote originals, failures could look like withdrawals, rebuilds discarded history, separate readers retained stale vectors, and PostgreSQL was not selected by the indexer. A coherent schema did not prove the lifecycle.
+
+**Alternatives.** Mutable URL caches with a version counter; rebuilding into an empty live store; cache invalidation without a read transaction; a separate vector service; a distributed queue before there is more than one ingestion host.
+
+**Why these choices.**
+
+- Content-addressed originals and one atomic crawl pointer keep source evidence independent of processing. HTTP validators reduce transfer; SHA-256 establishes content identity. A failed crawl leaves the previous source release intact.
+- Validate sources, extraction and vectors before transactional delta activation. Retain failed documents' prior versions; block mixed processing configurations. Record URL/version/hash/path membership and complete crawl counts inside publication.
+- Pin one read transaction per answer. SQLite WAL and PostgreSQL repeatable read keep passages, caveats and vocabulary in the same release. Reload SQLite vectors for the next request. A parent-snapshot check rejects a competing stale publisher.
+- Use exact pgvector search while retaining vectors of different historical dimensions. An ANN index is an optimization to evaluate with recall and latency evidence, not a reason to discard history.
+- Use one backend factory for indexer, CLI, UI and readiness. Test real PostgreSQL rather than accepting a configured adapter that silently skips failures.
+- Accept reviewed staff JSON through the same chunking/version/audience pipeline. The ingestion operator owns approval; collecting expert knowledge and authenticating reviewers remain separate capabilities.
+- Persist scheduled ingestion jobs locally, with bounded retry, leases and dead-letter evidence. Cron or Task Scheduler supplies the schedule. This avoids operating a broker for a single ingestion host.
+
+**Prove it.** [The pipeline runbook](docs/knowledge-pipeline.md) maps presentation requirements to code and tests. Tests cover unchanged/change/withdraw/reactivate, failed extraction and rebuild, corrupt sources and vectors, approval and audience isolation, configuration changes, concurrent readers and publishers, job retries and crash recovery. Both actual databases are exercised. CI requires zero missing lines and branches across the measured libraries.
+
+**Where it breaks.** A mutable model tag is not a model checksum: use distinct immutable tags when changing weights. The queue is local and has a 24-hour crash lease; it is not a distributed broker. Staff JSON approval is an operator-controlled record, not a login or signature. Production source backups, real model evaluation, authenticated caller audiences, vision and answer-serving load controls remain separate requirements. Test coverage measures executed paths; it does not establish perfect answer correctness.
+
+**Primary design references:** [SQLite snapshot isolation](https://www.sqlite.org/isolation.html), [SQLite WAL](https://www.sqlite.org/wal.html), [Psycopg transactions](https://www.psycopg.org/psycopg3/docs/basic/transactions.html), [HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html).
 
 ## Known weaknesses
 

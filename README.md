@@ -10,16 +10,19 @@ A question is split by topic, gated against a routing table, and matched against
 
 ## Status
 
-Design complete and evidenced against the live site. The build is in progress.
+The knowledge ingestion lifecycle is implemented. The architecture and decision
+records distinguish working components from the remaining production roadmap.
+See [the pipeline runbook](docs/knowledge-pipeline.md) and
+[verification evidence](docs/knowledge-pipeline-verification.md).
 
 Status is reported with a fixed vocabulary, so an intention is never mistaken for an implementation: **built and verified**, **built but weakly tested**, **partial**, **documented only**, **known limitation**.
 
 | Area | Status | Evidence |
 |---|---|---|
-| Decisions | built and verified | 18 recorded with alternatives and costs — `DECISIONS.md` |
+| Decisions | built and verified | 19 recorded with alternatives, costs and verification boundaries — `DECISIONS.md` |
 | Crawler | built and verified | 94 documents, 0 errors; a re-run reports 94 unchanged |
 | Extraction | built and verified | 37 PDFs probed; two heading detectors; per-document quality in the ingestion report |
-| Indexer | built and verified | 94 documents + 1 staff fixture → 579 passages, 102 caveats, 39 stockists, 24 colours, 0 failures |
+| Indexer | built and verified | Container verification: 94 documents + 1 staff fixture, 552 passages, zero failures; unchanged second run reprocesses zero documents |
 | Delta ingestion | built and verified | A second crawl of an unchanged site reprocesses **nothing**: 1.4s against 23.8s. Changed documents supersede and keep their history; withdrawn ones are deactivated, not deleted. Four-run proof in `DECISIONS.md` entry 18 |
 | SQLite adapter | built and verified | The index builds, publishes atomically, and serves every answer in the transcript |
 | Retrieval | built and verified | Audience filtering in the query; authority banding; index-mismatch refusal |
@@ -29,13 +32,14 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
 | Evaluation harness | built and verified | **7/7 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. Transcript in `eval/results/transcript.txt` |
 | Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
-| PostgreSQL adapter | written, never run | Full adapter against the same Protocol and the same 8 tables, with filtering and similarity in one query. `psycopg[binary]` has no Windows ARM64 wheel and Docker's daemon is not running here, so the contract suite **skips** it rather than passing it |
-| Docker Compose | written, never booted | App, PostgreSQL + pgvector and Ollama, with pinned images, named volumes, a non-root app container and readiness checks. Not yet started once |
+| PostgreSQL adapter | built and verified | Real pgvector contract, ingestion lifecycle, concurrent reader and configuration migration tests |
+| Container deployment | partial | Image builds and runs ingestion as non-root against PostgreSQL with model doubles; Compose validates and initializes the index before the UI. Full live-model deployment is not claimed |
 | Authentication | documented only | The audience set is asserted, not proved — the filter itself is real and tested |
 | Vision | documented only | Refused by policy, not by capability — decision 16 |
-| Re-crawl hook | documented only | Change detection is built; the trigger is manual |
-| Answer cache, queueing | documented only | Designed for production; nothing to cache at one user |
-| Test coverage | built and verified | **336 tests, 99% overall, 100% line and branch on every safety-critical module.** The residual is four defensive branches in extraction, named in the testing section |
+| Scheduled ingestion | built and verified | Conditional refresh, durable job deduplication, retries, crash recovery and dead-letter status; external scheduler supplies cadence |
+| Approved staff ingestion | built and verified | Reviewed JSON sources, shared chunking/caveats, version history and audience enforcement |
+| Answer cache, generation queue | documented only | Separate from the implemented ingestion queue |
+| Test coverage | built and verified | 100% line and branch target includes crawler, extraction, indexing, jobs, model clients and both stores; [current measurements](docs/knowledge-pipeline-verification.md) |
 
 ## Read this first
 
@@ -58,7 +62,7 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 
 ## Running it
 
-Once the build lands, from a clean clone:
+From a clean clone:
 
 ```
 pip install -r requirements.txt
@@ -71,13 +75,17 @@ python -m eval.run             # seven situations, probe suite, threshold sweep
 
 The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without network access. Only the index is rebuilt locally, because it is tied to the embedding model on your machine.
 
-`python -m assistant.crawl` re-fetches from the site, and you should not need it: it reads the cache when present, and only documents whose content hash has changed are fetched again.
+`python -m assistant.crawl --refresh` revalidates sources using ETag and
+Last-Modified. Without `--refresh`, available bodies are reused but discovery
+still contacts the site. `python -m assistant.index` uses the cached source
+release. Set `ASSISTANT_POSTGRES_DSN` to select PostgreSQL for all entry points.
+See the [runbook](docs/knowledge-pipeline.md) for staff imports and scheduling.
 
 ## Layout
 
 ```
 README.md               what it is, how to run it
-DECISIONS.md            why it is this way — 18 decisions
+DECISIONS.md            why it is this way — 19 decisions
 requirements.txt        five pinned dependencies
 
 assistant/
@@ -129,46 +137,20 @@ python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
 python -m coverage report --rcfile=.coveragerc
 ```
 
-Nothing in `tests/` contacts Ollama, reads the network or needs a built index.
-That is deliberate: the part of the system that decides whether an answer prints
-is a set of pure functions over text and passages, and it should be testable
-without a model running.
+Tests replace the website transport and model calls with deterministic doubles.
+SQLite always runs. PostgreSQL tests require a disposable pgvector database via
+`ASSISTANT_POSTGRES_DSN`; they skip visibly only when it is unset, and configured
+connection failures fail the suite. Install `psycopg[binary]==3.3.3` in a supported
+Linux environment for the full suite.
 
-Two targets, and they are different on purpose.
+The target is **100% line and branch coverage** across the knowledge and answer
+libraries, including crawler, queue and both stores. CLI/UI presentation wrappers
+are outside that measurement. CI runs the full suite against both stores and
+checks that `missing_lines` and `missing_branches` are zero. Coverage is evidence
+of exercised paths, not a guarantee that technical answers are always correct.
 
-**Safety-critical logic carries a 100% line and branch target** — the router and
-its precedence, the six checks, the relevance gate, audience filtering,
-active-version filtering, snapshot publication, the index-compatibility refusal,
-and the load-bearing-slot rules. These are the branches where a miss is not a
-missing feature but a wrong answer printed with a citation. CI fails the build
-if any of them drops below 100%.
-
-**Everything else targets 90%.** `crawl.py` talks to a live website, the CLI and
-the web page are argument parsing and HTML, and the PostgreSQL adapter cannot
-run on the build machine, so all four are excluded from measurement rather than
-counted at a number that would describe the environment instead of the tests.
-
-Measured, with 336 tests: **99% overall, one missed statement and four partial
-branches, all in `extract.py` and `index.py` at 99% each.** Naming them rather
-than hiding them, because they are the only gap:
-
-| Location | Branch | Why it is not covered |
-|---|---|---|
-| `extract.py:200` | text empty after cleaning a PDF span | The span list is already filtered on `sp["text"].strip()`, so cleaning cannot empty it |
-| `extract.py:282, 290` | section body empty after cleaning | Same guard, on a buffer that only receives non-empty lines |
-| `index.py:129` | a chunk buffer that is only whitespace | `_split_on_bullets` discards whitespace-only parts before this runs |
-
-Each is a defensive guard against a condition an earlier filter already
-prevents. They are kept because extraction is the part most likely to change
-when the site does, and cheap insurance there is worth one uncovered branch.
-None of them is in the safety-critical set.
-
-The repository contract is one behavioural suite run against every adapter. It
-passes against SQLite here and **skips** against PostgreSQL, visibly, because
-`psycopg` publishes no Windows ARM64 wheel and Docker's daemon is not running on
-this machine. CI runs the same suite against a real pgvector service, which is
-the only thing that turns "the two adapters are one system" into a check rather
-than a claim.
+[Verification evidence](docs/knowledge-pipeline-verification.md) records the
+measured result and the limits of the container/model checks.
 
 ## Notes for an assessor
 
