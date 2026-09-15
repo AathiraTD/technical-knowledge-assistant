@@ -1,172 +1,214 @@
 # Architecture — Technical Knowledge Assistant
 
-Two diagrams, at two levels of detail, plus the live site inventory they're both grounded in. For the *why* behind each component (not just what connects to what), see [`architecture-rationale.md`](architecture-rationale.md).
+Two diagrams at two levels, plus the live site inventory both are grounded in. For the *why* behind each component and the four decisions that shaped them, see [`architecture-rationale.md`](architecture-rationale.md).
+
+These repository diagrams are the reference. The presentation slide carries a collapsed spine of the second one — input, split and gate, retrieve, router, model, checks, reply — not the full flow.
 
 ## 1. Container view
 
-The whole system inside one boundary, split into three groups: **Indexing path** (production only — the automatic re-index pipeline), **Retrieval data** (the shared store both paths touch), **Question-answering path** (MVP and production — what's actually built for the submission).
+Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only** (receiver, queue, staff capture, channel adapters), **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
 
-Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd) — paste directly into mermaid.live or Mermaid Chart.
+One system boundary, three groups inside it: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (one chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag), **Question-answering path** (engine, CLI, evaluation harness; channel adapters are roadmap).
+
+Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd)
 
 ```mermaid
-flowchart TD
-    classDef person fill:#fff7ed,stroke:#fb923c,color:#9a3412,stroke-width:2px
-    classDef website fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
-    classDef crm fill:#fdf4ff,stroke:#d946ef,color:#86198f,stroke-width:2px
-    classDef llmClass fill:#f5f3ff,stroke:#a78bfa,color:#5b21b6,stroke-width:2px
-    classDef receiver fill:#fefce8,stroke:#facc15,color:#854d0e,stroke-width:2px
-    classDef cache fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-width:2px
-    classDef queue fill:#fff1f2,stroke:#fb7185,color:#9f1239,stroke-width:2px
-    classDef dlq fill:#fef2f2,stroke:#f87171,color:#991b1b,stroke-width:2px
-    classDef worker fill:#f0fdfa,stroke:#2dd4bf,color:#115e59,stroke-width:2px
-    classDef vectordb fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
-    classDef metadb fill:#f0f9ff,stroke:#38bdf8,color:#0c4a6e,stroke-width:2px
-    classDef core fill:#eef2ff,stroke:#818cf8,color:#3730a3,stroke-width:2px
-    classDef cli fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
+C4Container
+    title Container diagram — Technical Knowledge Assistant<br/>Colour key: green = built for the submission · amber, rose and pink = production-only · cyan and sky = data, website and evaluation · violet = local models and the answer engine · grey = shipped cache
 
-    USER(("Customer, trade, or staff<br/>[Person]<br/>Asks product questions"))
-    WEBN[["Lime Green website<br/>[Software System]<br/>Pages, FAQs, KB articles, datasheets"]]
-    CRMN[["CRM<br/>[Software System]<br/>Future source — customer & enquiry records"]]
-    LLMN[["Local LLM<br/>[Software System]<br/>Ollama — composes from retrieved passages only"]]
+    Person(user, "Customer, trade, or staff", "Asks product questions")
+    System_Ext(website, "Lime Green website", "Product pages, datasheets, FAQs, articles, guides, contact, supplier, and sample pages")
+    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, failure cases, and compatibility data")
 
-    subgraph APP["TECHNICAL KNOWLEDGE ASSISTANT"]
-        direction TB
+    Boundary(ollama, "Ollama — local model server", "external") {
+        System_Ext(emb, "Embedding model", "qwen3-embedding:0.6b or nomic-embed-text; verified at build")
+        System_Ext(gen, "Generation model", "qwen3:4b-instruct or granite4.2:3b; selected by the author")
+    }
 
-        subgraph INDEX["🔴 PRODUCTION — Indexing path<br/>(queue justified by multiple sources, not website size)"]
-            direction TB
-            RECVN["Change Receiver<br/>[Container: webhook / poller]<br/>Detects published or changed content"]
-            CACHEN["Content Cache<br/>[Container: disk store]<br/>Stores raw changed content before indexing"]
-            QUEUEN["Indexing Queue<br/>[Container: message queue]<br/>Buffers jobs from every source"]
-            WORKN["Indexing Worker<br/>[Container: Python, async]<br/>Chunks + embeds changed docs<br/>retries with backoff in-process"]
-            DLQN["Dead-Letter Queue<br/>[Container: message queue]<br/>Holds jobs that exceed the retry limit"]
-            RECVN --> CACHEN --> QUEUEN --> WORKN
-            WORKN -->|"after retry limit"| DLQN
-        end
+    Container_Boundary(assistant, "Technical Knowledge Assistant") {
+        Container_Boundary(indexing, "Indexing path") {
+            Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
+            ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
+            Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
+            ContainerDb(cache, "Content cache", "Disk", "Raw pages and PDFs shipped for offline assessment")
+        }
 
-        subgraph DATA["Retrieval data"]
-            direction TB
-            VECN[("Vector Index<br/>[Container: vector database]<br/>Embeddings for semantic retrieval")]
-            METAN[("Metadata Store<br/>[Container: document database]<br/>Source, chunk refs, indexing status")]
-        end
+        Container_Boundary(data, "Retrieval data") {
+            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
+        }
 
-        subgraph QA["Question-answering path — MVP and production"]
-            direction TB
-            CLIN["CLI<br/>[Container: Python]<br/>Displays answer, sources, or a cited refusal"]
-            ENGN["Answer Engine<br/>[Container: Python]<br/>Retrieves passages, verifies citations,<br/>answers or refuses"]
-            CLIN --> ENGN
-        end
-    end
+        Container_Boundary(answering, "Question-answering path") {
+            Container_Boundary(access, "Inputs and integrations") {
+                Container(cli, "CLI", "Python", "Question and mode in; answer, sources, refusal, and diagnostics out")
+                Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
+            }
 
-    WEBN -->|"webhook on publish,<br/>or polled with conditional GET"| RECVN
-    CRMN -.->|"webhook / export<br/>(future source)"| RECVN
-    USER --> CLIN
-    WORKN -->|"writes embeddings"| VECN
-    WORKN -->|"writes metadata"| METAN
-    ENGN -.->|"retrieves passages"| VECN
-    ENGN -.->|"reads citations"| METAN
-    ENGN -->|"composes from<br/>retrieved passages"| LLMN
+            Container_Boundary(core, "Answering and evaluation") {
+                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation")
+                Container(eval, "Evaluation harness", "Python, offline", "Transcript situations, probe suite, threshold sweep, pass/fail, and a staff-tagged fixture")
+            }
+        }
+    }
 
-    class USER person
-    class WEBN website
-    class CRMN crm
-    class LLMN llmClass
-    class RECVN receiver
-    class CACHEN cache
-    class QUEUEN queue
-    class DLQN dlq
-    class WORKN worker
-    class VECN vectordb
-    class METAN metadb
-    class ENGN core
-    class CLIN cli
+    Rel_D(website, indexer, "Crawled once by sitemap")
+    Rel_D(website, receiver, "Sitemap last-modified")
+    Rel_D(staff, queue, "New or changed documents")
+    Rel_R(receiver, queue, "Enqueues changed URLs")
+    Rel_R(queue, indexer, "Delivers jobs")
+    BiRel(indexer, cache, "Writes on crawl; reads on index")
+    Rel_D(indexer, config, "Reads rules and exclusions")
+    Rel_U(indexer, emb, "Embeds chunks")
+    Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
+    Rel_D(user, cli, "Asks a question")
+    Rel_R(cli, engine, "Question and mode")
+    Rel_L(channels, engine, "Question and mode")
+    Rel_D(eval, engine, "Drives situations and probes")
+    Rel_U(engine, store, "Retrieves filtered passages and citation data")
+    Rel_U(engine, config, "Reads routing and policy")
+    Rel_U(engine, emb, "Embeds question")
+    Rel_U(engine, gen, "Composes answer from retrieved passages")
 
-    style APP fill:#fafafa,stroke:#334155,stroke-width:2px
-    style INDEX fill:#fff1f2,stroke:#e11d48,stroke-width:3px,stroke-dasharray:6 4
-    style DATA fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px
-    style QA fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
+    UpdateElementStyle(user, $bgColor="#fff7ed", $borderColor="#fb923c", $fontColor="#7c2d12")
+    UpdateElementStyle(website, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
+    UpdateElementStyle(staff, $bgColor="#fdf4ff", $borderColor="#e879f9", $fontColor="#86198f")
+    UpdateElementStyle(emb, $bgColor="#f5f3ff", $borderColor="#a78bfa", $fontColor="#4c1d95")
+    UpdateElementStyle(gen, $bgColor="#f5f3ff", $borderColor="#a78bfa", $fontColor="#4c1d95")
+
+    UpdateElementStyle(indexer, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(cache, $bgColor="#f8fafc", $borderColor="#94a3b8", $fontColor="#334155")
+    UpdateElementStyle(store, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
+    UpdateElementStyle(config, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
+    UpdateElementStyle(cli, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(engine, $bgColor="#eef2ff", $borderColor="#818cf8", $fontColor="#3730a3")
+    UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
+
+    UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
+
+    UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
+    UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
+    UpdateRelStyle(staff, queue, $textColor="#86198f", $lineColor="#e879f9", $offsetX="-36", $offsetY="18")
+    UpdateRelStyle(receiver, queue, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
+    UpdateRelStyle(queue, indexer, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(indexer, cache, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(indexer, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="34")
+    UpdateRelStyle(indexer, emb, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="32", $offsetY="-20")
+    UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
+    UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
+    UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(channels, engine, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
+    UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
+    UpdateRelStyle(engine, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="-42", $offsetY="-22")
+    UpdateRelStyle(engine, emb, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="40", $offsetY="22")
+    UpdateRelStyle(engine, gen, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="-40", $offsetY="22")
+
+    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
-## 2. Answer Engine detail
+## 2. Answer engine detail
 
-What "Answer Engine" in the diagram above actually does — the deterministic router and guardrail chain, derived from the mental-model record §9 (How), §10 (Bound), §11 (Build).
+What the `Answer engine` container does with one question. Its own colour key: **grey = deterministic code**, **purple = the one step where the model runs**, **red = where the system stops and hands over**.
 
 Source: [`diagrams/answer-engine-detail.mmd`](diagrams/answer-engine-detail.mmd)
 
 ```mermaid
 flowchart TD
-    subgraph QUERY["Query time"]
-        Q["User question"]
-        CLARIFY["Clarify gate<br/>underspecified? -> state assumptions"]
-        POLICY["Policy gate<br/>price / stock / competitor / compliance / health?"]
-        Q --> CLARIFY --> POLICY
-    end
+    classDef code fill:#f8fafc,stroke:#64748b,color:#1e293b,stroke-width:2px
+    classDef model fill:#f5f3ff,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef stop fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
 
-    subgraph RETRIEVE["Retrieval"]
-        SIM["Similarity search<br/>per-document cap in top-k"]
-        THRESH{"Best score<br/>vs threshold?"}
-        POLICY -->|not routed| SIM --> THRESH
-    end
+    IN["Question + mode (public / staff)<br/>input capped at about 500 words"]
+    SPLIT["Split by topic<br/>policy patterns + slot vocabularies; each part is gated and routed on its own;<br/>a published lead time or cut-off becomes its own part and takes the retrieval path;<br/>the symptom part of a complaint takes the diagnosis path"]
+    POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
+    ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tag: name, date, link"]
+    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom / photograph · property asked for;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions"]
+    RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>audience-filtered by mode; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
+    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 symptom or photograph → diagnosis · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff mode: extract (compose on request is roadmap)"}
+    DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
+    EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
+    COMPOSE["Compose — the model composes with [n] markers<br/>per option when inside / outside is uncued;<br/>regulatory asks: explained from the knowledge base, never certified; building control named;<br/>document caveats appended by code, at most three"]
+    DEFER["Cited hand-off<br/>the deferral sentence quoted and cited"]
+    REFUSE["Refuse"]
+    MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
+    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
+    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff mode, on refusal: nearest candidates, scores, passage text · public mode: hand-off only"]
+    OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
-    subgraph ROUTER["Deterministic router — 5 paths"]
-        direction TB
-        ROUTE["Route<br/>fixed referral text<br/>(no retrieval)"]
-        EXTR["Extract<br/>one dominant doc<br/>quote verbatim + cite"]
-        COMPOSE["Compose<br/>>=2 docs above threshold<br/>LLM synthesises with numbered markers"]
-        DEFER["Cited hand-off<br/>top passage itself says 'contact us'"]
-        REFUSE["Refuse<br/>nothing above threshold,<br/>or a guardrail check fails"]
-    end
+    IN --> SPLIT --> POLICY
+    POLICY -->|"matches"| ROUTE
+    POLICY -->|"no match"| SLOTS --> RETRIEVE --> ROUTER
+    ROUTER -->|"1 below threshold · 4 asked-for term absent"| REFUSE
+    ROUTER -->|"2 top passage defers"| DEFER
+    ROUTER -->|"3 symptom or photograph"| DIAG
+    ROUTER -->|"5 substrate uncued: ask back"| HANDOFF
+    ROUTER -->|"6 calculation words: coverage and pack-size passages, sum refused"| EXTR
+    ROUTER -->|"7 one document and a factual ask"| EXTR
+    ROUTER -->|"5 inside / outside uncued: per option · 8 otherwise"| COMPOSE
+    COMPOSE --> MODEL --> CHECKS
+    SLOTS -.->|"stated assumptions"| MODEL
+    CHECKS -->|"all pass"| OUT
+    CHECKS -->|"any check fails"| REFUSE
+    REFUSE --> HANDOFF
+    DIAG --> HANDOFF
+    DEFER --> HANDOFF
+    IN -.->|"mode"| RETRIEVE
+    IN -.->|"mode"| ROUTER
+    IN -.->|"mode"| ROUTE
+    IN -.->|"mode"| HANDOFF
+    ROUTE --> OUT
+    EXTR --> OUT
+    HANDOFF --> OUT
 
-    POLICY -->|policy pattern matched| ROUTE
-    THRESH -->|one doc dominates, factual| EXTR
-    THRESH -->|multi-doc, synthesis-shaped| COMPOSE
-    THRESH -->|top passage defers| DEFER
-    THRESH -->|below threshold| REFUSE
-
-    COMPOSE --> MODEL["Local LLM<br/>context-only prompt, temperature zero"]
-
-    subgraph GUARD["Guardrails — post-generation checks"]
-        CITE["Citation-marker check<br/>marker must point at a retrieved passage"]
-        NUM["Numbers-verbatim check<br/>figure must appear word-for-word in cited passage"]
-        QUAL["Qualifier/caveat travels with its number"]
-        MODEL --> CITE --> NUM --> QUAL
-    end
-
-    subgraph MODE["Audience filter"]
-        FLAG{"Staff or public mode?"}
-        FLAG -->|staff, on refuse| CAND["Show nearest candidates + scores"]
-        FLAG -->|public, on refuse| HANDOFF["Hand off to technical team"]
-    end
-    SIM -. audience-tagged filter .-> FLAG
-    REFUSE --> FLAG
-
-    subgraph OUT["Output — CLI"]
-        REPLY["Answer / Sources / Refusal-or-Handoff<br/>(brief's exact format, doc name + URL)"]
-    end
-    ROUTE --> REPLY
-    EXTR --> REPLY
-    QUAL --> REPLY
-    DEFER --> REPLY
-    CAND --> REPLY
-    HANDOFF --> REPLY
+    class IN,SPLIT,POLICY,ROUTE,SLOTS,RETRIEVE,ROUTER,DIAG,EXTR,COMPOSE,DEFER,CHECKS,OUT code
+    class MODEL model
+    class REFUSE,HANDOFF stop
 ```
 
-Three things worth saying out loud from this diagram:
+Four things to say out loud from this diagram:
 
-- **Route through the router is deterministic** — no model decides which of the five paths a question takes; a policy-pattern match, retrieval shape, or the top passage's own wording decides it.
-- **The model is a narrator, never the source of a fact** — it only runs on the Compose path.
-- **Guardrails run after generation, before printing** — a failed check on the Compose path routes into `REFUSE`.
+- **The route is decided by code, before the model sees anything, in a stated order.** Below threshold, then a published deferral (which beats a computed quantity — "how much Solo for MgO board" gets the sheet's "contact us", not a bag count), then symptoms, then the relevance gate, then uncued load-bearing slots, then calculation words, then one document with a factual ask, otherwise compose. Slots are detected before retrieval, but the retrieval-shape steps are evaluated first because a below-threshold or deferring result must not be overridden by a slot-driven branch — and a photograph question that retrieves nothing still gets "cannot see photographs", because the hand-off renderer keys that line on the slot, not the path. Instructions inside a question or a passage change nothing.
+- **The model runs on one path only — Compose — and never originates a fact.** Five paths as the record defines them (route, extract, compose, cited hand-off, refuse); diagnosis is a composite of quoted causes plus hand-off, and calculation is extract over the coverage and pack-size passages with the sum refused. Temperature zero and a fixed seed keep the run repeatable.
+- **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose) or the part refuses with "not stated in the indexed material". A confident retrieval is not enough.
+- **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
+- **Composite replies are the norm.** "Which mortar, how many bags, where do I buy" is three parts on three paths, labelled in one reply.
 
-## Appendix: live site inventory (decision 0)
+## Appendix: live site inventory (the record's decision 0, confirmed 15 September 2026)
 
-Pulled from `lime-green.co.uk`'s `sitemap.xml` and spot-checked pages. Corrects the mental-model record's hypothesis in §8.6 where noted.
+Method: `sitemap.xml` (exists, complete, referenced from `robots.txt`); every product, knowledge-base, support and Warmshell page fetched once; three datasheet PDFs extracted with PyMuPDF. Corrects the mental-model record's §8.6 hypothesis.
 
-- `robots.txt` allows all crawlers and points to a real, complete `sitemap.xml` — the record assumed this couldn't be confirmed; it can. Crawl by sitemap.
-- **Product pages**: 6 categories (Lime Mortar, Lime Plaster, Lime Render, Insulation, Primers & Adhesives, Stone Repair), ~35 individual pages, plus `/products-by-colour` (24 colour pages).
-- **Technical datasheets**: one PDF per product, plus up to 6 other PDF types per product (SDS, UK/EU DoP, Carbon Footprint, EPD, LRV) — confirms classifying by link text, not filename, and excluding everything except the TDS.
-- **Knowledge base**: `/support/knowledgebase`, 15 articles (record assumed "about five" — correct this in §8.4/§8.7).
-- **FAQ**: `/support/faq`, one page, **~41 questions across 6 sections** — record cites "17 items" throughout (§10.2, §8.7, §7.6); needs correcting wherever it appears.
-- **Case studies**: 24, matching the named examples already in the record.
+**Products — 36 pages in 6 categories; 33 have a technical datasheet; 34 datasheet PDFs** (Natural Lime Mortar links two, Medium and Strong).
+- No datasheet: Solo Filler (SDS only), Warmshell 660 Mesh (no documents at all), Silic8 AeroGel Adhesive (installation guide and SDS). The "named product with no indexed datasheet" guardrail case is real.
+- Pages are thin: substrates, uses, compatible products, colours; every number is deferred to the datasheet. Worth indexing for selection questions; the repeated 24-colour list is boilerplate to strip.
+- Datasheet link text varies ("Datasheet", "Data Sheet", "TDS", "DATA SHEET", "Data sheet Medium", "Data Sheets"); filenames are inconsistent, with spaces and typos ("Insualtion", "silgaurd", "Peformance") — classify by link text, resolve hrefs exactly as given.
+- Other document types per product: SDS, UK/EU DoP (several are `.docx`), EPD, Carbon Footprint, LRV, UKCA DoC, per-product installation guides (the three Warmshell system guides are the exception, below), one history document — all excluded except the technical datasheet.
+- Dates printed on sheets range 2015 (Forte) to October 2025 (Silguard); many carry a "140919" filename prefix (2019). Show the date.
+- Two products are not lime-based (Coloured Cement Mortar, Grippa) and one is silicate — still Lime Green products; the answer quotes what the sheet says.
 
-**Rough tier-one corpus size, corrected**: ~35 product pages + ~30 TDS PDFs + 1 FAQ page (41 Q&As) + 15 KB articles + contact/find-a-supplier ≈ **83 addressable units** — above the record's "about forty documents" cap. The spend-order in §8.7/§10.2 will need to actually cut, not just theoretically allow for it.
+**Knowledge base — 17 URLs = 15 distinct articles + 1 video index page (35 words, no procedures) + 1 superseded duplicate** (the older Building Regulations article).
+- High technical value (6): Building Regs and internal wall insulation; Lime renders checklist; Colour and colour consistency (Technical Note B1); Hydraulic or hydrated lime; Lime plastering onto laths; Background preparation for lime rendering.
+- Medium (7): Glossary; What is lime mortar; The importance of breathability; Why use lime; Lime for conservation; Lime buying guide; What is lime.
+- Low (2): Healthy buildings; Hydraulic lime for new builds.
+- Index all 15; exclude the duplicate and the video index.
 
-**Not yet checked**: Warmshell subsection pages (4); `find-a-supplier`/`contact` page structure (needed for hand-off text); whether datasheet PDFs keep qualifiers/caveats in the same section as their figures; actual PDF text-extraction quality.
+**FAQ — one page, 32 questions in 5 sections** (General 10, Plasters 4, Mortars 4, Renders 5, Warmshell Systems 9); answers are visible on the page. The record's "17 items" was wrong. The completeness check in the record's §7.6 must be redone against 32.
+
+**Commercial pages (3) — contact, find-a-supplier, order-a-sample.**
+- Contact: `0800 538 5746`; "Office Hours: Mon - Fri 9:00am - 5:00pm"; "For general and technical enquiries please get in touch with us direct using the details or contact form here."; no named individuals; no email printed. This is the hand-off text, taken from the crawl into the manifest, never typed in.
+- Find-a-supplier: postcode-and-category search, a map, and a list of about 25 named stockists (Brick and Lime Supplies, The Lime Centre, Womersley's, Lincolnshire Lime, Jewson and Travis Perkins branches, Huws Gray, and others). This list is the merchant vocabulary for the real-names check.
+- Order a sample: 24 free colour samples; paid product samples (Solo £5, Warmshell Internal £8, Warmshell External £8); brochures. The only prices on the site — quotable because the page is indexed, so sample asks are answered from it rather than routed; product prices still route.
+
+**Warmshell (5 pages).** Landing and "about" pages are marketing and duplicates of each other; the roof page links the roof design guide. The IWI page is the hub for the system documents (design guide, installation guide, site checklist, specification clauses, detail drawings, BDA Agrément, fire classification, EPD, warranty, maintenance guide). The EWI page carries the one U-value on the site (0.18 at 260 mm) and substrate guidance. Index the IWI and EWI pages plus three system guides (IWI design guide, IWI installation guide, roof design guide — content not yet extracted). This answers the record's §10.8 open item: thermal figures are published, in the system guides, not on product pages.
+
+**Excluded by rule:** 24 colour pages (near-identical), 6 category pages (boilerplate), 24 case studies, 25 news items, 4 inspiration pages, SDS/DoP/EPD/Carbon/LRV/warranty/Agrément/clause documents, brochures, the video index, the duplicate article, the Warmshell landing/about/roof HTML pages.
+
+**Datasheet PDFs — three probed.** WebFetch cannot read them; PyMuPDF extracts a full text layer. Headings sit on their own lines in all three, so heading-delimited chunking works.
+- Solo (July 2024, 3 pages): mostly clean. "Preparation & Application" is one long bulleted list, one background per bullet (about 2,000 characters) — keep bullets whole. The page-1 header block is emitted out of reading order — strip it. Plain-digit units ("1.5m2", "2 to 4N/mm2"). PPE/disposal block and EWC code — drop at chunking. The MgO deferral is real and quotable: "many MgO boards are not suitable for Solo. Contact us for further information in writing before proceeding." No DIY caveat in this sheet.
+- Fine Stuff (June 2019, 1 page): clean text, but caveats are only partly adjacent to figures — the 8 °C limit sits under Mixing (correct symbol) and again under Curing as "8oC" (garbled); "It is not suitable for DIY plastering" sits under Application; coverage is its own section with the printed error "3m3 at 3mm thick". The PDF title reads "Lime green Skim Plaster" — carry the page-side product name in chunk metadata.
+- Forte (August 2015, 2 pages): clean; caveats adjacent ("Do not use in temperatures less than 5°C or over 30°C… Typically apply in coats of around 10mm"). Page 2 is an unheaded GHS hazard block — label or drop. "Finishing Coats" has two labelled sub-paragraphs with different curing figures — keep each with its label.
+
+**What this fixes in the build:** chunk by heading; never split a bullet or a labelled sub-paragraph; strip header blocks, hazard and PPE blocks, and repeated colour lists; normalise m2/m²/m3 and °C/oC for comparison only, never for display; carry the page-side product name, the printed date and the link text into metadata; and tag each document's caveat sentences at ingestion (deferral sentences excluded — they take the cited hand-off path) so they are appended by code whenever a chunk of that document is printed or composed over — because older sheets put temperature limits under Mixing rather than Application, and Fine Stuff's "not suitable for DIY plastering" sits under Application while the steps a user asks about sit elsewhere.
+
+**Corpus boundary (decision 1 in the rationale) applied to these facts.** In: 36 product pages, 34 technical datasheets, 3 Warmshell system guides, 2 Warmshell system pages, 1 FAQ page (32 Q&A chunks), 15 knowledge-base articles, 3 commercial pages — **94 units, roughly 600–800 chunks, measured at build.** Spend order if extraction QA bites: datasheets → FAQ → high-tier articles → contact and find-a-supplier → product pages → Warmshell guides → remaining articles → order-a-sample; anything dropped is listed in the manifest as excluded, by name and link.

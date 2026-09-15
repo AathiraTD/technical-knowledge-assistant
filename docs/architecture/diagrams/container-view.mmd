@@ -1,75 +1,93 @@
-flowchart TD
-    classDef person fill:#fff7ed,stroke:#fb923c,color:#9a3412,stroke-width:2px
-    classDef website fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
-    classDef crm fill:#fdf4ff,stroke:#d946ef,color:#86198f,stroke-width:2px
-    classDef llmClass fill:#f5f3ff,stroke:#a78bfa,color:#5b21b6,stroke-width:2px
-    classDef receiver fill:#fefce8,stroke:#facc15,color:#854d0e,stroke-width:2px
-    classDef cache fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-width:2px
-    classDef queue fill:#fff1f2,stroke:#fb7185,color:#9f1239,stroke-width:2px
-    classDef dlq fill:#fef2f2,stroke:#f87171,color:#991b1b,stroke-width:2px
-    classDef worker fill:#f0fdfa,stroke:#2dd4bf,color:#115e59,stroke-width:2px
-    classDef vectordb fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
-    classDef metadb fill:#f0f9ff,stroke:#38bdf8,color:#0c4a6e,stroke-width:2px
-    classDef core fill:#eef2ff,stroke:#818cf8,color:#3730a3,stroke-width:2px
-    classDef cli fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
+C4Container
+    title Container diagram — Technical Knowledge Assistant<br/>Colour key: green = built for the submission · amber, rose and pink = production-only · cyan and sky = data, website and evaluation · violet = local models and the answer engine · grey = shipped cache
 
-    USER(("Customer, trade, or staff<br/>[Person]<br/>Asks product questions"))
-    WEBN[["Lime Green website<br/>[Software System]<br/>Pages, FAQs, KB articles, datasheets"]]
-    CRMN[["CRM<br/>[Software System]<br/>Future source — customer & enquiry records"]]
-    LLMN[["Local LLM<br/>[Software System]<br/>Ollama — composes from retrieved passages only"]]
+    Person(user, "Customer, trade, or staff", "Asks product questions")
+    System_Ext(website, "Lime Green website", "Product pages, datasheets, FAQs, articles, guides, contact, supplier, and sample pages")
+    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, failure cases, and compatibility data")
 
-    subgraph APP["TECHNICAL KNOWLEDGE ASSISTANT"]
-        direction TB
+    Boundary(ollama, "Ollama — local model server", "external") {
+        System_Ext(emb, "Embedding model", "qwen3-embedding:0.6b or nomic-embed-text; verified at build")
+        System_Ext(gen, "Generation model", "qwen3:4b-instruct or granite4.2:3b; selected by the author")
+    }
 
-        subgraph INDEX["🔴 PRODUCTION — Indexing path<br/>(queue justified by multiple sources, not website size)"]
-            direction TB
-            RECVN["Change Receiver<br/>[Container: webhook / poller]<br/>Detects published or changed content"]
-            CACHEN["Content Cache<br/>[Container: disk store]<br/>Stores raw changed content before indexing"]
-            QUEUEN["Indexing Queue<br/>[Container: message queue]<br/>Buffers jobs from every source"]
-            WORKN["Indexing Worker<br/>[Container: Python, async]<br/>Chunks + embeds changed docs<br/>retries with backoff in-process"]
-            DLQN["Dead-Letter Queue<br/>[Container: message queue]<br/>Holds jobs that exceed the retry limit"]
-            RECVN --> CACHEN --> QUEUEN --> WORKN
-            WORKN -->|"after retry limit"| DLQN
-        end
+    Container_Boundary(assistant, "Technical Knowledge Assistant") {
+        Container_Boundary(indexing, "Indexing path") {
+            Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
+            ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
+            Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
+            ContainerDb(cache, "Content cache", "Disk", "Raw pages and PDFs shipped for offline assessment")
+        }
 
-        subgraph DATA["Retrieval data"]
-            direction TB
-            VECN[("Vector Index<br/>[Container: vector database]<br/>Embeddings for semantic retrieval")]
-            METAN[("Metadata Store<br/>[Container: document database]<br/>Source, chunk refs, indexing status")]
-        end
+        Container_Boundary(data, "Retrieval data") {
+            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
+        }
 
-        subgraph QA["Question-answering path — MVP and production"]
-            direction TB
-            CLIN["CLI<br/>[Container: Python]<br/>Displays answer, sources, or a cited refusal"]
-            ENGN["Answer Engine<br/>[Container: Python]<br/>Retrieves passages, verifies citations,<br/>answers or refuses"]
-            CLIN --> ENGN
-        end
-    end
+        Container_Boundary(answering, "Question-answering path") {
+            Container_Boundary(access, "Inputs and integrations") {
+                Container(cli, "CLI", "Python", "Question and mode in; answer, sources, refusal, and diagnostics out")
+                Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
+            }
 
-    WEBN -->|"webhook on publish,<br/>or polled with conditional GET"| RECVN
-    CRMN -.->|"webhook / export<br/>(future source)"| RECVN
-    USER --> CLIN
-    WORKN -->|"writes embeddings"| VECN
-    WORKN -->|"writes metadata"| METAN
-    ENGN -.->|"retrieves passages"| VECN
-    ENGN -.->|"reads citations"| METAN
-    ENGN -->|"composes from<br/>retrieved passages"| LLMN
+            Container_Boundary(core, "Answering and evaluation") {
+                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation")
+                Container(eval, "Evaluation harness", "Python, offline", "Transcript situations, probe suite, threshold sweep, pass/fail, and a staff-tagged fixture")
+            }
+        }
+    }
 
-    class USER person
-    class WEBN website
-    class CRMN crm
-    class LLMN llmClass
-    class RECVN receiver
-    class CACHEN cache
-    class QUEUEN queue
-    class DLQN dlq
-    class WORKN worker
-    class VECN vectordb
-    class METAN metadb
-    class ENGN core
-    class CLIN cli
+    Rel_D(website, indexer, "Crawled once by sitemap")
+    Rel_D(website, receiver, "Sitemap last-modified")
+    Rel_D(staff, queue, "New or changed documents")
+    Rel_R(receiver, queue, "Enqueues changed URLs")
+    Rel_R(queue, indexer, "Delivers jobs")
+    BiRel(indexer, cache, "Writes on crawl; reads on index")
+    Rel_D(indexer, config, "Reads rules and exclusions")
+    Rel_U(indexer, emb, "Embeds chunks")
+    Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
+    Rel_D(user, cli, "Asks a question")
+    Rel_R(cli, engine, "Question and mode")
+    Rel_L(channels, engine, "Question and mode")
+    Rel_D(eval, engine, "Drives situations and probes")
+    Rel_U(engine, store, "Retrieves filtered passages and citation data")
+    Rel_U(engine, config, "Reads routing and policy")
+    Rel_U(engine, emb, "Embeds question")
+    Rel_U(engine, gen, "Composes answer from retrieved passages")
 
-    style APP fill:#fafafa,stroke:#334155,stroke-width:2px
-    style INDEX fill:#fff1f2,stroke:#e11d48,stroke-width:3px,stroke-dasharray:6 4
-    style DATA fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px
-    style QA fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
+    UpdateElementStyle(user, $bgColor="#fff7ed", $borderColor="#fb923c", $fontColor="#7c2d12")
+    UpdateElementStyle(website, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
+    UpdateElementStyle(staff, $bgColor="#fdf4ff", $borderColor="#e879f9", $fontColor="#86198f")
+    UpdateElementStyle(emb, $bgColor="#f5f3ff", $borderColor="#a78bfa", $fontColor="#4c1d95")
+    UpdateElementStyle(gen, $bgColor="#f5f3ff", $borderColor="#a78bfa", $fontColor="#4c1d95")
+
+    UpdateElementStyle(indexer, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(cache, $bgColor="#f8fafc", $borderColor="#94a3b8", $fontColor="#334155")
+    UpdateElementStyle(store, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
+    UpdateElementStyle(config, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
+    UpdateElementStyle(cli, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(engine, $bgColor="#eef2ff", $borderColor="#818cf8", $fontColor="#3730a3")
+    UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
+
+    UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
+
+    UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
+    UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
+    UpdateRelStyle(staff, queue, $textColor="#86198f", $lineColor="#e879f9", $offsetX="-36", $offsetY="18")
+    UpdateRelStyle(receiver, queue, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
+    UpdateRelStyle(queue, indexer, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(indexer, cache, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(indexer, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="34")
+    UpdateRelStyle(indexer, emb, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="32", $offsetY="-20")
+    UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
+    UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
+    UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(channels, engine, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
+    UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
+    UpdateRelStyle(engine, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="-42", $offsetY="-22")
+    UpdateRelStyle(engine, emb, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="40", $offsetY="22")
+    UpdateRelStyle(engine, gen, $textColor="#4c1d95", $lineColor="#a78bfa", $offsetX="-40", $offsetY="22")
+
+    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")

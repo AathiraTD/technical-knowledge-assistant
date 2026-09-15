@@ -1,55 +1,50 @@
 flowchart TD
-    subgraph QUERY["Query time"]
-        Q["User question"]
-        CLARIFY["Clarify gate<br/>underspecified? -> state assumptions"]
-        POLICY["Policy gate<br/>price / stock / competitor / compliance / health?"]
-        Q --> CLARIFY --> POLICY
-    end
+    classDef code fill:#f8fafc,stroke:#64748b,color:#1e293b,stroke-width:2px
+    classDef model fill:#f5f3ff,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef stop fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
 
-    subgraph RETRIEVE["Retrieval"]
-        SIM["Similarity search<br/>per-document cap in top-k"]
-        THRESH{"Best score<br/>vs threshold?"}
-        POLICY -->|not routed| SIM --> THRESH
-    end
+    IN["Question + mode (public / staff)<br/>input capped at about 500 words"]
+    SPLIT["Split by topic<br/>policy patterns + slot vocabularies; each part is gated and routed on its own;<br/>a published lead time or cut-off becomes its own part and takes the retrieval path;<br/>the symptom part of a complaint takes the diagnosis path"]
+    POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
+    ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tag: name, date, link"]
+    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom / photograph · property asked for;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions"]
+    RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>audience-filtered by mode; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
+    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 symptom or photograph → diagnosis · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff mode: extract (compose on request is roadmap)"}
+    DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
+    EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
+    COMPOSE["Compose — the model composes with [n] markers<br/>per option when inside / outside is uncued;<br/>regulatory asks: explained from the knowledge base, never certified; building control named;<br/>document caveats appended by code, at most three"]
+    DEFER["Cited hand-off<br/>the deferral sentence quoted and cited"]
+    REFUSE["Refuse"]
+    MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
+    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
+    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff mode, on refusal: nearest candidates, scores, passage text · public mode: hand-off only"]
+    OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
-    subgraph ROUTER["Deterministic router — 5 paths"]
-        direction TB
-        ROUTE["Route<br/>fixed referral text<br/>(no retrieval)"]
-        EXTR["Extract<br/>one dominant doc<br/>quote verbatim + cite"]
-        COMPOSE["Compose<br/>>=2 docs above threshold<br/>LLM synthesises with numbered markers"]
-        DEFER["Cited hand-off<br/>top passage itself says 'contact us'"]
-        REFUSE["Refuse<br/>nothing above threshold,<br/>or a guardrail check fails"]
-    end
+    IN --> SPLIT --> POLICY
+    POLICY -->|"matches"| ROUTE
+    POLICY -->|"no match"| SLOTS --> RETRIEVE --> ROUTER
+    ROUTER -->|"1 below threshold · 4 asked-for term absent"| REFUSE
+    ROUTER -->|"2 top passage defers"| DEFER
+    ROUTER -->|"3 symptom or photograph"| DIAG
+    ROUTER -->|"5 substrate uncued: ask back"| HANDOFF
+    ROUTER -->|"6 calculation words: coverage and pack-size passages, sum refused"| EXTR
+    ROUTER -->|"7 one document and a factual ask"| EXTR
+    ROUTER -->|"5 inside / outside uncued: per option · 8 otherwise"| COMPOSE
+    COMPOSE --> MODEL --> CHECKS
+    SLOTS -.->|"stated assumptions"| MODEL
+    CHECKS -->|"all pass"| OUT
+    CHECKS -->|"any check fails"| REFUSE
+    REFUSE --> HANDOFF
+    DIAG --> HANDOFF
+    DEFER --> HANDOFF
+    IN -.->|"mode"| RETRIEVE
+    IN -.->|"mode"| ROUTER
+    IN -.->|"mode"| ROUTE
+    IN -.->|"mode"| HANDOFF
+    ROUTE --> OUT
+    EXTR --> OUT
+    HANDOFF --> OUT
 
-    POLICY -->|policy pattern matched| ROUTE
-    THRESH -->|one doc dominates, factual| EXTR
-    THRESH -->|multi-doc, synthesis-shaped| COMPOSE
-    THRESH -->|top passage defers| DEFER
-    THRESH -->|below threshold| REFUSE
-
-    COMPOSE --> MODEL["Local LLM<br/>context-only prompt, temperature zero"]
-
-    subgraph GUARD["Guardrails — post-generation checks"]
-        CITE["Citation-marker check<br/>marker must point at a retrieved passage"]
-        NUM["Numbers-verbatim check<br/>figure must appear word-for-word in cited passage"]
-        QUAL["Qualifier/caveat travels with its number"]
-        MODEL --> CITE --> NUM --> QUAL
-    end
-
-    subgraph MODE["Audience filter"]
-        FLAG{"Staff or public mode?"}
-        FLAG -->|staff, on refuse| CAND["Show nearest candidates + scores"]
-        FLAG -->|public, on refuse| HANDOFF["Hand off to technical team"]
-    end
-    SIM -. audience-tagged filter .-> FLAG
-    REFUSE --> FLAG
-
-    subgraph OUT["Output — CLI"]
-        REPLY["Answer / Sources / Refusal-or-Handoff<br/>(brief's exact format, doc name + URL)"]
-    end
-    ROUTE --> REPLY
-    EXTR --> REPLY
-    QUAL --> REPLY
-    DEFER --> REPLY
-    CAND --> REPLY
-    HANDOFF --> REPLY
+    class IN,SPLIT,POLICY,ROUTE,SLOTS,RETRIEVE,ROUTER,DIAG,EXTR,COMPOSE,DEFER,CHECKS,OUT code
+    class MODEL model
+    class REFUSE,HANDOFF stop
