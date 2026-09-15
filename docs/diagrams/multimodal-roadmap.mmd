@@ -22,7 +22,7 @@ flowchart TD
     subgraph BUILTPIPE["BUILT — the existing pipeline, unchanged"]
         direction TB
         SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
-        RETR["Retrieval over the chunk store<br/>on the structured profile, not on the raw question"]
+        RETR["Retrieval over the knowledge store<br/>on the structured profile, not on the raw question"]
         ENGINE["Deterministic router → extract or compose<br/>six checks before anything prints"]
         SLOTS2 --> RETR --> ENGINE
     end

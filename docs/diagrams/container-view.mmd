@@ -15,11 +15,11 @@ C4Container
             Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
             ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
             Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
-            ContainerDb(cache, "Content cache", "Disk", "Raw pages and PDFs shipped for offline assessment")
+            ContainerDb(cache, "Source document store", "Versioned filesystem — ships with the submission", "Original HTML and PDFs as fetched, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history")
         }
 
         Container_Boundary(data, "Retrieval data") {
-            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, audience tags, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks, embeddings, caveats, excluded documents, crawl runs, index snapshots. Exactly one active version per document, enforced by the database")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
             ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
         }
@@ -35,7 +35,7 @@ C4Container
             }
 
             Container_Boundary(core, "Answering and evaluation") {
-                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation")
+                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation. Depends on the KnowledgeRepository interface, never on a database driver, so the assessment and deployment paths are one system")
                 Container(eval, "Evaluation harness", "Python, offline", "Transcript situations, probe suite, threshold sweep, pass/fail, and a staff-tagged fixture")
             }
         }
@@ -46,10 +46,10 @@ C4Container
     Rel_D(staff, queue, "New or changed documents")
     Rel_R(receiver, queue, "Enqueues changed URLs")
     Rel_R(queue, indexer, "Delivers jobs")
-    BiRel(indexer, cache, "Writes on crawl; reads on index")
+    BiRel(indexer, cache, "Writes versions on crawl; reads them on index")
     Rel_D(indexer, config, "Reads rules and exclusions")
     Rel_U(indexer, emb, "Embeds chunks")
-    Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
+    Rel_R(indexer, store, "Publishes a snapshot atomically; the superseded version is deactivated in the same transaction")
     Rel_D(user, cli, "Asks a question")
     Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
@@ -62,7 +62,7 @@ C4Container
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
     Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
-    Rel_U(engine, store, "Retrieves filtered passages and citation data")
+    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered in the query, authority then similarity")
     Rel_U(engine, config, "Reads routing and policy")
     Rel_U(engine, emb, "Embeds question")
     Rel_U(engine, gen, "Composes answer from retrieved passages")

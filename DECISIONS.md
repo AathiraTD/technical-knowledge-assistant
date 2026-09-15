@@ -10,7 +10,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 |---|---|---|
 | 1 | Corpus boundary | Everything technical the site publishes — 94 units by rule, not a curated list |
 | 2 | Extract path | Verbatim by code; the model runs on Compose only |
-| 3 | Store | One store: a numpy array plus a manifest, swapped together. No vector database, no second metadata store |
+| 3 | Store | One repository boundary, two adapters: SQLite ships for assessment, PostgreSQL + pgvector is the deployment target |
 | 4 | Framework | Hand-rolled retrieval, about 150 lines. No LangChain, no LlamaIndex, no agent loop |
 | 5 | Chunking | Structure-aware: split at headings, keep bullets whole, tag caveats at document level |
 | 6 | Embedding model | Open: decided by measurement before the build finishes |
@@ -51,17 +51,30 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 **Where it breaks.** The straightforward test question shows a quoted passage with a citation rather than model prose, so say it on the slide: the model formulates where there is something to formulate. A model quote-and-stop stays a roadmap option, gated on a measured warm call with headroom; nothing in the design assumes it.
 
-## 3. Store: one array and a manifest
+## 3. Store: one boundary, two adapters
 
-**Why it exists.** Something has to hold six to eight hundred embeddings and the metadata that makes a citation possible.
+**Why it exists.** Something has to hold the embeddings, the metadata that makes a citation possible, and the version history that stops a changed datasheet putting two coverage figures into the same answer. And it has to do that under two conditions that pull apart: the assessors run it offline from a clean clone with one command, while Lime Green would run it as a deployed service.
 
-**Alternatives.** Chroma, FAISS, pgvector or a hosted vector database. Two stores, vectors and metadata separately.
+**Alternatives.** A numpy array plus a JSON manifest, which is the smallest thing that works at this scale. A dedicated vector database — Chroma, FAISS, Qdrant. PostgreSQL with pgvector everywhere, including the assessment path. Two stores, vectors and metadata separately.
 
-**Why this one.** Cosine over the whole array is a single matrix multiply — microseconds, nothing to tune. Approximate nearest-neighbour indexes earn their place around a hundred thousand to a million vectors, two to three orders of magnitude away. A separate metadata store is a synchronisation bug that breaks citations while retrieval still looks healthy, which is the worst failure shape available. One store, swapped atomically with its manifest.
+**Why this one.** Serving both conditions with one codebase means the storage has to sit behind an interface, so the answer engine depends on `KnowledgeRepository` and never on a database driver. Then:
 
-**Prove it.** Index build time and mean query latency printed in the transcript header.
+| | Assessment path | Deployment path |
+|---|---|---|
+| Store | SQLite — standard library, one file, ships in the repository | PostgreSQL + pgvector |
+| Similarity | Cosine in numpy after loading; a single matrix multiply over six to eight hundred chunks | `<=>` inside the query, with an HNSW index |
+| Service required | None | Postgres |
+| Schema | `db/schema.sqlite.sql` | `db/schema.postgres.sql` |
 
-**Where it breaks.** One process, one user, no concurrent writers; the index is rebuilt rather than updated in place. Production swaps a vector database with payload behind the same interface — or a vector column in the database the company already runs, which is likelier once the CRM is in scope.
+The two schemas carry the same eight tables, the same column names and the same version semantics. That is what makes the claim "the assessment adapter and the production adapter are the same system" literally true rather than approximately true, and it makes the port mechanical rather than a rewrite.
+
+SQLite rather than numpy-plus-JSON for the embedded adapter is the choice that buys this. A flat array would have worked for retrieval, but it would not have enforced one active version per document, and the two adapters would then have resembled each other rather than matched.
+
+pgvector rather than a dedicated vector database, because the metadata filtering and the similarity search then happen in **one query** — active version, audience set, authority order and cosine distance together — instead of a numpy search followed by Python filtering followed by a separate metadata lookup. It is also one service for Lime Green to run rather than two, and free.
+
+**Prove it.** Both schemas execute. The partial unique index refuses a second active version of the same document — an attempt to activate version 2 while version 1 is live raises an integrity error from the database, not from application code. Index build time and mean query latency are printed in the transcript header.
+
+**Where it breaks.** The assessment adapter is one file and one process: no concurrent writers, and the index is rebuilt rather than updated in place. The Postgres adapter is written against the same interface but is exercised far less than the SQLite one, because the submission runs on SQLite — so treat its test coverage as the weaker of the two and say so rather than implying parity. Raw HTML and PDFs stay on a versioned filesystem in both paths: Postgres holds identity, history and chunks, never the bytes, because a 29 MB blob column buys nothing that a path and a content hash do not.
 
 ## 4. Framework: hand-rolled, not LangChain or LlamaIndex
 
@@ -375,6 +388,7 @@ The caveat the prototype hardware imposes: vision encoders are compute-heavy, an
 
 ## Known weaknesses
 
+- **The Postgres adapter is the less-exercised of the two.** The submission runs on SQLite, so the deployment adapter is written against the same interface and the same schema but sees far less use. Parity of design is not parity of testing, and the transcript only evidences one of them.
 - **Compatibility is enforced by citation, not by a rules gate.** Nothing deterministic decides which products are eligible for a substrate before retrieval runs; the assistant can only say what a cited passage says, which prevents invention but does not actively exclude an incompatible product. The proper mechanism is an eligibility stage — substrate and exposure in, candidate products out, retrieval restricted to those — and it needs the product-to-substrate compatibility matrix, which the data inventory records as existing nowhere on the site, scattered across datasheets and advisors' heads. Building that matrix is partnership work; the eligibility gate follows it.
 - **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
 - **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
@@ -396,7 +410,7 @@ Five decisions of no consequence — the Ollama client (raw HTTP, to avoid a dep
 
 ## Quick answers
 
-- *Why no vector database?* — Decision 3: at six to eight hundred chunks a dot product over one array is microseconds, behind the same interface a vector database sits behind in production.
+- *Why SQLite in the demo and Postgres in production?* — Decision 3: the assessors need an offline clean-clone run, so the domain layer is not coupled to a database. `KnowledgeRepository` is the boundary; the assessment adapter is SQLite, the deployment adapter is PostgreSQL with pgvector, and the schema and version semantics are identical.
 - *Why not LangChain?* — Decision 4: every guardrail sits where a framework abstracts, and the constraint is that the technical team can inspect it.
 - *Why is the model only on Compose?* — Decision 2: every other path prints quoted passages by code; there is nothing to formulate, and a generated hand-off can invent a phone number.
 - *Why 94 units, not forty?* — Decision 1: forty was a scope signal, not a limit; the boundary is a rule and its cost is extraction QA.

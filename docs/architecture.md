@@ -10,7 +10,7 @@ These repository diagrams are the reference. The presentation slide carries a co
 
 Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only**, **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
 
-Three groups inside one system boundary: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (the chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag), **Question-answering path** (engine, CLI, web UI and evaluation harness built; channel adapters, identity and the serving layer are roadmap).
+Three groups inside one system boundary: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (the knowledge store and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the snapshot records its model tag and the engine refuses to run against a mismatch), **Question-answering path** (engine, CLI, web UI and evaluation harness built; channel adapters, identity and the serving layer are roadmap).
 
 Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd)
 
@@ -32,11 +32,11 @@ C4Container
             Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
             ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
             Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
-            ContainerDb(cache, "Content cache", "Disk", "Raw pages and PDFs shipped for offline assessment")
+            ContainerDb(cache, "Source document store", "Versioned filesystem — ships with the submission", "Original HTML and PDFs as fetched, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history")
         }
 
         Container_Boundary(data, "Retrieval data") {
-            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, audience tags, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks, embeddings, caveats, excluded documents, crawl runs, index snapshots. Exactly one active version per document, enforced by the database")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
             ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
         }
@@ -52,7 +52,7 @@ C4Container
             }
 
             Container_Boundary(core, "Answering and evaluation") {
-                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation")
+                Container(engine, "Answer engine", "Python library", "Deterministic router followed by retrieval-augmented generation. Depends on the KnowledgeRepository interface, never on a database driver, so the assessment and deployment paths are one system")
                 Container(eval, "Evaluation harness", "Python, offline", "Transcript situations, probe suite, threshold sweep, pass/fail, and a staff-tagged fixture")
             }
         }
@@ -63,10 +63,10 @@ C4Container
     Rel_D(staff, queue, "New or changed documents")
     Rel_R(receiver, queue, "Enqueues changed URLs")
     Rel_R(queue, indexer, "Delivers jobs")
-    BiRel(indexer, cache, "Writes on crawl; reads on index")
+    BiRel(indexer, cache, "Writes versions on crawl; reads them on index")
     Rel_D(indexer, config, "Reads rules and exclusions")
     Rel_U(indexer, emb, "Embeds chunks")
-    Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
+    Rel_R(indexer, store, "Publishes a snapshot atomically; the superseded version is deactivated in the same transaction")
     Rel_D(user, cli, "Asks a question")
     Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
@@ -79,7 +79,7 @@ C4Container
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
     Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
-    Rel_U(engine, store, "Retrieves filtered passages and citation data")
+    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered in the query, authority then similarity")
     Rel_U(engine, config, "Reads routing and policy")
     Rel_U(engine, emb, "Embeds question")
     Rel_U(engine, gen, "Composes answer from retrieved passages")
@@ -157,7 +157,7 @@ flowchart TD
     POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
     ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tags: name, date, link"]
     SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom · cause asked · photograph · property asked for;<br/>the photograph slot adds the cannot-see-photographs line to whatever path is taken; it does not by itself route to diagnosis;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions<br/>[production] a vision model fills substrate, coatings, symptom and exposure from photographs,<br/>each with a confidence; below the floor the slot stays uncued and the flow is unchanged"]
-    RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>filtered to the caller's audience set; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
+    RETRIEVE["Retrieval [via KnowledgeRepository]<br/>embed the question (Ollama); similarity over the knowledge store; top-k with a per-document cap;<br/>active versions only; filtered to the caller's audience set in the query, never by prompt;<br/>ranked by authority (datasheet > product page > knowledge-base article > FAQ), newest wins within a type;<br/>refuses to run if the snapshot's embedding model or chunking version does not match"]
     ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 a cause or defect is asked → diagnosis (a photograph alone is not a diagnosis request) · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
     DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
     EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
@@ -243,7 +243,7 @@ flowchart TD
     subgraph BUILTPIPE["BUILT — the existing pipeline, unchanged"]
         direction TB
         SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
-        RETR["Retrieval over the chunk store<br/>on the structured profile, not on the raw question"]
+        RETR["Retrieval over the knowledge store<br/>on the structured profile, not on the raw question"]
         ENGINE["Deterministic router → extract or compose<br/>six checks before anything prints"]
         SLOTS2 --> RETR --> ENGINE
     end
@@ -287,13 +287,13 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Generation model** (Ollama) | External | Composes over retrieved passages on the Compose path only; qwen3.5:4b, with qwen3:4b-instruct as the fallback |
 | **Staff-knowledge capture** | Roadmap | Agreed answer set, failure library and compatibility matrix as text; the policy list goes to the authored configuration |
 | **Indexer** | Built, run once by hand | Crawl by sitemap → cache → extract (PyMuPDF for PDFs) → classify by link text → strip boilerplate and hazard blocks → chunk by heading, bullets and labelled sub-paragraphs kept whole → tag each document's caveat sentences → embed → write the index, the product, colour and merchant name lists, and the ingestion report → atomic swap |
-| **Content cache** | Built, shipped | Raw pages and PDFs on disk, so the assessors run it offline without repeating the crawl |
+| **Source document store** | Built, shipped | Original HTML and PDFs as fetched, on a versioned filesystem, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history. Ships so the assessors run offline without repeating the crawl |
 | **Change receiver** | Roadmap | Reads the sitemap's last-modified, falls back to conditional GET per page, enqueues changed URLs |
 | **Indexing queue** | Roadmap | Buffers change jobs from both sources; retries with backoff; dead-letters after the limit |
-| **Chunk store** | Built | Per chunk: embedding, product, document, section, date, authority rank, audience tags. Manifest: every document with type, authority rank, audience tag, date, link and its caveat sentences; excluded documents by name and link; contact text and the name lists from the crawl; embedding-model tag and chunking version — the engine refuses to run on a mismatch of either |
+| **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics |
 | **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
 | **Answer cache** | Roadmap | Composite parts keyed on template, slots, audience set and index version; expires with each snapshot swap |
-| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value |
+| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
 | **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
 | **Web UI** | Built | A thin Streamlit page over the same library, for the demonstration |
 | **Evaluation harness** | Built | Seven transcript situations, probe suite, threshold sweep, pass/fail, self-describing header, one synthetic staff-tagged fixture that must be invisible in public mode |
