@@ -26,7 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.model import (                                    # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Excluded, Snapshot,
+    Caveat, Chunk, CrawlRun, Document, DocumentUpdate, DocumentVersion,
+    Excluded, Snapshot,
 )
 from assistant.repository import KnowledgeRepository             # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository            # noqa: E402
@@ -319,3 +320,131 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ------------------------------------------------- the delta lifecycle
+
+def update(url: str, content: str, emb, version_hash: str,
+           product: str = "Solo", caveats=()) -> "DocumentUpdate":
+    """One document's new state, as an indexing run would submit it."""
+    return DocumentUpdate(
+        document=doc(url, product=product),
+        version=DocumentVersion(canonical_url=url, version=1,
+                                content_hash=version_hash, source_path=f"{url}.src",
+                                is_active=True, fetched_at="2026-01-01"),
+        chunks=[chunk(url, 0, content, emb, product=product)],
+        caveats=list(caveats),
+    )
+
+
+def test_a_first_delta_behaves_like_a_first_build(repo):
+    """An empty store plus a delta is the normal starting state, not a special case."""
+    repo.apply_delta([update("https://x/a", "A one.", A, "h1")], [], snap("s1", 1, 1))
+    hits = repo.retrieve(A, top_k=5)
+    assert len(hits) == 1
+    assert repo.active_content_hashes() == {"https://x/a": "h1"}
+
+
+def test_a_changed_document_keeps_its_old_version_and_serves_only_the_new(repo):
+    """This is the audit claim: an answer given last year must still be explicable."""
+    repo.apply_delta([update("https://x/a", "OLD coverage 16-20.", A, "h1")], [],
+                     snap("s1", 1, 1))
+    repo.apply_delta([update("https://x/a", "NEW coverage 14-18.", A, "h2")], [],
+                     snap("s2", 1, 1))
+
+    versions = repo.versions("https://x/a")
+    assert len(versions) == 2, "the superseded version was discarded"
+    assert [v.is_active for v in versions] == [True, False]
+    assert versions[0].content_hash == "h2"
+    assert versions[1].content_hash == "h1"
+
+    served = " ".join(h.chunk.content for h in repo.retrieve(A, top_k=10))
+    assert "NEW" in served
+    assert "OLD" not in served, "a superseded version was retrievable"
+
+
+def test_an_unchanged_document_is_not_touched_by_a_later_delta(repo):
+    """Unchanged must mean no work, or the pipeline is a rebuild wearing a delta's name."""
+    repo.apply_delta([update("https://x/a", "A one.", A, "h1"),
+                      update("https://x/b", "B one.", B, "h1b")], [], snap("s1", 2, 2))
+    before = repo.versions("https://x/b")
+
+    repo.apply_delta([update("https://x/a", "A two.", A, "h2")], [], snap("s2", 2, 2))
+
+    after = repo.versions("https://x/b")
+    assert len(after) == len(before) == 1
+    assert after[0].content_hash == "h1b"
+    assert len(repo.versions("https://x/a")) == 2
+
+
+def test_a_removed_document_stops_being_served_but_keeps_its_history(repo):
+    """A withdrawn datasheet must not keep being quoted as current."""
+    repo.apply_delta([update("https://x/a", "Still here.", A, "h1"),
+                      update("https://x/gone", "Withdrawn.", A, "h1g")], [],
+                     snap("s1", 2, 2))
+    repo.apply_delta([], ["https://x/gone"], snap("s2", 1, 1))
+
+    served = " ".join(h.chunk.content for h in repo.retrieve(A, top_k=10))
+    assert "Withdrawn" not in served
+    assert "Still here" in served
+    assert len(repo.versions("https://x/gone")) == 1, "history was deleted"
+    assert repo.versions("https://x/gone")[0].is_active is False
+    assert "https://x/gone" not in repo.active_content_hashes()
+    assert repo.document("https://x/gone") is not None
+
+
+def test_removing_a_document_that_was_never_indexed_is_not_an_error(repo):
+    repo.apply_delta([update("https://x/a", "A one.", A, "h1")], [], snap("s1", 1, 1))
+    repo.apply_delta([], ["https://x/never"], snap("s2", 1, 1))
+    assert len(repo.retrieve(A, top_k=5)) == 1
+
+
+def test_content_hashes_are_what_the_indexer_diffs_against(repo):
+    repo.apply_delta([update("https://x/a", "A.", A, "h1"),
+                      update("https://x/b", "B.", B, "h2")], [], snap("s1", 2, 2))
+    assert repo.active_content_hashes() == {"https://x/a": "h1", "https://x/b": "h2"}
+
+
+def test_a_crawl_run_is_recorded_rather_than_printed(repo):
+    """A console line saying 94 unchanged disappears; a row is evidence."""
+    run = CrawlRun(started_at="2026-01-01T00:00:00Z", completed_at="2026-01-01T00:05:00Z",
+                   documents_checked=94, documents_new=0, documents_changed=1,
+                   documents_unchanged=93)
+    repo.apply_delta([update("https://x/a", "A.", A, "h1")], [], snap("s1", 1, 1),
+                     crawl_run=run)
+    runs = repo.crawl_runs()
+    assert len(runs) == 1
+    assert runs[0].documents_unchanged == 93
+    assert runs[0].documents_changed == 1
+    assert runs[0].reprocessed == 1
+
+
+def test_caveats_follow_the_active_version_and_not_the_old_one(repo):
+    """A caveat quoted from a superseded sheet is a caveat about nothing served."""
+    repo.apply_delta([update("https://x/a", "A one.", A, "h1",
+                             caveats=[Caveat("https://x/a", "temperature",
+                                             "Old limit: above 3 C.", "Mixing")])],
+                     [], snap("s1", 1, 1))
+    repo.apply_delta([update("https://x/a", "A two.", A, "h2",
+                             caveats=[Caveat("https://x/a", "temperature",
+                                             "New limit: above 5 C.", "Mixing")])],
+                     [], snap("s2", 1, 1))
+    sentences = [c.sentence for c in repo.caveats("https://x/a")]
+    assert sentences == ["New limit: above 5 C."], sentences
+
+
+def test_a_failed_delta_leaves_the_previous_state_intact(repo):
+    """Half an applied delta is a corrupt index, so it must be all or nothing."""
+    repo.apply_delta([update("https://x/a", "GOOD.", A, "h1")], [], snap("s1", 1, 1))
+
+    broken = update("https://x/b", "BAD.", A, "h1b")
+    broken.chunks[0].embedding = ["not a number"]
+    try:
+        repo.apply_delta([broken], [], snap("s2", 2, 2))
+    except Exception:
+        pass
+
+    served = " ".join(h.chunk.content for h in repo.retrieve(A, top_k=10))
+    assert "GOOD" in served
+    assert "BAD" not in served
+    assert repo.snapshot().snapshot_id == "s1"

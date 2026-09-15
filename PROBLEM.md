@@ -40,6 +40,7 @@ Everything runs locally. No data leaves the machine.
 | Crawler | Sitemap-driven, robots-aware, rate-limited, content-hashed, with a version ledger |
 | Extraction | Two heading detectors for PDFs, DOM-aware for HTML, quality recorded per document |
 | Indexer | Structure-aware chunking, caveat tagging, name harvesting, atomic snapshot publish |
+| Delta ingestion | Unchanged documents skipped entirely; changed ones superseded with history retained; withdrawn ones deactivated; every run recorded |
 | Storage | `KnowledgeRepository` with a SQLite adapter; the same schema in PostgreSQL + pgvector |
 | Retrieval | Local embeddings, audience filtering in the query, authority ranking with recency |
 | Router | Eleven-topic policy gate, eight slots, eight ordered decisions |
@@ -74,8 +75,11 @@ output this system could produce. The roadmap for doing it properly is
 documented; the current behaviour is to say it cannot see the image, quote what
 the sheets do say about the symptom, and hand over.
 
-**The re-crawl hook.** The crawler detects change by content hash and the design
-for an event-triggered delta re-index is recorded, but it runs by hand.
+**The re-crawl trigger.** Ingestion is now a true delta: a second crawl of an
+unchanged site reprocesses nothing, a changed document supersedes the version it
+replaces and keeps it, and a withdrawn one is deactivated rather than deleted.
+What is still absent is the *trigger* — the pipeline runs by hand rather than
+from a change hook.
 
 **Caching of answers, queueing, and concurrency.** Designed and documented for
 production, not built. At one user on one laptop there is nothing to cache.

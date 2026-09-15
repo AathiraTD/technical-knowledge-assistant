@@ -18,9 +18,11 @@ from typing import Protocol, runtime_checkable
 
 from .model import (
     Caveat,
+    CrawlRun,
     Chunk,
     Document,
     DocumentVersion,
+    DocumentUpdate,
     Excluded,
     Retrieved,
     Snapshot,
@@ -51,6 +53,55 @@ class KnowledgeRepository(Protocol):
 
         Returns the snapshot id.
         """
+        ...
+
+    def apply_delta(
+        self,
+        updates: list[DocumentUpdate],
+        removed: list[str],
+        snapshot: Snapshot,
+        excluded: list[Excluded] | None = None,
+        crawl_run: CrawlRun | None = None,
+    ) -> str:
+        """Apply only what changed, and keep what it replaced.
+
+        This is the difference between a pipeline that rebuilds and one that
+        maintains. `publish` replaces the whole index, which is right for a
+        first build and wrong for a site that changes one datasheet: it throws
+        away the history that makes an old answer explicable.
+
+        For each update, the document's currently active version is deactivated
+        and the new one activated **in the same transaction**, with the old
+        version retained. Documents named in `removed` have every version
+        deactivated but nothing deleted, because a datasheet withdrawn from the
+        site is a fact worth keeping rather than a row worth losing. Documents
+        appearing in neither list are not touched at all, which is the whole
+        point: unchanged means no work.
+
+        Returns the snapshot id.
+        """
+        ...
+
+    def active_content_hashes(self) -> dict[str, str]:
+        """Canonical URL to the content hash of its live version.
+
+        What the indexer diffs the crawl against to decide new, changed,
+        unchanged and removed. Reading it from the store rather than from a
+        local file means the decision is made against what is actually being
+        served.
+        """
+        ...
+
+    def versions(self, canonical_url: str) -> list[DocumentVersion]:
+        """Every version of a document, newest first, active flag included.
+
+        The audit answer to "why did it say that six months ago?" — without
+        this, version history is a schema feature nothing can read.
+        """
+        ...
+
+    def crawl_runs(self, limit: int = 10) -> list[CrawlRun]:
+        """Recent crawl runs, newest first."""
         ...
 
     # ---- answering path ---------------------------------------------------

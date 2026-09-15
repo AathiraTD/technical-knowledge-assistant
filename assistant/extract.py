@@ -108,6 +108,100 @@ CAVEAT_PATTERNS = (
         r"|\bunsuitable\b", re.I)),
 )
 
+# ------------------------------------------------------------- hazard blocks
+
+# Safety furniture, stripped at extraction because the architecture's indexing
+# rule is "strip boilerplate and hazard blocks", and the site inventory names
+# the two shapes it takes: Forte's page 2 is an unheaded GHS block, and Solo
+# prints a PPE/disposal block and an EWC code.
+#
+# Left in, this material is not merely noise. A safety phrase sits on its own
+# short line above a paragraph, so the layout detector reads it as a heading —
+# and the heading is half the citation. An answer then cites "Data Sheet — S36
+# Wear suitable protective clothing", which is a reference no plasterer would
+# look up and makes a curated corpus look like a scrape.
+#
+# The corpus prints the same material three ways, so there are three patterns:
+# a heading that is itself a safety phrase, a labelled block that runs to the
+# end of its section, and a lone sentence inside an otherwise good section.
+# Everything here strips whole lines only, and the resume rule below decides
+# where a block ends, because a PDF line wraps mid-sentence: half of "Wear PPE
+# including gloves goggles and respiratory protection. Cut the insulation with
+# a sharp knife or" is a real instruction and must survive.
+
+# R- and S-phrases on the older sheets; CLP/GHS H-, P- and EUH-statements on
+# the newer ones. Both are printed as a code followed by its sentence, and the
+# sentence always opens on a capital: "S22 Do not breathe dust". The capital is
+# load-bearing rather than decorative. The breathability article labels its
+# four sensors S1 to S4 and writes "S2 and S3 were stable throughout the data",
+# which a code-only pattern deletes — six years of published measurement lost
+# to a regular expression that could not tell a sensor from a safety phrase.
+# Case-sensitive inside a case-insensitive pattern, deliberately: the codes and
+# the capital are both printed conventions, and matching them loosely is what
+# deleted the sensor lines in the first place.
+_PHRASE = (r"(?-i:(?:EUH\s?\d{3}|[RSHP]\s?\d{1,3}(?:\s*/\s*\d{1,3})*)"
+           r"\s+(?=[A-Z]))")
+
+# A heading that is a safety phrase, a GHS signal word or a regulatory label.
+# The whole section goes: there is nothing under it but more of the same.
+HAZARD_HEADING = re.compile(
+    rf"^(?:{_PHRASE}\S"
+    r"|(?:danger|warning)\s*[:!.]?$"
+    r"|(?:health\s*(?:&|and)\s*safety|risk phrases?|safety phrases?"
+    r"|hazard statements?|precautionary statements?|relevant r-?phrases?"
+    r"|(?:full )?declaration of ingredients?|ewc code|european waste code"
+    r"|personal protective equipment)\b)",
+    re.I)
+
+# A label that opens a block: everything after it belongs to the block until a
+# line resumes the document's own subject. Scoped this way rather than by
+# sentence because these blocks are laid out as table cells — "Risk Phrases",
+# "R36/37/38 Irritating to eyes, respiratory", "system and skin" — and a
+# wrapped continuation line carries no signal of its own.
+HAZARD_BLOCK = re.compile(
+    r"^(?:health\s*(?:&|and)\s*safety|risk phrases?|safety phrases?"
+    r"|hazard statements?|precautionary statements?|relevant r-?phrases?"
+    r"|(?:full )?declaration of ingredients?|ewc code|european waste code"
+    r"|disposal|personal protective equipment)\s*[:.]?$"
+    r"|^hazard class\b",
+    re.I)
+
+# A complete generic PPE sentence: told to the reader of any bagged product,
+# specific to none of them. "Clean tools with plenty of water" is a product
+# instruction and does not match; "Wear PPE and wash of skin immediately" does.
+PPE_SENTENCE = re.compile(
+    r"^(?:wear|use)\b.{0,120}?\b(?:ppe|gloves|goggles|dust ?mask"
+    r"|protective (?:clothing|equipment)|eye protection"
+    r"|respiratory protection|respirators?)\b.*[.!]$",
+    re.I)
+
+# A line that is safety furniture wherever it appears. The PPE branch demands a
+# line that both opens with the directive and closes on a full stop, so a
+# wrapped line carrying a real instruction after the PPE sentence is not
+# beheaded here — that case is handled a sentence at a time instead.
+#
+# There is deliberately no rule for a bare percentage on its own line. The
+# ingredient bands are printed that way, but so are a soluble-salts limit
+# ("≤0.25%" under Performance) and the thermal-bypass figures in the roof
+# guide. The block rule above already takes the bands, because they only ever
+# appear under a declaration heading; a line rule would take the limit too.
+HAZARD_LINE = re.compile(
+    rf"^{_PHRASE}\S.*$"
+    r"|^(?:european )?waste code\b.*$"
+    r"|^\d{2}\s\d{2}\s\d{2}\*?\s.*$",
+    re.I)
+
+# A published figure with a unit. It is what the answer exists to print, so it
+# both protects a line from the line rules and ends a hazard block: a number
+# with a unit means the sheet is back to its own subject. Percentages are
+# deliberately absent — a bare "20%+" is an ingredient band, not a measurement.
+TECHNICAL_FIGURE = re.compile(
+    r"\d\s*(?:mm|cm|m\s?[²³23]|kg|litres?|hours?|days?|minutes?|weeks?"
+    r"|[°ºo]\s?C|N/mm|W/m)\b",
+    re.I,
+)
+
+
 # A sentence that tells the reader to ask a human is a deferral, not a caveat.
 # It has its own path through the router, and tagging it here prints it twice.
 DEFERRAL = re.compile(
@@ -168,10 +262,28 @@ def clean(text: str) -> str:
     return text.strip()
 
 
+# The longest heading anything in this corpus actually publishes is 59
+# characters ("3.3) Brickwork Masonry and Hollow Core Clay Blocks (HCCB's)"),
+# so the cap is a measurement rather than a preference.
+HEADING_MAX = 60
+
+# Values a table prints in a cell where it has nothing to report. "Other /
+# None" closes the ingredients table on the older sheets, and because the line
+# that follows it is long prose, the layout detector read "None" as a heading
+# and published a passage cited as "Ashlar Lime Mortar — None".
+_PLACEHOLDER = re.compile(r"^(?:none|nil|n\s?/\s?a|na|tbc|tba|[-–—])$", re.I)
+
+# Where a sentence can be cut and still read as a citation: a dash clause, a
+# label, or the end of its first sentence.
+_HEADING_CUT = re.compile(r"\s+[-–—]\s+|\s*[:;]\s|(?<=[.?!])\s")
+
+
 def _is_heading_text(s: str) -> bool:
     """Shape test, applied by both detectors before either font or layout."""
     s = s.strip()
-    if not 2 < len(s) <= 60:
+    if not 2 < len(s) <= HEADING_MAX:
+        return False
+    if _PLACEHOLDER.match(s):
         return False
     if not re.match(r"^[A-Z0-9]", s):
         return False
@@ -181,6 +293,116 @@ def _is_heading_text(s: str) -> bool:
     if len(s.split()) > 8:
         return False
     return bool(re.search(r"[A-Za-z]", s))
+
+
+def citable_heading(heading: str, title: str = "") -> str:
+    """A heading the reader can look up, from whatever the markup contained.
+
+    The PDF detectors refuse a sentence before they ever call it a heading. The
+    HTML path had no equivalent rule, so it took whatever sat inside an `<h2>`
+    or a heading-styled paragraph — and the site opens several knowledge-base
+    articles with a 150-character lead sentence styled exactly that way. A
+    citation reading "Our range of lime products are ideal for building
+    conservation projects of any size, and include options suitable as lime
+    mortar for listed buildings." is not one a plasterer can check.
+
+    The same two tests the PDF path applies, minus the font-era ones: short,
+    and not a finished sentence. Capitalisation and word count are dropped
+    because a CMS heading is not typeset — "3.3) Brickwork Masonry and Hollow
+    Core Clay Blocks (HCCB's)" is nine words and a real heading. A sentence is
+    cut at its first natural boundary, and if that leaves nothing citable the
+    document's own title is used, which is always a name rather than a claim.
+    """
+    heading = heading.strip()
+    if len(heading) <= HEADING_MAX and not heading.endswith("."):
+        return heading
+
+    head = _HEADING_CUT.split(heading, maxsplit=1)[0].rstrip(" ,;:-–—.")
+    if 2 < len(head) <= HEADING_MAX:
+        return head
+
+    fallback = title.split("|")[0].strip()
+    return fallback[:HEADING_MAX].strip() or "Introduction"
+
+
+# ------------------------------------------------------- stripping the hazard
+
+
+def _resumes_content(line: str) -> bool:
+    """A line that ends a hazard block: the document is back on its own subject.
+
+    Three signals, any of which is enough. A published figure with a unit — the
+    thing the answer exists to print. A recognised section name. Or a sentence
+    long enough to be prose rather than a table cell, which is how the older
+    sheets return to their disclaimer after the safety phrases.
+    """
+    if TECHNICAL_FIGURE.search(line):
+        return True
+    if _is_heading_text(line) and any(k in line.lower() for k in KNOWN_SECTIONS):
+        return True
+    return len(line) >= 60 and re.search(r"\.(?:\s|$)", line) is not None
+
+
+def _without_ppe(line: str) -> str:
+    """The line with any complete generic PPE sentence taken out of it.
+
+    A PDF line wraps mid-sentence, so "Wear PPE including gloves goggles and
+    respiratory protection. Cut the insulation with a sharp knife or" carries
+    both a safety sentence and a real instruction. Dropping the line loses the
+    knife; keeping it publishes the PPE. Cutting at the sentence keeps both
+    promises, and a sentence holding a published figure is never cut.
+    """
+    parts = re.split(r"(?<=[.!])\s+", line)
+    if len(parts) < 2:
+        return line
+    keep = [p for p in parts
+            if not (PPE_SENTENCE.match(p.strip()) and not TECHNICAL_FIGURE.search(p))]
+    return " ".join(keep) if len(keep) != len(parts) else line
+
+
+def strip_hazard_lines(text: str) -> str:
+    """Safety furniture out of a section body, real instructions left in."""
+    kept: list[str] = []
+    in_block = False
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if in_block:
+            if not line or not _resumes_content(line):
+                continue
+            in_block = False
+        if not line:
+            kept.append(raw)
+            continue
+        if HAZARD_BLOCK.match(line):
+            in_block = True
+            continue
+        if TECHNICAL_FIGURE.search(line):
+            kept.append(raw)
+            continue
+        if HAZARD_LINE.match(line) or PPE_SENTENCE.match(line):
+            continue
+        line = _without_ppe(line)
+        if line:
+            kept.append(line)
+    return clean("\n".join(kept))
+
+
+def strip_hazard(sections: list[Section]) -> list[Section]:
+    """Hazard, PPE and GHS blocks out of a document's sections.
+
+    A section whose heading is itself a safety phrase goes whole — there is
+    nothing under it but more of the same. Otherwise the hazard lines are taken
+    out of the body, and a section emptied by that is dropped rather than
+    published as a heading with nothing to cite.
+    """
+    out: list[Section] = []
+    for sec in sections:
+        if HAZARD_HEADING.match(sec.heading.strip()):
+            continue
+        text = strip_hazard_lines(sec.text)
+        if text:
+            out.append(Section(sec.heading, text, sec.page))
+    return out
 
 
 # ---------------------------------------------------------------------- PDFs
@@ -290,6 +512,8 @@ def extract_pdf(path: str) -> Extracted:
         if body_text:
             sections.append(Section(current or title or "Introduction", body_text, cpage))
 
+    sections = strip_hazard(sections)
+
     # Nothing to split on: fall back to one section per page and say so, rather
     # than pretending the document has structure it does not.
     if not sections or detector == "none":
@@ -298,6 +522,7 @@ def extract_pdf(path: str) -> Extracted:
             t = clean(page.get_text())
             if t:
                 sections.append(Section(f"Page {pno + 1}", t, pno))
+        sections = strip_hazard(sections)
         return Extracted(sections, "flat", "no headings detected; chunked by page",
                          printed, "none", title)
 
@@ -405,7 +630,7 @@ def _is_break(tag) -> bool:
     return False
 
 
-def _html_sections(main) -> list[Section]:
+def _html_sections(main, title: str = "") -> list[Section]:
     """Split at heading tags and the site's paragraph-styled pseudo-headings."""
     out: list[Section] = []
     for node in main.find_all(_is_break):
@@ -414,6 +639,9 @@ def _html_sections(main) -> list[Section]:
             break
         if not heading or heading.lower() in HTML_BOILERPLATE:
             continue
+        # Furniture is matched on the heading as published; the citable form is
+        # taken afterwards so a shortened heading cannot slip past those lists.
+        heading = citable_heading(heading, title)
         body = []
         for sib in node.next_siblings:
             if _is_break(sib):
@@ -428,10 +656,16 @@ def _html_sections(main) -> list[Section]:
     return out
 
 
-def _bold_sections(main) -> list[Section]:
+def _bold_sections(main, title: str = "") -> list[Section]:
     """Split where a short bold run opens a block — how the technical notes mark sections."""
     out: list[Section] = []
     heading, buf = "", []
+
+    def flush(name: str, lines: list[str]) -> None:
+        body = clean("\n".join(lines))
+        if name and lines and len(body) >= 40:
+            out.append(Section(citable_heading(name, title), body))
+
     for para in main.find_all("p"):
         text = clean(para.get_text(" ", strip=True))
         if not text:
@@ -441,23 +675,14 @@ def _bold_sections(main) -> list[Section]:
         opens = bool(lead_text) and text.startswith(lead_text) and len(lead_text) <= 70
 
         if opens and len(lead_text) < len(text) * 0.9:
-            if heading and buf:
-                body = clean("\n".join(buf))
-                if len(body) >= 40:
-                    out.append(Section(heading, body))
+            flush(heading, buf)
             heading, buf = lead_text, [text[len(lead_text):].strip()]
         elif opens:
-            if heading and buf:
-                body = clean("\n".join(buf))
-                if len(body) >= 40:
-                    out.append(Section(heading, body))
+            flush(heading, buf)
             heading, buf = lead_text, []
         else:
             buf.append(text)
-    if heading and buf:
-        body = clean("\n".join(buf))
-        if len(body) >= 40:
-            out.append(Section(heading, body))
+    flush(heading, buf)
     return out
 
 
@@ -472,7 +697,10 @@ def extract_html(path: str, doc_type: str = "") -> tuple[Extracted, dict]:
         tag.decompose()
 
     if doc_type == "faq":
-        sections = _faq_sections(main)
+        # The FAQ is exempt from the heading-shape rule on purpose: its heading
+        # is the question the customer asked, which is both the citable unit and
+        # the thing retrieval has to match. Shortened, it stops being either.
+        sections = strip_hazard(_faq_sections(main))
         if sections:
             return Extracted(sections, "clean", "", "", "dom", title), harvested
 
@@ -482,13 +710,13 @@ def extract_html(path: str, doc_type: str = "") -> tuple[Extracted, dict]:
     pub = main.find("p", class_="pub-date")
     printed = clean(pub.get_text(" ", strip=True)).replace(" th ", " ") if pub else ""
 
-    sections = _html_sections(main)
+    sections = _html_sections(main, title)
 
     # Technical notes mark their sections with <strong>, not with a heading tag,
     # so a heading-only split returns one 5,000-character block for an article
     # that actually has sixteen numbered sections.
     if len(sections) <= 2:
-        bold = _bold_sections(main)
+        bold = _bold_sections(main, title)
         if len(bold) > len(sections):
             sections = bold
 
@@ -502,6 +730,8 @@ def extract_html(path: str, doc_type: str = "") -> tuple[Extracted, dict]:
             lead = Section(title.split("|")[0].strip() or "Description",
                            clean("\n\n".join(para[:8])))
             sections.insert(0, lead)
+
+    sections = strip_hazard(sections)
 
     quality = "clean" if len(sections) >= 3 else ("partial" if sections else "flat")
     return Extracted(sections, quality, "", printed, "dom", title), harvested

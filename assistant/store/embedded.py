@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +29,10 @@ import numpy as np
 from ..model import (
     AUTHORITY,
     Caveat,
+    CrawlRun,
     Chunk,
     Document,
+    DocumentUpdate,
     DocumentVersion,
     Excluded,
     Retrieved,
@@ -199,6 +202,209 @@ class SQLiteKnowledgeRepository:
 
         self._matrix = None
         return snapshot.snapshot_id
+
+    # -------------------------------------------------------------- delta
+
+    def apply_delta(
+        self,
+        updates: list[DocumentUpdate],
+        removed: list[str],
+        snapshot: Snapshot,
+        excluded: list[Excluded] | None = None,
+        crawl_run: CrawlRun | None = None,
+    ) -> str:
+        """Apply only what changed, keeping what it replaced. One transaction.
+
+        The ordering inside matters. The old version is deactivated *before*
+        the new one is inserted, because the partial unique index permits
+        exactly one active version per document and would otherwise refuse the
+        insert. That refusal would be correct, which is the point: the database
+        enforces the invariant rather than trusting this method to remember it.
+        """
+        cur = self.db.cursor()
+        try:
+            cur.execute("BEGIN")
+
+            for update in updates:
+                self._apply_one(cur, update, snapshot.created_at)
+
+            for url in removed:
+                row = cur.execute(
+                    "SELECT id FROM documents WHERE canonical_url = ?", (url,)
+                ).fetchone()
+                if row is None:
+                    continue
+                # Deactivate, never delete. A datasheet withdrawn from the site
+                # is a fact about the site, and an answer given while it was
+                # live still has to be explicable afterwards.
+                cur.execute(
+                    "UPDATE document_versions SET is_active = 0 WHERE document_id = ?",
+                    (row["id"],))
+                cur.execute(
+                    "UPDATE documents SET active_version_id = NULL WHERE id = ?",
+                    (row["id"],))
+
+            if excluded is not None:
+                cur.execute("DELETE FROM excluded_documents")
+                for ex in excluded:
+                    cur.execute(
+                        "INSERT INTO excluded_documents (url, link_text, reason) "
+                        "VALUES (?,?,?)", (ex.url, ex.link_text, ex.reason))
+
+            if crawl_run is not None:
+                self._insert_crawl_run(cur, crawl_run, snapshot.snapshot_id)
+
+            # The snapshot records the live index, counted here rather than
+            # taken from the caller. After a delta the totals are a function of
+            # what was already stored plus what just changed, and only the store
+            # knows both halves.
+            live_docs = cur.execute(
+                "SELECT COUNT(*) FROM documents d "
+                "JOIN document_versions v ON v.id = d.active_version_id"
+            ).fetchone()[0]
+            live_chunks = cur.execute(
+                "SELECT COUNT(*) FROM chunks c "
+                "JOIN document_versions v ON v.id = c.document_version_id "
+                "WHERE v.is_active = 1"
+            ).fetchone()[0]
+            counted = replace(snapshot, document_count=live_docs,
+                              chunk_count=live_chunks)
+            self._insert_snapshot(cur, counted)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        self._matrix = None
+        return snapshot.snapshot_id
+
+    def _apply_one(self, cur, update: DocumentUpdate, created_at: str) -> None:
+        d, v = update.document, update.version
+
+        row = cur.execute(
+            "SELECT id, active_version_id FROM documents WHERE canonical_url = ?",
+            (d.canonical_url,)).fetchone()
+
+        if row is None:
+            cur.execute(
+                """INSERT INTO documents
+                   (canonical_url, title, link_text, document_type, authority,
+                    audience, product, created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (d.canonical_url, d.title, d.link_text, d.document_type,
+                 d.authority, d.audience, d.product, created_at))
+            document_id, superseded = cur.lastrowid, None
+        else:
+            document_id, superseded = row["id"], row["active_version_id"]
+            # The document's own metadata can change without its content
+            # changing shape: a retitled page is still the same document.
+            cur.execute(
+                """UPDATE documents SET title = ?, link_text = ?, document_type = ?,
+                          authority = ?, audience = ?, product = ? WHERE id = ?""",
+                (d.title, d.link_text, d.document_type, d.authority,
+                 d.audience, d.product, document_id))
+            cur.execute(
+                "UPDATE document_versions SET is_active = 0 WHERE document_id = ?",
+                (document_id,))
+
+        next_number = (cur.execute(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM document_versions "
+            "WHERE document_id = ?", (document_id,)).fetchone()[0])
+
+        cur.execute(
+            """INSERT INTO document_versions
+               (document_id, version_number, content_hash, etag,
+                source_last_modified, source_path, extraction_quality, notes,
+                first_seen_at, fetched_at, checked_at, is_active, supersedes_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+            (document_id, next_number, v.content_hash, v.etag,
+             v.source_last_modified, v.source_path, v.extraction_quality,
+             v.notes, v.first_seen_at, v.fetched_at, v.checked_at, superseded))
+        version_id = cur.lastrowid
+        cur.execute("UPDATE documents SET active_version_id = ? WHERE id = ?",
+                    (version_id, document_id))
+
+        for c in update.chunks:
+            cur.execute(
+                """INSERT INTO chunks
+                   (document_version_id, chunk_index, section, content,
+                    audience, product, source_date, embedding)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (version_id, c.chunk_index, c.section, c.content, c.audience,
+                 c.product, c.source_date,
+                 _f32(c.embedding) if c.embedding else None))
+
+        for cav in update.caveats:
+            cur.execute(
+                """INSERT INTO document_caveats
+                   (document_version_id, caveat_type, sentence, section)
+                   VALUES (?,?,?,?)""",
+                (version_id, cav.caveat_type, cav.sentence, cav.section))
+
+    @staticmethod
+    def _insert_crawl_run(cur, run: CrawlRun, snapshot_id: str) -> None:
+        cur.execute(
+            """INSERT INTO crawl_runs
+               (started_at, completed_at, documents_checked, documents_new,
+                documents_changed, documents_unchanged, documents_failed)
+               VALUES (?,?,?,?,?,?,?)""",
+            (run.started_at, run.completed_at or run.started_at,
+             run.documents_checked, run.documents_new, run.documents_changed,
+             run.documents_unchanged, run.documents_failed))
+
+    @staticmethod
+    def _insert_snapshot(cur, snapshot: Snapshot) -> None:
+        cur.execute("UPDATE index_snapshots SET is_active = 0")
+        cur.execute(
+            """INSERT OR REPLACE INTO index_snapshots
+               (id, created_at, embedding_model, embedding_dimensions,
+                chunking_version, document_count, chunk_count, is_active, notes)
+               VALUES (?,?,?,?,?,?,?,1,?)""",
+            (snapshot.snapshot_id, snapshot.created_at, snapshot.embedding_model,
+             snapshot.embedding_dimensions, snapshot.chunking_version,
+             snapshot.document_count, snapshot.chunk_count,
+             json.dumps(snapshot.notes, ensure_ascii=False)))
+
+    def active_content_hashes(self) -> dict[str, str]:
+        """What is live now, so the indexer can diff a crawl against it."""
+        rows = self.db.execute(
+            """SELECT d.canonical_url, v.content_hash
+               FROM documents d
+               JOIN document_versions v ON v.id = d.active_version_id"""
+        ).fetchall()
+        return {r["canonical_url"]: r["content_hash"] for r in rows}
+
+    def versions(self, canonical_url: str) -> list[DocumentVersion]:
+        rows = self.db.execute(
+            """SELECT v.* FROM document_versions v
+               JOIN documents d ON d.id = v.document_id
+               WHERE d.canonical_url = ?
+               ORDER BY v.version_number DESC""", (canonical_url,)).fetchall()
+        return [
+            DocumentVersion(
+                canonical_url=canonical_url, version=r["version_number"],
+                content_hash=r["content_hash"], source_path=r["source_path"],
+                etag=r["etag"], source_last_modified=r["source_last_modified"],
+                first_seen_at=r["first_seen_at"], fetched_at=r["fetched_at"],
+                checked_at=r["checked_at"], is_active=bool(r["is_active"]),
+                extraction_quality=r["extraction_quality"], notes=r["notes"])
+            for r in rows
+        ]
+
+    def crawl_runs(self, limit: int = 10) -> list[CrawlRun]:
+        rows = self.db.execute(
+            "SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [
+            CrawlRun(
+                started_at=r["started_at"], completed_at=r["completed_at"] or "",
+                documents_checked=r["documents_checked"],
+                documents_new=r["documents_new"],
+                documents_changed=r["documents_changed"],
+                documents_unchanged=r["documents_unchanged"],
+                documents_failed=r["documents_failed"])
+            for r in rows
+        ]
 
     # ----------------------------------------------------------- answering
 

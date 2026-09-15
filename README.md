@@ -16,10 +16,11 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 
 | Area | Status | Evidence |
 |---|---|---|
-| Decisions | built and verified | 17 recorded with alternatives and costs — `DECISIONS.md` |
+| Decisions | built and verified | 18 recorded with alternatives and costs — `DECISIONS.md` |
 | Crawler | built and verified | 94 documents, 0 errors; a re-run reports 94 unchanged |
 | Extraction | built and verified | 37 PDFs probed; two heading detectors; per-document quality in the ingestion report |
 | Indexer | built and verified | 94 documents + 1 staff fixture → 579 passages, 102 caveats, 39 stockists, 24 colours, 0 failures |
+| Delta ingestion | built and verified | A second crawl of an unchanged site reprocesses **nothing**: 1.4s against 23.8s. Changed documents supersede and keep their history; withdrawn ones are deactivated, not deleted. Four-run proof in `DECISIONS.md` entry 18 |
 | SQLite adapter | built and verified | The index builds, publishes atomically, and serves every answer in the transcript |
 | Retrieval | built and verified | Audience filtering in the query; authority banding; index-mismatch refusal |
 | Router | built and verified | 11-topic policy gate, 8 slots, 8 ordered steps |
@@ -62,6 +63,7 @@ Once the build lands, from a clean clone:
 ```
 pip install -r requirements.txt
 python -m assistant.index      # crawl is cached in the repo; builds the index offline
+                               # a second run reprocesses only what changed
 python -m assistant.cli        # ask a question
 python -m assistant.ui         # the same library behind a web page
 python -m eval.run             # seven situations, probe suite, threshold sweep
@@ -75,7 +77,7 @@ The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without ne
 
 ```
 README.md               what it is, how to run it
-DECISIONS.md            why it is this way — 17 decisions
+DECISIONS.md            why it is this way — 18 decisions
 requirements.txt        five pinned dependencies
 
 assistant/

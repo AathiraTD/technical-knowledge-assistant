@@ -25,6 +25,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 15 | Interface | CLI canonical; a thin Streamlit UI over the same library |
 | 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
 | 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
+| 18 | Delta ingestion | Unchanged documents are not reprocessed; changed ones keep the version they replaced; withdrawn ones are deactivated, never deleted |
 
 ---
 
@@ -423,6 +424,37 @@ Shipping the cache rather than the index is the part worth defending. The index 
 **Prove it.** The same build, twice: 892 seconds computing 644 vectors, then 11 seconds with 644 cache hits and none computed. The counts appear in the ingestion report, so a run that quietly recomputed everything cannot be mistaken for one that did not.
 
 **Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 579 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
+
+## 18. Delta ingestion: skip, supersede, deactivate
+
+**Why it exists.** The schema had eight tables, the store enforced one active version per document, and the contract suite proved the enforcement worked — and none of it was ever used. Every build re-extracted and re-chunked all 94 documents, wrote exactly one version each, and left `crawl_runs` empty. The architecture described an incremental pipeline; the code was a rebuild wearing its schema. That gap is the kind a panel finds by opening the database, so it was worth closing rather than narrating.
+
+**Alternatives.** Keep rebuilding and rely on the embedding cache to make it cheap. Diff against the local version ledger rather than against the store. Delete withdrawn documents outright.
+
+**Why this one.** Three choices inside it are load-bearing.
+
+*The comparison is against what is being served, not against a file.* `active_content_hashes()` reads the live index. A ledger can drift from the index — a failed publish, a hand-edited file, a restored backup — and then a delta computed from the ledger skips work the index actually needs. The index cannot drift from itself.
+
+*A changed document supersedes rather than replaces.* The old version is deactivated and the new one activated in the same transaction, with the old row retained and linked by `supersedes_id`. This is what makes "why did it say that six months ago?" answerable: the passage that produced the answer is still there, marked inactive, and retrieval cannot reach it.
+
+*A withdrawn document is deactivated, never deleted.* A datasheet removed from the site must stop being quoted as current, which deletion would achieve — but deletion also destroys the record that it was ever published, and an answer given while it was live still has to be explicable. Every version is deactivated, the document row stays, and it disappears from retrieval and from the manifest.
+
+The embedding cache is not a substitute for any of this. It made a rebuild fast; it did not make a rebuild incremental, and it did not create a single version record.
+
+**Prove it.** Four runs against the real 94-document corpus, with the shipped cache restored by `git checkout` afterwards:
+
+| Run | What happened | new | changed | unchanged | removed | reprocessed | Time |
+|---|---|---|---|---|---|---|---|
+| 1 | Forced rebuild | 94 | 0 | 0 | 0 | 94 | 23.8 s |
+| 2 | Nothing changed | 0 | 0 | 94 | 0 | **0** | **1.4 s** |
+| 3 | One page edited | 0 | 1 | 93 | 0 | 1 | 1.5 s |
+| 4 | One page withdrawn | 0 | 0 | 93 | 1 | 0 | — |
+
+Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo with two versions, v2 active and v1 retained, and only the revised text retrievable. Run 4 left the withdrawn document's history intact and its row in place while removing it from what is served, taking the index from 95 documents to 94. All four runs are recorded in `crawl_runs`, so the evidence outlives the terminal.
+
+`tests/test_delta_lifecycle.py` runs the same four-run sequence against a small staged corpus in about a second, and the contract suite exercises the same behaviour against every adapter.
+
+**Where it breaks.** A chunking change moves every passage boundary without moving a single content hash, so a delta would correctly conclude that nothing needs reprocessing and be wrong. That is what `--rebuild` is for, and forgetting it is the most likely way to get a stale index. Name harvesting is also deliberately outside the delta: it is a full pass over the cached pages every run, because it costs about a second and carrying the lists forward would leave a withdrawn colour in the vocabulary that check 5 trusts.
 
 ## Known weaknesses
 

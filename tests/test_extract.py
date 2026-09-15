@@ -39,11 +39,14 @@ from assistant.extract import (                                # noqa: E402
     _repeated_lines,
     _soup,
     caveats,
+    citable_heading,
     clean,
     contact_details,
     extract_html,
     extract_pdf,
     harvest,
+    strip_hazard,
+    strip_hazard_lines,
 )
 
 PAGES = ROOT / "data" / "cache" / "pages"
@@ -56,12 +59,20 @@ CONTACT_PAGE = PAGES / "contact.html"
 SUPPLIER_PAGE = PAGES / "find-a-supplier.html"
 TECHNICAL_NOTE = PAGES / "support-knowledgebase-background-preparation-for-rendering.html"
 GLOSSARY_PAGE = PAGES / "support-knowledgebase-glossary-of-terms.html"
+CONSERVATION = PAGES / "support-knowledgebase-conservation.html"
+HYDRAULIC_OR_HYDRATED = PAGES / "support-knowledgebase-hydraulic_or_hydrated_lime.html"
+BREATHABILITY = PAGES / "support-knowledgebase-the-importance-of-breathability.html"
 
 FINE_STUFF = DOCS / "Fine-Stuff-TDS.pdf"          # font-marked family
 MEDIUM_MORTAR = DOCS / "medium-mortar-tds.pdf"    # layout-marked family
 SILGUARD = DOCS / "silgaurd-datasheet-oct-25.pdf"  # layout signal only
 SOLO_TDS = DOCS / "solo-one-coat-lime-plaster-tds.pdf"
 IWI_GUIDE = DOCS / "Installation-Guide---IWI.pdf"  # 24 pages, running footer
+FORTE = DOCS / "LimeGreen-Forte.pdf"              # page 2 is an unheaded GHS block
+ULTRA = DOCS / "140919LimeGreenUltra.pdf"         # safety phrases read as headings
+STIPPLE = DOCS / "140919LimeGreenNaturalStipple.pdf"   # ingredients declaration
+ASHLAR_TDS = DOCS / "140919LimeGreenAshlarMortar.pdf"  # the 'None' table cell
+AEROGEL = DOCS / "Warmshell-Aerogel-Insualtion-Board.pdf"  # PPE on a wrapped line
 
 pytestmark = pytest.mark.skipif(
     not SOLO_PAGE.exists(),
