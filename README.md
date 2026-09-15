@@ -12,17 +12,29 @@ A question is split by topic, gated against a routing table, and matched against
 
 Design complete and evidenced against the live site. The build is in progress.
 
-| Area | State |
-|---|---|
-| Decisions | 16 recorded, with alternatives and costs — see `DECISIONS.md` |
-| Site inventory | Confirmed against the live site, then crawled: **94 documents, 0 errors** |
-| Crawler | **Built.** Sitemap-driven, rate limited, robots-aware, cache-backed, with SHA-256 content hashing and a version ledger — a re-run reports 94 unchanged |
-| Storage boundary | **Built.** `KnowledgeRepository` with two schemas: SQLite (ships) and PostgreSQL + pgvector (deployment) |
-| Indexer | In progress — extract, chunk, tag caveats, embed, publish |
-| Answer engine | Not started |
-| Evaluation harness | Not started |
-| Web UI | Not started |
-| Environment | Ollama 0.34.0 with `qwen3.5:4b` and `qwen3-embedding:0.6b` pulled |
+Status is reported with a fixed vocabulary, so an intention is never mistaken for an implementation: **built and verified**, **built but weakly tested**, **partial**, **documented only**, **known limitation**.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Decisions | built and verified | 17 recorded with alternatives and costs — `DECISIONS.md` |
+| Crawler | built and verified | 94 documents, 0 errors; a re-run reports 94 unchanged |
+| Extraction | built and verified | 37 PDFs probed; two heading detectors; per-document quality in the ingestion report |
+| Indexer | built and verified | 94 documents + 1 staff fixture → 579 passages, 102 caveats, 39 stockists, 24 colours, 0 failures |
+| SQLite adapter | built and verified | The index builds, publishes atomically, and serves every answer in the transcript |
+| Retrieval | built and verified | Audience filtering in the query; authority banding; index-mismatch refusal |
+| Router | built and verified | 11-topic policy gate, 8 slots, 8 ordered steps |
+| Six checks | built and verified | 16 unit tests, one per failure they exist to catch — `tests/test_checks.py` |
+| Answer engine | built but weakly tested | Seven paths. Verified by hand on individual questions; no full transcript has been produced yet |
+| CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
+| Evaluation harness | built, not yet run to completion | 7 situations, 10 probes, threshold sweep and audience-filter test are written. The last partial run reached 5 of 7 situations and 2 probes before being stopped, on code since superseded. **No transcript exists yet** |
+| Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
+| PostgreSQL adapter | written, never run | Full adapter against the same Protocol and the same 8 tables, with filtering and similarity in one query. `psycopg[binary]` has no Windows ARM64 wheel and Docker's daemon is not running here, so the contract suite **skips** it rather than passing it |
+| Docker Compose | written, never booted | App, PostgreSQL + pgvector and Ollama, with pinned images, named volumes, a non-root app container and readiness checks. Not yet started once |
+| Authentication | documented only | The audience set is asserted, not proved — the filter itself is real and tested |
+| Vision | documented only | Refused by policy, not by capability — decision 16 |
+| Re-crawl hook | documented only | Change detection is built; the trigger is manual |
+| Answer cache, queueing | documented only | Designed for production; nothing to cache at one user |
+| Test coverage | known limitation | 16 targeted unit tests on the checks; no coverage measurement yet, and the guidance asks for branch coverage on safety-critical logic |
 
 ## Read this first
 
@@ -63,44 +75,48 @@ The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without ne
 
 ```
 README.md               what it is, how to run it
-DECISIONS.md            why it is this way — 15 decisions
-requirements.txt        pinned dependencies
+DECISIONS.md            why it is this way — 17 decisions
+requirements.txt        five pinned dependencies
 
-assistant/              the package (five to eight modules)
+assistant/
   crawl.py              sitemap crawl, content hashing, the version ledger
   model.py              the domain model — storage-agnostic by design
   repository.py         KnowledgeRepository: the boundary the engine depends on
-  store/                the two adapters behind it
-  index.py              extract, chunk, tag caveats, embed, publish a snapshot
-  retrieve.py           embed the question, cosine, top-k, per-document cap, audience filter
-  router.py             policy gate, slot detection, the ordered router
+  store/embedded.py     the SQLite adapter behind it
+  extract.py            HTML and PDF to citable sections; harvest before stripping
+  index.py              chunk, tag caveats, embed, publish a snapshot
+  embedcache.py         content-addressed embeddings, so a rebuild is seconds
+  ollama.py             two HTTP endpoints, retried; no client library
+  retrieve.py           question embedding, synonyms, index-mismatch refusal
+  router.py             policy gate, slot detection, the eight ordered steps
   answer.py             extract and compose, the six checks, hand-off, rendering
+  engine.py             the assembled assistant, split by topic
   cli.py                canonical interface
-  ui.py                 a web page over the same library, served from the standard library
+  ui.py                 a web page over the same library, standard library only
 
-config/                 hand-written: routing table, vocabularies, authority and audience rules
-db/                     one data model, two dialects
+config/
+  sources.json          the corpus boundary as executable configuration
+  routing.json          the policy gate: eleven topics that never reach retrieval
+  vocabularies.json     slot vocabularies, synonyms, deferral markers
+db/
   schema.sqlite.sql     the assessment adapter — stdlib, ships, offline
   schema.postgres.sql   the deployment adapter — PostgreSQL + pgvector
 data/
-  cache/                original HTML and PDFs as fetched, versioned by content hash,
-                        shipped so it runs offline
-  index/                generated — the SQLite knowledge store and the ingestion
-                        report (not committed; rebuilt from the cache)
+  cache/                original HTML and PDFs as fetched, shipped so it runs offline
+  embeddings.db         the embedding cache, content-addressed by text and model
+  index/                generated — the knowledge store and the ingestion report
 eval/
-  situations.*          seven transcript situations with expected sources and refusal states
-  probes.*              one-line guardrail probes
-  fixtures/             a synthetic staff-tagged document that must stay invisible in public mode
-  results/              transcripts and the threshold sweep
+  situations.json       seven situations with mechanical expectations
+  probes.json           ten guardrail probes
+  fixtures/             a synthetic staff-tagged document that must stay invisible
+  run.py                the harness
+  embedding_choice.py   the measurement behind decision 6
+tests/
+  test_checks.py        the six checks, against the failures they exist to catch
 docs/
   architecture.md       diagrams, component reference, corpus inventory
   diagrams/             Mermaid sources for the three diagrams
-  brief.docx            the exercise
-  working-record.docx   the analysis behind the design
-  DECISIONS.docx        generated Word export of DECISIONS.md
 ```
-
-Directories not yet present appear as the build reaches them.
 
 ## Notes for an assessor
 

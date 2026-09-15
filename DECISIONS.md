@@ -24,6 +24,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 14 | Caching | Production only, keyed on template, slots, audience and index version |
 | 15 | Interface | CLI canonical; a thin Streamlit UI over the same library |
 | 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
+| 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
 
 ---
 
@@ -96,9 +97,19 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 **Why this one.** Decided on evidence from the datasheets rather than convention. All three probed sheets put headings on their own lines, so heading splitting is available. Solo's application section is one bullet per background at roughly 2,000 characters — a size-based splitter cuts a thickness away from the substrate it applies to. A section is also a citable unit: "the Mixing section of the Solo datasheet" is something a plasterer can check, which a 512-token window is not. Semantic chunking is non-deterministic, which costs reproducibility; proposition extraction puts an LLM in the ingestion path, rewriting a datasheet in a liability-sensitive corpus. Small-to-big is the closest good alternative, and retrieving whole sections approximates it without a second index.
 
-**Prove it.** Three datasheets extracted and inspected: headings on their own lines, the 2,000-character bullet, and the caveat-adjacency finding that produced decision 11.
+**Prove it.** All 37 PDFs were then probed, not three. The result changed the implementation and is worth stating plainly, because a font-only heading detector would have shipped broken:
 
-**Where it breaks.** Thirty-one datasheets and three system guides are unprobed. If any are multi-column or table-only, heading splitting degrades — the ingestion report will show it, and the fallback is per-page chunks for those documents, flagged in the manifest.
+| Detector | Documents where it finds headings |
+|---|---|
+| Font signal alone — heading is bolder or larger than body | 17 of 37 |
+| Layout signal alone — heading is a short line above a paragraph | 20 of 37 |
+| Both, union | 36 of 37, the last being a 34-page guide that splits anyway |
+
+The corpus is two families of datasheet. The older sheets mark a heading with a heavier font; the newer ones use one font throughout and mark a heading by putting it alone on a short line. A font-only detector reports the second family as flat and falls back to whole-page chunks — which is how `medium-mortar-tds.pdf` first came out as two 3,000-character blobs despite having thirteen clean sections. Running both detectors and taking the union recovers Description / Mixing / Application / Aftercare across the corpus.
+
+Final counts: 94 published documents plus one staff-tagged evaluation fixture, 579 passages, none over the 4,000-character ceiling, 52 documents classed clean and 43 partial, none failed. The passage count fell from 644 once the download furniture on product pages was removed — see the note under decision 8.
+
+**Where it breaks.** "Partial" mostly means a short page rather than a bad extraction — a product page with two sections is a two-section page. The genuine weakness is the 34-page roof design guide, which yields 74 passages whose headings are drawing references rather than section names; it is retrievable but its citations read less well than a datasheet's. The ingestion report names every document and its quality, so this is inspectable rather than asserted.
 
 ## 6. Embedding model: open, decided by measurement
 
@@ -268,7 +279,7 @@ Two gate rows are unverified and must be checked when the model is pulled, not a
 |---|---|---|
 | Product name list | Crawled product pages | Check 5, real names only |
 | Colour name list | The repeated colour block on product pages — **harvested before boilerplate stripping removes it** | Check 5, and the invented-colour probe |
-| Merchant list | The find-a-supplier page (about 25 named stockists) | Check 5, and never inventing a merchant |
+| Merchant list | The find-a-supplier page — 39 named stockists, read from the `alt` text of the map pins, because the page publishes them as an image overlay rather than as prose | Check 5, and never inventing a merchant |
 | Contact line and hours | The contact page, verbatim | Every refusal and hand-off |
 
 The tagging rule in the prototype is trivial but still explicit: everything crawled from the public website is tagged `public`; nothing is tagged `trade` or `staff`, because no such material is published. The one staff-tagged document is the synthetic fixture created for the evaluation set.
@@ -385,6 +396,20 @@ The caveat the prototype hardware imposes: vision encoders are compute-heavy, an
 **Where it breaks.** The customer still has a photograph and still wants an answer, so the hand-off has to be good — which is why the refusal carries the published causes and the contact line rather than a bare referral. This is also the decision most likely to be revisited first: it is the strongest demand-side case for the partnership's multimodal guardrails strand, and 16.1 sets out the architecture. The prerequisite is not a model, though — it is a labelled failure library, built with the technical team as annotators, which is exactly the knowledge capture the partnership exists to do.
 
 ---
+
+## 17. Embedding cache: content-addressed, and shipped
+
+**Why it exists.** Embedding 579 passages on this laptop takes about fifteen minutes on CPU. That is paid on a first build, which is tolerable, and then paid again on every rebuild, which is not — and a rebuild happens whenever chunking changes, which during development is constantly. It was paid twice before this existed, once when a transient HTTP 400 ended a run at 97 per cent.
+
+**Alternatives.** Accept the rebuild cost. Ship the built index instead of the cache. Keep no cache and tell the assessor to wait.
+
+**Why this one.** The key is the SHA-256 of the passage text together with the model tag and the dimension count, which is the whole correctness argument: a vector is returned only for the exact text it was computed from, by the exact model that computed it. Point the indexer at a different embedding model and every lookup misses and the run recomputes — which is the required behaviour, because a cached vector from another model is precisely the confident nonsense the index header exists to prevent.
+
+Shipping the cache rather than the index is the part worth defending. The index is a build artefact tied to one machine's model; the cache is a lookup table that is either valid or misses. An assessor with the same model tag gets a build in seconds and can still verify it by deleting the cache; an assessor with a different model gets a correct, slower build rather than a wrong fast one.
+
+**Prove it.** The same build, twice: 892 seconds computing 644 vectors, then 11 seconds with 644 cache hits and none computed. The counts appear in the ingestion report, so a run that quietly recomputed everything cannot be mistaken for one that did not.
+
+**Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 579 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
 
 ## Known weaknesses
 
