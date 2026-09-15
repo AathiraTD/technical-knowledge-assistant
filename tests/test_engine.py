@@ -24,6 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from assistant.index import CHUNKING_VERSION
 from assistant import ollama                                      # noqa: E402
 from assistant.answer import Answer                               # noqa: E402
 from assistant.engine import MAX_WORDS, cap, Assistant, Reply, render, split_by_topic  # noqa: E402
@@ -94,7 +95,7 @@ def build_repo(tmp_path, two_documents: bool = False) -> SQLiteKnowledgeReposito
         snapshot_id="snap-test", created_at="2026-01-01T00:00:00Z",
         embedding_model=ollama.EMBED_MODEL,
         embedding_dimensions=ollama.EMBED_DIMENSIONS,
-        chunking_version="test/1.0", document_count=len(documents),
+        chunking_version=CHUNKING_VERSION, document_count=len(documents),
         chunk_count=len(chunks),
         notes={"products": ["Solo", "Duro"], "colours": ["York"],
                "merchants": ["The Lime Centre"], "contact": CONTACT})

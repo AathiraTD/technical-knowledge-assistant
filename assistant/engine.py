@@ -67,8 +67,18 @@ class Assistant:
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
-        for part in split_by_topic(question):
-            reply.parts.append((part, self._answer_part(part, audiences)))
+        with self.repo.read_snapshot() as snapshot:
+            self.retriever._verify()
+            # Names/contact are release metadata too; refresh them together
+            # with the passages rather than retaining the startup snapshot.
+            self.engine.names = {key: snapshot.notes.get(key, default) for key, default in
+                                 (("products", []), ("colours", []), ("merchants", []), ("contact", {}))}
+            for part in split_by_topic(question):
+                answer = self._answer_part(part, audiences)
+                answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
+                answer.diagnostics["embedding_model"] = snapshot.embedding_model
+                answer.diagnostics["chunking_version"] = snapshot.chunking_version
+                reply.parts.append((part, answer))
         return reply
 
     def _answer_part(self, part: str, audiences: tuple[str, ...]) -> Answer:

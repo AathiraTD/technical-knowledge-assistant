@@ -31,6 +31,8 @@ and nothing above it changes.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from ..repository import IndexMismatch
 from pathlib import Path
 
 from ..model import (
@@ -64,7 +66,7 @@ class PostgresKnowledgeRepository:
     def __init__(self, dsn: str, apply_schema: bool = True) -> None:
         try:
             import psycopg
-        except ImportError as exc:                       # pragma: no cover
+        except ImportError as exc:
             raise RuntimeError(
                 "psycopg is not installed. The deployment adapter needs it; the "
                 "assessment path does not. Install with: pip install 'psycopg[binary]' "
@@ -81,6 +83,17 @@ class PostgresKnowledgeRepository:
 
     def close(self) -> None:
         self.conn.close()
+
+    @contextmanager
+    def read_snapshot(self):
+        # Finish any earlier metadata read before beginning request isolation.
+        self.conn.rollback()
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            yield self.snapshot()
+        finally:
+            self.conn.rollback()
 
     def __enter__(self) -> "PostgresKnowledgeRepository":
         return self
@@ -141,8 +154,8 @@ class PostgresKnowledgeRepository:
                            RETURNING id""",
                         (did, v.version, v.content_hash, v.etag,
                          v.source_last_modified, v.source_path,
-                         v.extraction_quality, v.notes, v.first_seen_at,
-                         v.fetched_at, v.checked_at, v.is_active),
+                         v.extraction_quality, v.notes, v.first_seen_at or snapshot.created_at,
+                         v.fetched_at or snapshot.created_at, v.checked_at or snapshot.created_at, v.is_active),
                     )
                     vid = cur.fetchone()[0]
                     version_ids[(v.canonical_url, v.version)] = vid
@@ -161,7 +174,7 @@ class PostgresKnowledgeRepository:
                             audience, product, source_date, embedding)
                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (vid, c.chunk_index, c.section, c.content, c.audience,
-                         c.product, c.source_date or None,
+                         c.product, c.source_date,
                          _vector_literal(c.embedding) if c.embedding else None),
                     )
 
@@ -199,7 +212,7 @@ class PostgresKnowledgeRepository:
                          notes = EXCLUDED.notes""",
                     (snapshot.snapshot_id, snapshot.created_at,
                      snapshot.embedding_model, snapshot.embedding_dimensions,
-                     snapshot.chunking_version, live_docs, live_chunks,
+                     snapshot.chunking_version, snapshot.document_count, snapshot.chunk_count,
                      json.dumps(snapshot.notes, ensure_ascii=False)))
             self.conn.commit()
         except Exception:
@@ -228,6 +241,11 @@ class PostgresKnowledgeRepository:
         """
         try:
             with self.conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_xact_lock(8675309)")
+                if "parent_snapshot" in snapshot.notes:
+                    current = self.snapshot()
+                    if snapshot.notes["parent_snapshot"] != (current.snapshot_id if current else None):
+                        raise IndexMismatch("Another indexer published first; retry against the current release")
                 for update in updates:
                     self._apply_one(cur, update, snapshot.created_at)
 
@@ -259,13 +277,14 @@ class PostgresKnowledgeRepository:
                         """INSERT INTO crawl_runs
                            (started_at, completed_at, documents_checked,
                             documents_new, documents_changed, documents_unchanged,
-                            documents_failed)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                            documents_failed, documents_removed, snapshot_id)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (crawl_run.started_at,
                          crawl_run.completed_at or crawl_run.started_at,
                          crawl_run.documents_checked, crawl_run.documents_new,
                          crawl_run.documents_changed, crawl_run.documents_unchanged,
-                         crawl_run.documents_failed))
+                         crawl_run.documents_failed, crawl_run.documents_removed,
+                         snapshot.snapshot_id))
 
                 # The snapshot records the live index, counted here rather
                 # than taken from the caller: after a delta the totals depend on
@@ -279,6 +298,12 @@ class PostgresKnowledgeRepository:
                 live_chunks = cur.fetchone()[0]
 
                 cur.execute("UPDATE index_snapshots SET is_active = FALSE")
+                cur.execute("""SELECT d.canonical_url, v.version_number,
+                    v.content_hash, v.source_path FROM documents d
+                    JOIN document_versions v ON v.id=d.active_version_id""")
+                notes = {**snapshot.notes, "active_versions": {
+                    r[0]: {"version": r[1], "content_hash": r[2], "source_path": r[3]}
+                    for r in cur.fetchall()}}
                 cur.execute(
                     """INSERT INTO index_snapshots
                        (id, created_at, embedding_model, embedding_dimensions,
@@ -294,7 +319,7 @@ class PostgresKnowledgeRepository:
                     (snapshot.snapshot_id, snapshot.created_at,
                      snapshot.embedding_model, snapshot.embedding_dimensions,
                      snapshot.chunking_version, live_docs, live_chunks,
-                     json.dumps(snapshot.notes, ensure_ascii=False)))
+                     json.dumps(notes, ensure_ascii=False)))
             self.conn.commit()
         except Exception:
             self.conn.rollback()
@@ -341,9 +366,9 @@ class PostgresKnowledgeRepository:
                 first_seen_at, fetched_at, checked_at, is_active, supersedes_id)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id""",
             (document_id, next_number, v.content_hash, v.etag,
-             v.source_last_modified or None, v.source_path, v.extraction_quality,
-             v.notes, v.first_seen_at or None, v.fetched_at or None,
-             v.checked_at or None, superseded))
+             v.source_last_modified, v.source_path, v.extraction_quality,
+             v.notes, v.first_seen_at or created_at, v.fetched_at or created_at,
+             v.checked_at or created_at, superseded))
         version_id = cur.fetchone()[0]
         cur.execute("UPDATE documents SET active_version_id = %s WHERE id = %s",
                     (version_id, document_id))
@@ -355,7 +380,7 @@ class PostgresKnowledgeRepository:
                     audience, product, source_date, embedding)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (version_id, c.chunk_index, c.section, c.content, c.audience,
-                 c.product, c.source_date or None,
+                 c.product, c.source_date,
                  _vector_literal(c.embedding) if c.embedding else None))
 
         for cav in update.caveats:
@@ -400,14 +425,14 @@ class PostgresKnowledgeRepository:
             cur.execute(
                 """SELECT started_at, completed_at, documents_checked,
                           documents_new, documents_changed, documents_unchanged,
-                          documents_failed
+                          documents_failed, documents_removed, snapshot_id
                    FROM crawl_runs ORDER BY id DESC LIMIT %s""", (limit,))
             rows = cur.fetchall()
         return [
             CrawlRun(started_at=str(r[0]), completed_at=str(r[1] or ""),
                      documents_checked=r[2], documents_new=r[3],
                      documents_changed=r[4], documents_unchanged=r[5],
-                     documents_failed=r[6])
+                     documents_failed=r[6], documents_removed=r[7], snapshot_id=r[8])
             for r in rows
         ]
 
@@ -592,7 +617,8 @@ class PostgresKnowledgeRepository:
             with self.conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
                 has_vector = cur.fetchone() is not None
-                cur.execute("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL")
+                cur.execute("""SELECT COUNT(*) FROM chunks c JOIN document_versions v
+                    ON v.id=c.document_version_id WHERE v.is_active AND c.embedding IS NOT NULL""")
                 embedded = cur.fetchone()[0]
             snapshot = self.snapshot()
             return {

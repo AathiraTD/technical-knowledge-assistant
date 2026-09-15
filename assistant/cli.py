@@ -19,6 +19,7 @@ from . import ollama, use_utf8
 from .engine import Assistant, render
 from .repository import IndexMismatch
 from .store import EmbeddedRepository
+from .store.factory import open_repository
 
 BANNER = """Lime Green technical assistant
 Answers only from Lime Green's published material, cites every source, and
@@ -32,7 +33,7 @@ Type a question, or 'quit'. Add -v for the routing diagnostics."""
 
 
 def _open(args) -> EmbeddedRepository:
-    return EmbeddedRepository(args.db)
+    return open_repository(args.db)
 
 
 def main(argv: list[str] | None = None) -> int:

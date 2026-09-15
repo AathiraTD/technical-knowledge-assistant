@@ -68,12 +68,14 @@ CREATE TABLE IF NOT EXISTS chunks (
     audience            TEXT        NOT NULL DEFAULT 'public',
     product             TEXT        NOT NULL DEFAULT '',
     source_date         TEXT        NOT NULL DEFAULT '',
-    embedding           vector(1024),
+    embedding           vector,
     UNIQUE (document_version_id, chunk_index)
 );
 
-CREATE INDEX IF NOT EXISTS chunks_embedding_idx
-    ON chunks USING hnsw (embedding vector_cosine_ops);
+-- Exact search supports multiple historical embedding configurations. An ANN
+-- index is an optional measured optimisation, not a correctness dependency.
+DROP INDEX IF EXISTS chunks_embedding_idx;
+ALTER TABLE chunks ALTER COLUMN embedding TYPE vector;
 CREATE INDEX IF NOT EXISTS chunks_audience_idx ON chunks (audience);
 
 -- -------------------------------------------------------- document caveats
@@ -124,6 +126,9 @@ CREATE TABLE IF NOT EXISTS index_snapshots (
     is_active               BOOLEAN     NOT NULL DEFAULT FALSE,
     notes                   JSONB       NOT NULL DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE crawl_runs ADD COLUMN IF NOT EXISTS documents_removed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE crawl_runs ADD COLUMN IF NOT EXISTS snapshot_id TEXT NOT NULL DEFAULT '';
 
 CREATE UNIQUE INDEX IF NOT EXISTS index_snapshots_one_active
     ON index_snapshots ((TRUE)) WHERE is_active;

@@ -14,7 +14,7 @@ other.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import ContextManager, Protocol, runtime_checkable
 
 from .model import (
     Caveat,
@@ -34,6 +34,10 @@ class KnowledgeRepository(Protocol):
     """What the answer engine needs from storage, and nothing more."""
 
     # ---- indexing path ----------------------------------------------------
+
+    def read_snapshot(self) -> ContextManager[Snapshot | None]:
+        """Keep every read for one answer on the same committed release."""
+        ...
 
     def publish(
         self,

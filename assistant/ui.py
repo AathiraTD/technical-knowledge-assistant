@@ -27,6 +27,7 @@ from . import ollama, use_utf8
 from .engine import Assistant
 from .repository import IndexMismatch
 from .store import EmbeddedRepository
+from .store.factory import open_repository
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
@@ -231,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)
 
-    repo = EmbeddedRepository(args.db)
+    repo = open_repository(args.db)
     try:
         assistant = Assistant(repo)
     except (IndexMismatch, ollama.OllamaUnavailable) as exc:

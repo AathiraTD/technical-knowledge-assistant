@@ -20,6 +20,7 @@ from pathlib import Path
 from . import ollama
 from .model import Retrieved
 from .repository import IndexMismatch
+from .index import CHUNKING_VERSION
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
 
@@ -79,6 +80,8 @@ class Retriever:
                 f"Index vectors are {snapshot.embedding_dimensions}d, the engine "
                 f"expects {ollama.EMBED_DIMENSIONS}d."
             )
+        if snapshot.chunking_version != CHUNKING_VERSION:
+            raise IndexMismatch("Index chunking configuration changed; rebuild with python -m assistant.index")
         self.snapshot = snapshot
 
     def expand(self, question: str) -> str:

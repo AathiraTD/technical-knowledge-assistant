@@ -53,7 +53,7 @@ def stage(tmp_path: Path, pages: dict[str, str]) -> Path:
         path = cache / "pages" / f"{slug}.html"
         path.write_text(html, encoding="utf-8")
         url = f"https://example.test/products/{slug}"
-        digest = index.hashlib.sha256(html.encode("utf-8")).hexdigest()
+        digest = index.hashlib.sha256(path.read_bytes()).hexdigest()
         fetched.append({
             "url": url, "path": str(path).replace("\\", "/"), "kind": "page",
             "doc_type": "product_page", "title": f"{slug} | Lime Green",
@@ -273,8 +273,10 @@ def test_a_forced_rebuild_reprocesses_everything_even_when_nothing_changed(harne
     assert report["delta"]["unchanged"] == 0
     assert report["delta"]["reprocessed"] == 3
     assert report["documents"] == 3
-    # A rebuild starts from nothing, so history does not survive it.
-    assert len(repo.versions(SOLO_URL)) == 1
+    # Reprocessing must preserve the evidence used by previous answers.
+    versions = repo.versions(SOLO_URL)
+    assert len(versions) == 2
+    assert versions[0].is_active and not versions[1].is_active
 
 
 # --------------------------------------------------------------- the report

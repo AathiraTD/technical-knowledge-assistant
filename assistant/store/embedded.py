@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from ..model import (
     Retrieved,
     Snapshot,
 )
+from ..repository import IndexMismatch
 
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sqlite.sql"
 
@@ -77,12 +79,27 @@ class SQLiteKnowledgeRepository:
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
+        self.db.execute("PRAGMA journal_mode = WAL")
         self.db.executescript(SCHEMA.read_text(encoding="utf-8"))
+        columns = {r[1] for r in self.db.execute("PRAGMA table_info(crawl_runs)")}
+        for name, definition in (("documents_removed", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("snapshot_id", "TEXT NOT NULL DEFAULT ''")):
+            if name not in columns:
+                self.db.execute(f"ALTER TABLE crawl_runs ADD COLUMN {name} {definition}")
         self._matrix: np.ndarray | None = None
         self._rows: list[sqlite3.Row] = []
 
     def close(self) -> None:
         self.db.close()
+
+    @contextmanager
+    def read_snapshot(self):
+        """Pin metadata, evidence and caveats to one committed release."""
+        self.db.execute("BEGIN")
+        try:
+            yield self.snapshot()
+        finally:
+            self.db.rollback()
 
     def __enter__(self) -> "SQLiteKnowledgeRepository":
         return self
@@ -223,7 +240,11 @@ class SQLiteKnowledgeRepository:
         """
         cur = self.db.cursor()
         try:
-            cur.execute("BEGIN")
+            cur.execute("BEGIN IMMEDIATE")
+            if "parent_snapshot" in snapshot.notes:
+                current = self.snapshot()
+                if snapshot.notes["parent_snapshot"] != (current.snapshot_id if current else None):
+                    raise IndexMismatch("Another indexer published first; retry against the current release")
 
             for update in updates:
                 self._apply_one(cur, update, snapshot.created_at)
@@ -346,14 +367,21 @@ class SQLiteKnowledgeRepository:
         cur.execute(
             """INSERT INTO crawl_runs
                (started_at, completed_at, documents_checked, documents_new,
-                documents_changed, documents_unchanged, documents_failed)
-               VALUES (?,?,?,?,?,?,?)""",
+                documents_changed, documents_unchanged, documents_failed,
+                documents_removed, snapshot_id)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (run.started_at, run.completed_at or run.started_at,
              run.documents_checked, run.documents_new, run.documents_changed,
-             run.documents_unchanged, run.documents_failed))
+             run.documents_unchanged, run.documents_failed,
+             run.documents_removed, snapshot_id))
 
     @staticmethod
     def _insert_snapshot(cur, snapshot: Snapshot) -> None:
+        members = cur.execute("""SELECT d.canonical_url, v.version_number,
+            v.content_hash, v.source_path FROM documents d
+            JOIN document_versions v ON v.id=d.active_version_id""").fetchall()
+        notes = {**snapshot.notes, "active_versions": {
+            r[0]: {"version": r[1], "content_hash": r[2], "source_path": r[3]} for r in members}}
         cur.execute("UPDATE index_snapshots SET is_active = 0")
         cur.execute(
             """INSERT OR REPLACE INTO index_snapshots
@@ -363,7 +391,7 @@ class SQLiteKnowledgeRepository:
             (snapshot.snapshot_id, snapshot.created_at, snapshot.embedding_model,
              snapshot.embedding_dimensions, snapshot.chunking_version,
              snapshot.document_count, snapshot.chunk_count,
-             json.dumps(snapshot.notes, ensure_ascii=False)))
+             json.dumps(notes, ensure_ascii=False)))
 
     def active_content_hashes(self) -> dict[str, str]:
         """What is live now, so the indexer can diff a crawl against it."""
@@ -402,7 +430,8 @@ class SQLiteKnowledgeRepository:
                 documents_new=r["documents_new"],
                 documents_changed=r["documents_changed"],
                 documents_unchanged=r["documents_unchanged"],
-                documents_failed=r["documents_failed"])
+                documents_failed=r["documents_failed"],
+                documents_removed=r["documents_removed"], snapshot_id=r["snapshot_id"])
             for r in rows
         ]
 
@@ -410,8 +439,8 @@ class SQLiteKnowledgeRepository:
 
     def _load(self) -> None:
         """Load active chunk vectors once, normalised, so cosine is a dot product."""
-        if self._matrix is not None:
-            return
+        # A different process may have published since the last request. Read
+        # current rows in one query instead of retaining vectors across releases.
         self._rows = self.db.execute(
             """SELECT c.id, c.chunk_index, c.section, c.content, c.audience,
                       c.product, c.source_date, c.embedding,

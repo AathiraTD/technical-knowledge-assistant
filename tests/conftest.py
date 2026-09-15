@@ -21,23 +21,41 @@ sys.path.insert(0, str(ROOT))
 
 from assistant.store import SQLiteKnowledgeRepository  # noqa: E402
 
+TEST_POSTGRES_DSN = os.environ.get("ASSISTANT_POSTGRES_DSN")
+
+
+@pytest.fixture(autouse=True)
+def isolated_backend_environment(monkeypatch):
+    # Contract tests use the explicitly configured disposable service. Other
+    # tests must not silently switch their temporary SQLite stores to it.
+    monkeypatch.delenv("ASSISTANT_POSTGRES_DSN", raising=False)
+
 
 def _sqlite():
     return SQLiteKnowledgeRepository(Path(tempfile.mkdtemp()) / "contract.db")
 
 
 def _postgres():
-    dsn = os.environ.get("ASSISTANT_POSTGRES_DSN")
+    dsn = TEST_POSTGRES_DSN
     if not dsn:
         pytest.skip("ASSISTANT_POSTGRES_DSN is not set; PostgreSQL contract not run")
-    try:
-        from assistant.store.postgres import PostgresKnowledgeRepository
-    except ImportError as exc:
-        pytest.skip(f"psycopg unavailable: {exc}")
-    try:
-        return PostgresKnowledgeRepository(dsn)
-    except Exception as exc:                     # unreachable server
-        pytest.skip(f"PostgreSQL unreachable: {exc}")
+    import uuid
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    from assistant.store.postgres import PostgresKnowledgeRepository
+    admin = psycopg.connect(dsn, autocommit=True)
+    schema = "tka_test_" + uuid.uuid4().hex
+    admin.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+    made = PostgresKnowledgeRepository(make_conninfo(dsn, options=f"-c search_path={schema},public"))
+    close = made.close
+    def cleanup():
+        close()
+        admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+        admin.close()
+    made.close = cleanup
+    return made
 
 
 ADAPTERS = {"sqlite": _sqlite, "postgres": _postgres}

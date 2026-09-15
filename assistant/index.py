@@ -23,14 +23,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import os
 import re
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import ollama, use_utf8
 from .embedcache import EmbeddingCache
+from .crawl import archive_source, atomic_write
 from .extract import (
     Section,
     _soup,
@@ -51,7 +55,7 @@ from .model import (
     Excluded,
     Snapshot,
 )
-from .store import EmbeddedRepository
+from .store.factory import open_repository
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "data" / "cache"
@@ -155,8 +159,7 @@ def chunk_sections(sections: list[Section]) -> list[tuple[str, str]]:
                 buf = part
             else:
                 buf = f"{buf}\n{part}" if buf else part
-        if buf.strip():
-            out.append((heading, buf.strip()))
+        out.append((heading, buf.strip()))
 
     if carry_text:
         if out:
@@ -240,7 +243,8 @@ def _classify(log: dict, ledger: dict, known: dict[str, str]
     read from the store, not against a local file. A ledger can drift from the
     index; the index cannot drift from itself.
     """
-    new, changed, unchanged, failed = [], [], [], []
+    new, changed, unchanged = [], [], []
+    failed = [entry["url"] for entry in log.get("errors", [])]
     entries: dict[str, dict] = {}
     for entry in log["fetched"]:
         url = entry["url"]
@@ -248,7 +252,20 @@ def _classify(log: dict, ledger: dict, known: dict[str, str]
         if not (ROOT / entry["path"]).exists():
             failed.append(url)
             continue
-        fresh = ledger.get(url, {}).get("content_hash", "")
+        fresh = "sha256:" + hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest()
+        record = ledger.setdefault(url, {})
+        expected = record.get("content_hash", "")
+        if len(expected) == 71 and expected != fresh:
+            # The shipped legacy ledger hashed HTML after Python's universal
+            # newline decoding. Migrate only when that exact old digest matches;
+            # immutable releases always require a byte-for-byte hash match.
+            legacy = entry["kind"] == "page" and not record.get("source_path")
+            normalized = ("sha256:" + hashlib.sha256(
+                (ROOT / entry["path"]).read_text(encoding="utf-8").encode("utf-8")).hexdigest()) if legacy else ""
+            if expected != normalized:
+                failed.append(url)
+                continue
+        record["content_hash"] = fresh
         prior = known.get(url)
         if prior is None:
             new.append(url)
@@ -300,11 +317,18 @@ def _extract_one(entry: dict, ledger: dict, now: str) -> tuple[DocumentUpdate, d
     url, path, kind = entry["url"], entry["path"], entry["kind"]
     doc_type = entry["doc_type"]
     full = ROOT / path
+    original = full.read_bytes()
+    expected = ledger.get(url, {}).get("content_hash", "")
+    if expected and expected != "sha256:" + hashlib.sha256(original).hexdigest():
+        raise ValueError(f"Source changed during indexing: {url}")
+    # Archive before extraction: a subsequent fetch must not overwrite the
+    # original file referenced by an older database version.
+    archived = archive_source(url, original, cache=CACHE)
 
     if kind == "page":
-        extracted, _harvested = extract_html(str(full), doc_type)
+        extracted, _harvested = extract_html(str(archived), doc_type)
     else:
-        extracted = extract_pdf(str(full))
+        extracted = extract_pdf(str(archived))
 
     title = entry.get("title") or extracted.title or ""
     record = ledger.get(url, {})
@@ -320,7 +344,8 @@ def _extract_one(entry: dict, ledger: dict, now: str) -> tuple[DocumentUpdate, d
     )
     version = DocumentVersion(
         canonical_url=url, version=record.get("version", 1),
-        content_hash=record.get("content_hash", ""), source_path=path,
+        content_hash=record.get("content_hash", ""),
+        source_path=os.path.relpath(archived, ROOT).replace("\\", "/"),
         etag=record.get("etag", ""),
         source_last_modified=record.get("last_modified", ""),
         first_seen_at=record.get("first_seen_at", now),
@@ -350,7 +375,8 @@ def _extract_one(entry: dict, ledger: dict, now: str) -> tuple[DocumentUpdate, d
     return DocumentUpdate(document, version, chunks, caveats), row
 
 
-def _fixture_updates(known: dict[str, str], now: str
+def _fixture_updates(known: dict[str, str], now: str, directory: Path | None = None,
+                     approved: bool = False,
                      ) -> tuple[list[DocumentUpdate], list[dict], set[str]]:
     """Evaluation fixtures, treated as documents with the same delta rules.
 
@@ -360,9 +386,18 @@ def _fixture_updates(known: dict[str, str], now: str
     WHERE clause rather than an instruction.
     """
     updates, rows, urls = [], [], set()
-    for path in sorted((ROOT / "eval" / "fixtures").glob("*.json")):
+    directory = directory if directory is not None else ROOT / "eval" / "fixtures"
+    for path in sorted(directory.glob("*.json")):
         spec = json.loads(path.read_text(encoding="utf-8"))
+        if approved and (spec.get("approved") is not True or not spec.get("approved_by")):
+            raise ValueError(f"Staff source requires explicit approval and reviewer: {path.name}")
+        if (spec.get("audience") not in ("public", "trade", "staff")
+                or not spec.get("sections")
+                or any(not section.get("text", "").strip() for section in spec["sections"])):
+            raise ValueError(f"Invalid authored source: {path.name}")
         url = spec["canonical_url"]
+        if url in urls:
+            raise ValueError(f"Duplicate authored source identity: {url}")
         urls.add(url)
         digest = _fixture_hash(path)
         if known.get(url) == digest:
@@ -376,32 +411,57 @@ def _fixture_updates(known: dict[str, str], now: str
         )
         version = DocumentVersion(
             canonical_url=url, version=1, content_hash=digest,
-            source_path=str(path.relative_to(ROOT)).replace("\\", "/"),
+            source_path=os.path.relpath(archive_source(url, path.read_bytes(), cache=CACHE), ROOT).replace("\\", "/"),
             first_seen_at=now, fetched_at=now, checked_at=now, is_active=True,
-            extraction_quality="clean", notes="evaluation fixture, not real data",
+            extraction_quality="clean", notes=(f"approved by {spec['approved_by']}" if approved else "evaluation fixture, not real data"),
         )
+        sections = [Section(sec["heading"], sec["text"]) for sec in spec["sections"]]
+        passages = chunk_sections(sections) if approved else [(s.heading, s.text) for s in sections]
         chunks = [
             Chunk(canonical_url=url, version=1, chunk_index=i,
-                  section=sec["heading"], content=sec["text"],
+                  section=heading, content=text,
                   audience=spec["audience"], product=spec.get("product", ""),
                   document_type=spec["document_type"],
                   authority=AUTHORITY.get(spec["document_type"], 9),
                   source_date=spec.get("source_date", ""))
-            for i, sec in enumerate(spec["sections"])
+            for i, (heading, text) in enumerate(passages)
         ]
-        updates.append(DocumentUpdate(document, version, chunks, []))
+        caveats = [Caveat(url, kind, sentence, heading)
+                   for kind, sentence, heading in find_caveats(sections)] if approved else []
+        updates.append(DocumentUpdate(document, version, chunks, caveats))
         rows.append({
             "url": url, "name": path.name, "type": spec["document_type"],
-            "quality": "clean", "detector": "fixture",
-            "sections": len(spec["sections"]), "chunks": len(spec["sections"]),
+            "quality": "clean", "detector": "approved-source" if approved else "fixture",
+            "sections": len(sections), "chunks": len(chunks),
             "chars": sum(len(x["text"]) for x in spec["sections"]),
-            "date": spec.get("source_date", ""), "caveats": 0,
-            "note": f"evaluation fixture, audience={spec['audience']}",
+            "date": spec.get("source_date", ""), "caveats": len(caveats),
+            "note": version.notes,
         })
     return updates, rows, urls
 
 
-def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
+def build(repo=None, verbose: bool = True, rebuild: bool = False,
+          staff_dir: Path | None = None) -> dict:
+    """Build a release and leave an explicit failure record if any stage raises."""
+    try:
+        return _build(repo, verbose, rebuild, staff_dir)
+    except Exception as exc:
+        atomic_write(INDEX_DIR / "ingestion-failure.json", json.dumps({
+            "status": "failed", "error": str(exc),
+            "at": datetime.now(timezone.utc).isoformat(),
+        }).encode("utf-8"))
+        raise
+
+
+def _validate_vectors(vectors):
+    for vector in vectors:
+        if (len(vector) != ollama.EMBED_DIMENSIONS
+                or not all(math.isfinite(n) and abs(n) <= 3.4028234e38 for n in vector)
+                or not any(vector)):
+            raise ValueError("Embedding model or cache returned an invalid vector")
+
+
+def _build(repo, verbose, rebuild, staff_dir) -> dict:
     """Index what changed, and leave the rest alone.
 
     A rebuild is a special case of a delta against an empty store, not the other
@@ -411,8 +471,14 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
     passage boundary moved.
     """
     started = time.perf_counter()
-    log = json.loads((CACHE / "crawl-log.json").read_text(encoding="utf-8"))
-    ledger = json.loads((CACHE / "versions.json").read_text(encoding="utf-8"))
+    pointer = CACHE / "crawl-current.json"
+    if pointer.exists():
+        release = CACHE / json.loads(pointer.read_text(encoding="utf-8"))["release"]
+        bundle = json.loads(release.read_text(encoding="utf-8"))
+        log, ledger = bundle["log"], bundle["ledger"]
+    else:
+        log = json.loads((CACHE / "crawl-log.json").read_text(encoding="utf-8"))
+        ledger = json.loads((CACHE / "versions.json").read_text(encoding="utf-8"))
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     ollama.require(ollama.EMBED_MODEL)
@@ -420,17 +486,30 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
     say = (lambda *a: print(*a)) if verbose else (lambda *a: None)
 
     owned = repo is None
-    repo = repo or EmbeddedRepository(INDEX_DIR / "knowledge.db")
+    repo = repo or open_repository(INDEX_DIR / "knowledge.db")
     try:
-        known = {} if rebuild else repo.active_content_hashes()
-        new, changed, unchanged, failed, entries = _classify(log, ledger, known)
+        previous = repo.snapshot()
+        known = repo.active_content_hashes()
+        incompatible = previous is not None and (
+            previous.embedding_model != ollama.EMBED_MODEL
+            or previous.embedding_dimensions != ollama.EMBED_DIMENSIONS
+            or previous.chunking_version != CHUNKING_VERSION)
+        reprocess = rebuild or incompatible
+        comparison = {} if reprocess else known
+        new, changed, unchanged, failed, entries = _classify(log, ledger, comparison)
 
-        fixture_updates, fixture_rows, fixture_urls = _fixture_updates(known, now)
+        fixture_updates, fixture_rows, fixture_urls = _fixture_updates(comparison, now)
+        staff_updates, staff_rows, staff_urls = _fixture_updates(
+            comparison, now, staff_dir if staff_dir is not None else ROOT / "data" / "staff", True)
+        if staff_urls & (fixture_urls | set(entries)):
+            raise ValueError("Staff source identity collides with another source")
 
         # Removed: served now, absent from this crawl, and not a fixture.
         crawled = set(entries)
-        removed = sorted(u for u in known
-                         if u not in crawled and u not in fixture_urls)
+        # Incomplete discovery is not proof of withdrawal (a failed product
+        # page may also hide every datasheet linked from it).
+        removed = ([] if log.get("errors") else sorted(u for u in known
+                         if u not in crawled and u not in fixture_urls and u not in staff_urls))
 
         say(f"Crawl of {len(log['fetched'])} documents against the live index:")
         say(f"  new {len(new)} · changed {len(changed)} · "
@@ -445,7 +524,11 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
         for url in new + changed:
             update, row = _extract_one(entries[url], ledger, now)
             row["change"] = "new" if url in set(new) else "changed"
-            updates.append(update)
+            if update.version.extraction_quality == "failed" or not update.chunks:
+                failed.append(url)
+                row["change"] = "failed"
+            else:
+                updates.append(update)
             report_rows.append(row)
         for url in unchanged:
             report_rows.append({"url": url, "name": Path(entries[url]["path"]).name,
@@ -455,20 +538,27 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
                                 "date": "", "caveats": 0, "change": "unchanged",
                                 "note": "skipped: content hash unchanged"})
         for url in failed:
+            if url in {row["url"] for row in report_rows}:
+                continue
             report_rows.append({"url": url, "name": "", "type": "",
                                 "quality": "failed", "detector": "-",
                                 "sections": 0, "chunks": 0, "chars": 0,
                                 "date": "", "caveats": 0, "change": "failed",
-                                "note": "cached file missing"})
+                                "note": "source fetch or integrity check failed; previous version retained"})
 
         updates += fixture_updates
         report_rows += fixture_rows
+        updates += staff_updates
+        report_rows += staff_rows
+        if incompatible and failed:
+            raise ValueError("Cannot change index configuration with failed sources")
 
         say(f"  extracted {sum(len(u.chunks) for u in updates)} passages from "
             f"{len(updates)} document(s)")
 
         # ----------------------------------------------------------- harvest
-        colours, products, merchants, contact = _harvest_all(log)
+        valid_log = {**log, "fetched": [e for e in log["fetched"] if e["url"] not in failed]}
+        colours, products, merchants, contact = _harvest_all(valid_log)
 
         # ----------------------------------------------------------- embed
         to_embed = [embedding_text(c) for u in updates for c in u.chunks]
@@ -487,12 +577,16 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
                 if todo:
                     fresh = ollama.embed([to_embed[i] for i in todo],
                                          progress=tick if verbose else None)
+                    if len(fresh) != len(todo):
+                        raise ValueError("Embedding model returned the wrong vector count")
+                    _validate_vectors(fresh)
                     cache.put_many([(to_embed[i], v) for i, v in zip(todo, fresh)],
                                    ollama.EMBED_MODEL, ollama.EMBED_DIMENSIONS)
                     found.update(dict(zip(todo, fresh)))
                     if verbose:
                         print()
                 cache_hits, cache_misses = cache.hits, cache.misses
+            _validate_vectors(found.values())
             position = 0
             for update in updates:
                 for c in update.chunks:
@@ -504,7 +598,7 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
         excluded = [Excluded(x["url"], x.get("reason", ""))
                     for x in log.get("skipped", [])]
         snapshot = Snapshot(
-            snapshot_id=f"snap-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}",
+            snapshot_id=f"snap-{uuid.uuid4().hex}",
             created_at=now,
             embedding_model=ollama.EMBED_MODEL,
             embedding_dimensions=ollama.EMBED_DIMENSIONS,
@@ -512,6 +606,7 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
             document_count=0,          # counted by the store; see apply_delta
             chunk_count=0,
             notes={
+                "parent_snapshot": previous.snapshot_id if previous else None,
                 "colours": _dedupe(colours),
                 "products": _dedupe(products),
                 "merchants": _dedupe(merchants),
@@ -528,10 +623,6 @@ def build(repo=None, verbose: bool = True, rebuild: bool = False) -> dict:
             snapshot_id=snapshot.snapshot_id,
         )
 
-        if rebuild:
-            # A forced rebuild starts from nothing, so history would otherwise
-            # be carried across a chunking change it no longer matches.
-            repo.publish([], [], [], snapshot, [], [])
         repo.apply_delta(updates, removed, snapshot, excluded, run)
 
         live = repo.snapshot()
@@ -625,9 +716,11 @@ def main(argv: list[str] | None = None) -> int:
         help="reprocess every document, ignoring what is already indexed. "
              "Needed after a chunking change, because that moves every passage "
              "boundary without moving a single content hash.")
+    parser.add_argument("--staff-dir", type=Path, help="Directory of explicitly approved staff JSON sources")
     args = parser.parse_args(argv)
     try:
-        report = build(rebuild=args.rebuild)
+        options = {"staff_dir": args.staff_dir} if args.staff_dir else {}
+        report = build(rebuild=args.rebuild, **options)
     except ollama.OllamaUnavailable as exc:
         print(f"\nCannot build the index.\n\n{exc}\n", file=sys.stderr)
         return 1

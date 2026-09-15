@@ -20,6 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from assistant.index import CHUNKING_VERSION
 from assistant import ollama                                  # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
 from assistant.repository import IndexMismatch                # noqa: E402
@@ -60,7 +61,7 @@ def build(model: str = ollama.EMBED_MODEL, dims: int = DIMS,
         rows,
         Snapshot(snapshot_id="s1", created_at="2026-01-01T00:00:00Z",
                  embedding_model=model, embedding_dimensions=dims,
-                 chunking_version="test/1.0", document_count=1,
+                 chunking_version=CHUNKING_VERSION, document_count=1,
                  chunk_count=len(rows)),
     )
     return repo

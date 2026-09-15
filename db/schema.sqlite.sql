@@ -99,7 +99,9 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
     documents_new           INTEGER NOT NULL DEFAULT 0,
     documents_changed       INTEGER NOT NULL DEFAULT 0,
     documents_unchanged     INTEGER NOT NULL DEFAULT 0,
-    documents_failed        INTEGER NOT NULL DEFAULT 0
+    documents_failed        INTEGER NOT NULL DEFAULT 0,
+    documents_removed       INTEGER NOT NULL DEFAULT 0,
+    snapshot_id             TEXT NOT NULL DEFAULT ''
 );
 
 -- ----------------------------------------------------------- index_snapshots
