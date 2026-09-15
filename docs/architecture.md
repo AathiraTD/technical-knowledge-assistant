@@ -1,18 +1,16 @@
 # Architecture — Technical Knowledge Assistant
 
-Two diagrams at two levels, plus the live site inventory both are grounded in. For the *why* behind each component and the four decisions that shaped them, see [`architecture-rationale.md`](architecture-rationale.md).
+**What the system is**: two diagrams, a component reference, and the site inventory they rest on. **Why it is this way** — every decision, its alternatives and its cost — is in [`DECISIONS.md`](../DECISIONS.md).
+
+The shape in one sentence: a question is answered only from retrieved passages, every fact cited, with a refusal that still hands over whatever is published when the material runs out — and content is indexed once by hand for the submission, re-indexed only on change in production.
 
 These repository diagrams are the reference. The presentation slide carries a collapsed spine of the second one — input, split and gate, retrieve, router, model, checks, reply — not the full flow.
 
 ## 1. Container view
 
-Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only** (receiver, queue, staff capture, channel adapters, identity, serving layer, answer cache), **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
+Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only**, **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
 
-One system boundary, three groups inside it: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (one chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag; the answer cache is production), **Question-answering path** (engine, CLI, evaluation harness built; channel adapters, identity and the serving layer are roadmap).
-
-**Who sees what.** Every chunk carries audience tags and retrieval filters to the caller's audience set — in code, never by prompt. There are three audiences, not two: **staff** (authenticated, full corpus plus internal material), **trade** (stockists and contractors, who in production may have portal access to trade lead times, stock and kit lists), and **public** (anonymous, published material only). In the prototype the audience set is a flag the caller asserts at the CLI; in production it comes from the identity step, which is the first thing production adds.
-
-**Concurrency.** Retrieval scales trivially — a snapshot read is lock-free, so hundreds of concurrent retrievals cost nothing. Generation is the only bottleneck, one at a time per Ollama instance. Production therefore adds a serving layer (generation queue with a visible wait, per-session rate limiting) that degrades by dropping the compose path, not by dropping a check, and an answer cache in front of it.
+Three groups inside one system boundary: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (the chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag), **Question-answering path** (engine, CLI, web UI and evaluation harness built; channel adapters, identity and the serving layer are roadmap).
 
 Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd)
 
@@ -45,7 +43,8 @@ C4Container
 
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
-                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out")
+                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out; canonical for the transcript and the harness")
+                Container(ui, "Web UI", "Streamlit", "A thin page over the same library, for the demonstration")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
@@ -68,7 +67,9 @@ C4Container
     Rel_U(indexer, emb, "Embeds chunks")
     Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
     Rel_D(user, cli, "Asks a question")
+    Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
+    Rel_R(ui, engine, "Question and audience set")
     Rel_R(channels, identity, "Request with session")
     Rel_R(identity, serving, "Audience set: public, trade, or staff")
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
@@ -90,6 +91,7 @@ C4Container
     UpdateElementStyle(store, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
     UpdateElementStyle(config, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
     UpdateElementStyle(cli, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(ui, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(engine, $bgColor="#eef2ff", $borderColor="#818cf8", $fontColor="#3730a3")
     UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
 
@@ -111,6 +113,8 @@ C4Container
     UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
     UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
     UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(user, ui, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="-30")
+    UpdateRelStyle(ui, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="20")
     UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
     UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
     UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
@@ -123,6 +127,10 @@ C4Container
 
     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
+
+**Who sees what.** Every chunk carries audience tags and retrieval filters to the caller's audience set — in code, never by prompt. Three audiences, not two: **staff** (authenticated, full corpus plus internal material), **trade** (stockists and contractors, who in production may have portal access to trade lead times, stock and kit lists), and **public** (anonymous, published material only). In the prototype the audience set is a flag the caller asserts; in production it comes from the identity step.
+
+**Concurrency.** Retrieval scales trivially — a snapshot read is lock-free, so hundreds of concurrent retrievals cost nothing. Generation is the only bottleneck, one at a time per Ollama instance. Production therefore adds a serving layer (generation queue with a visible wait, per-session rate limiting) that degrades by dropping the compose path, not by dropping a check, and an answer cache in front of it.
 
 ## 2. Answer engine detail
 
@@ -189,7 +197,31 @@ Four things to say out loud from this diagram:
 - **The model runs on one path only — Compose — and never originates a fact.** Five paths as the record defines them (route, extract, compose, cited hand-off, refuse); diagnosis is a composite of quoted causes plus hand-off, and calculation is extract over the coverage and pack-size passages with the sum refused. Temperature zero and a fixed seed keep the run repeatable.
 - **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose) or the part refuses with "not stated in the indexed material". A confident retrieval is not enough.
 - **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
-- **Composite replies are the norm.** "Which mortar, how many bags, where do I buy" is three parts on three paths, labelled in one reply.
+
+## 3. Component reference
+
+Built = in the submission. Roadmap = drawn and argued, not built. The reason each exists is in [`DECISIONS.md`](../DECISIONS.md).
+
+| Component | Status | What it does |
+|---|---|---|
+| **Lime Green website** | External | The only content source in scope: 94 technical units, inventoried below |
+| **Embedding model** (Ollama) | External | Turns chunks and questions into vectors; qwen3-embedding:0.6b or nomic-embed-text, verified at build |
+| **Generation model** (Ollama) | External | Composes over retrieved passages on the Compose path only; qwen3:4b-instruct, granite4.2:3b if it emits reasoning blocks |
+| **Staff-knowledge capture** | Roadmap | Agreed answer set, failure library and compatibility matrix as text; the policy list goes to the authored configuration |
+| **Indexer** | Built, run once by hand | Crawl by sitemap → cache → extract (PyMuPDF for PDFs) → classify by link text → strip boilerplate and hazard blocks → chunk by heading, bullets and labelled sub-paragraphs kept whole → tag each document's caveat sentences → embed → write the index, the product, colour and merchant name lists, and the ingestion report → atomic swap |
+| **Content cache** | Built, shipped | Raw pages and PDFs on disk, so the assessors run it offline without repeating the crawl |
+| **Change receiver** | Roadmap | Reads the sitemap's last-modified, falls back to conditional GET per page, enqueues changed URLs |
+| **Indexing queue** | Roadmap | Buffers change jobs from both sources; retries with backoff; dead-letters after the limit |
+| **Chunk store** | Built | Per chunk: embedding, product, document, section, date, authority rank, audience tags. Manifest: every document with type, authority rank, audience tag, date, link and its caveat sentences; excluded documents by name and link; contact text and the name lists from the crawl; embedding-model tag and chunking version — the engine refuses to run on a mismatch of either |
+| **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
+| **Answer cache** | Roadmap | Composite parts keyed on template, slots, audience set and index version; expires with each snapshot swap |
+| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value |
+| **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
+| **Web UI** | Built | A thin Streamlit page over the same library, for the demonstration |
+| **Evaluation harness** | Built | Seven transcript situations, probe suite, threshold sweep, pass/fail, self-describing header, one synthetic staff-tagged fixture that must be invisible in public mode |
+| **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
+| **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
+| **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |
 
 ## Appendix: live site inventory (the record's decision 0, confirmed 15 September 2026)
 
@@ -214,7 +246,7 @@ Method: `sitemap.xml` (exists, complete, referenced from `robots.txt`); every pr
 **Commercial pages (3) — contact, find-a-supplier, order-a-sample.**
 - Contact: `0800 538 5746`; "Office Hours: Mon - Fri 9:00am - 5:00pm"; "For general and technical enquiries please get in touch with us direct using the details or contact form here."; no named individuals; no email printed. This is the hand-off text, taken from the crawl into the manifest, never typed in.
 - Find-a-supplier: postcode-and-category search, a map, and a list of about 25 named stockists (Brick and Lime Supplies, The Lime Centre, Womersley's, Lincolnshire Lime, Jewson and Travis Perkins branches, Huws Gray, and others). This list is the merchant vocabulary for the real-names check.
-- Order a sample: 24 free colour samples; paid product samples (Solo £5, Warmshell Internal £8, Warmshell External £8); brochures. The only prices on the site — quotable because the page is indexed, so sample asks are answered from it rather than routed; product prices still route.
+- Order a sample: 24 free colour samples; paid product samples (Solo £5, Warmshell Internal £8, Warmshell External £8); brochures. The only prices on the site — quotable because the page is indexed; product prices still route.
 
 **Warmshell (5 pages).** Landing and "about" pages are marketing and duplicates of each other; the roof page links the roof design guide. The IWI page is the hub for the system documents (design guide, installation guide, site checklist, specification clauses, detail drawings, BDA Agrément, fire classification, EPD, warranty, maintenance guide). The EWI page carries the one U-value on the site (0.18 at 260 mm) and substrate guidance. Index the IWI and EWI pages plus three system guides (IWI design guide, IWI installation guide, roof design guide — content not yet extracted). This answers the record's §10.8 open item: thermal figures are published, in the system guides, not on product pages.
 
@@ -225,6 +257,6 @@ Method: `sitemap.xml` (exists, complete, referenced from `robots.txt`); every pr
 - Fine Stuff (June 2019, 1 page): clean text, but caveats are only partly adjacent to figures — the 8 °C limit sits under Mixing (correct symbol) and again under Curing as "8oC" (garbled); "It is not suitable for DIY plastering" sits under Application; coverage is its own section with the printed error "3m3 at 3mm thick". The PDF title reads "Lime green Skim Plaster" — carry the page-side product name in chunk metadata.
 - Forte (August 2015, 2 pages): clean; caveats adjacent ("Do not use in temperatures less than 5°C or over 30°C… Typically apply in coats of around 10mm"). Page 2 is an unheaded GHS hazard block — label or drop. "Finishing Coats" has two labelled sub-paragraphs with different curing figures — keep each with its label.
 
-**What this fixes in the build:** chunk by heading; never split a bullet or a labelled sub-paragraph; strip header blocks, hazard and PPE blocks, and repeated colour lists; normalise m2/m²/m3 and °C/oC for comparison only, never for display; carry the page-side product name, the printed date and the link text into metadata; and tag each document's caveat sentences at ingestion (deferral sentences excluded — they take the cited hand-off path) so they are appended by code whenever a chunk of that document is printed or composed over — because older sheets put temperature limits under Mixing rather than Application, and Fine Stuff's "not suitable for DIY plastering" sits under Application while the steps a user asks about sit elsewhere.
+**What this fixes in the build:** chunk by heading; never split a bullet or a labelled sub-paragraph; strip header blocks, hazard and PPE blocks, and repeated colour lists; normalise m2/m²/m3 and °C/oC for comparison only, never for display; carry the page-side product name, the printed date and the link text into metadata; and tag each document's caveat sentences at ingestion (deferral sentences excluded — they take the cited hand-off path) so they are appended by code whenever a chunk of that document is printed or composed over.
 
-**Corpus boundary (decision 1 in the rationale) applied to these facts.** In: 36 product pages, 34 technical datasheets, 3 Warmshell system guides, 2 Warmshell system pages, 1 FAQ page (32 Q&A chunks), 15 knowledge-base articles, 3 commercial pages — **94 units, roughly 600–800 chunks, measured at build.** Spend order if extraction QA bites: datasheets → FAQ → high-tier articles → contact and find-a-supplier → product pages → Warmshell guides → remaining articles → order-a-sample; anything dropped is listed in the manifest as excluded, by name and link.
+**Corpus boundary applied to these facts.** In: 36 product pages, 34 technical datasheets, 3 Warmshell system guides, 2 Warmshell system pages, 1 FAQ page (32 Q&A chunks), 15 knowledge-base articles, 3 commercial pages — **94 units, roughly 600–800 chunks, measured at build.** Spend order if extraction QA bites: datasheets → FAQ → high-tier articles → contact and find-a-supplier → product pages → Warmshell guides → remaining articles → order-a-sample; anything dropped is listed in the manifest as excluded, by name and link.

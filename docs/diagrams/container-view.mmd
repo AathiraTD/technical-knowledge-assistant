@@ -26,7 +26,8 @@ C4Container
 
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
-                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out")
+                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out; canonical for the transcript and the harness")
+                Container(ui, "Web UI", "Streamlit", "A thin page over the same library, for the demonstration")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
@@ -49,7 +50,9 @@ C4Container
     Rel_U(indexer, emb, "Embeds chunks")
     Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
     Rel_D(user, cli, "Asks a question")
+    Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
+    Rel_R(ui, engine, "Question and audience set")
     Rel_R(channels, identity, "Request with session")
     Rel_R(identity, serving, "Audience set: public, trade, or staff")
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
@@ -71,6 +74,7 @@ C4Container
     UpdateElementStyle(store, $bgColor="#ecfeff", $borderColor="#22d3ee", $fontColor="#155e75")
     UpdateElementStyle(config, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
     UpdateElementStyle(cli, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
+    UpdateElementStyle(ui, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(engine, $bgColor="#eef2ff", $borderColor="#818cf8", $fontColor="#3730a3")
     UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
 
@@ -92,6 +96,8 @@ C4Container
     UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
     UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
     UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
+    UpdateRelStyle(user, ui, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="-30")
+    UpdateRelStyle(ui, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="20")
     UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
     UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
     UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")

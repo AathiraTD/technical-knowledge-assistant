@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Generated index — rebuilt from the shipped cache by `python -m assistant.index`
+data/index/
+
+# Evaluation output that is regenerated on each run
+eval/results/*.tmp
+
+# Tooling
+.playwright-mcp/
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db

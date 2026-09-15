@@ -1,0 +1,7 @@
+# Pinned from the build environment once slice 1 lands (see DECISIONS.md, "Still open").
+# Deliberately small: every dependency here is one the design argued for.
+
+httpx            # crawling, and the Ollama HTTP API — no client library for two endpoints
+pymupdf          # the only PDF extractor that returned a clean text layer in the probe
+numpy            # the chunk store: cosine over one array
+streamlit        # the web UI; the CLI has no framework dependency
