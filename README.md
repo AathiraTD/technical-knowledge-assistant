@@ -34,7 +34,7 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Vision | documented only | Refused by policy, not by capability — decision 16 |
 | Re-crawl hook | documented only | Change detection is built; the trigger is manual |
 | Answer cache, queueing | documented only | Designed for production; nothing to cache at one user |
-| Test coverage | built and verified | **100% line and branch on every safety-critical module** — router, checks, retrieval gate, storage invariants, engine, health, cache, model client. `extract.py` and `index.py` remain the gap |
+| Test coverage | built and verified | **336 tests, 99% overall, 100% line and branch on every safety-critical module.** The residual is four defensive branches in extraction, named in the testing section |
 
 ## Read this first
 
@@ -145,6 +145,21 @@ if any of them drops below 100%.
 the web page are argument parsing and HTML, and the PostgreSQL adapter cannot
 run on the build machine, so all four are excluded from measurement rather than
 counted at a number that would describe the environment instead of the tests.
+
+Measured, with 336 tests: **99% overall, one missed statement and four partial
+branches, all in `extract.py` and `index.py` at 99% each.** Naming them rather
+than hiding them, because they are the only gap:
+
+| Location | Branch | Why it is not covered |
+|---|---|---|
+| `extract.py:200` | text empty after cleaning a PDF span | The span list is already filtered on `sp["text"].strip()`, so cleaning cannot empty it |
+| `extract.py:282, 290` | section body empty after cleaning | Same guard, on a buffer that only receives non-empty lines |
+| `index.py:129` | a chunk buffer that is only whitespace | `_split_on_bullets` discards whitespace-only parts before this runs |
+
+Each is a defensive guard against a condition an earlier filter already
+prevents. They are kept because extraction is the part most likely to change
+when the site does, and cheap insurance there is worth one uncovered branch.
+None of them is in the safety-critical set.
 
 The repository contract is one behavioural suite run against every adapter. It
 passes against SQLite here and **skips** against PostgreSQL, visibly, because
