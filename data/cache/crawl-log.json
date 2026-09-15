@@ -1,0 +1,2410 @@
+{
+  "site": "https://www.lime-green.co.uk",
+  "counts": {
+    "product_page": 38,
+    "knowledge_base": 15,
+    "faq": 1,
+    "commercial": 3,
+    "system_guide": 3,
+    "datasheet": 34
+  },
+  "total_fetched": 94,
+  "total_skipped": 175,
+  "errors": [],
+  "fetched": [
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-mortar/natural-lime-mortar",
+      "path": "data/cache/pages/products-lime-mortar-natural-lime-mortar.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Natural Lime Mortar for Old Buildings, Repointing, Pointing Repair and Stone Walls | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 98871,
+      "content_hash": "sha256:bc3342df9bbf5bdc8055295062d31c37c0129654dfd2cb44e076518fafed4b0c",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-mortar/ashlar-mortar",
+      "path": "data/cache/pages/products-lime-mortar-ashlar-mortar.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Ashlar Lime Mortar | Hydraulic Lime Mortar | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 90617,
+      "content_hash": "sha256:aaa03d9d6aab69a835a56fde554cde4770eee21e5487f2a1d0e7e0802203abda",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-mortar/coloured-cement-mortar",
+      "path": "data/cache/pages/products-lime-mortar-coloured-cement-mortar.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Coloured Cement Mortar | Cement Mortar | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 89646,
+      "content_hash": "sha256:01da578569d33813eda43813b0e31a581aca54e50150bf2e44615b934c55820b",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/stipple-coat",
+      "path": "data/cache/pages/products-lime-plaster-stipple-coat.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Stipple Coat Lime Preparation and primer for lime render walls",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78793,
+      "content_hash": "sha256:bf7e2b57eaa9f01a4a1d9024e59aae33c5121c0638f63ccdc8fbbd5076b0f1f1",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/ultra",
+      "path": "data/cache/pages/products-lime-plaster-ultra.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Ultra Insulated Lime Render Base Coat | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 80405,
+      "content_hash": "sha256:a42d630331ab5fb63185fd5b97224f7ad738a5e436c02ad654830eda439c602f",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/duro-plaster",
+      "path": "data/cache/pages/products-lime-plaster-duro-plaster.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Lime plaster for old buildings and new eco builds | Duro by Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79888,
+      "content_hash": "sha256:9344089a766a9c63462b36088a7d85b2856d9f53c61d70b6592ddc8b2d5d02df",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:44+00:00",
+      "fetched_at": "2026-09-15T12:22:44+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/solo-onecoat-plaster",
+      "path": "data/cache/pages/products-lime-plaster-solo-onecoat-plaster.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Solo Onecoat Lime Plaster |Lime Plaster | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 89941,
+      "content_hash": "sha256:c66230afbbb4fd43a3a5b88d178ee09e708c6cb32e415fa2a86fdd28efa637c4",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/ionic-fine-stuff",
+      "path": "data/cache/pages/products-lime-plaster-ionic-fine-stuff.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Lime Green Fine Stuff Lime Putty Plaster | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78766,
+      "content_hash": "sha256:cb12bcf2fe34253dea3bec1aa751d7f2cce1a78739391574be1b3f372c4c5a8b",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/fibrelime",
+      "path": "data/cache/pages/products-lime-plaster-fibrelime.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Fibrelime, a soft, flexible plaster and render made from air setting lime",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78838,
+      "content_hash": "sha256:e4a5e3e78055cc8b2eda7f71b6545ef2fcca564693f607ec8ff552065fe24e91",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/solo-filler",
+      "path": "data/cache/pages/products-lime-plaster-solo-filler.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Solo Filler for plaster and crack repair for lime walls",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76438,
+      "content_hash": "sha256:7453d2614aec4b3595bd5292f3473ae4cf42a74b5f85c964f518dcd34f866f34",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster/solo-mesh",
+      "path": "data/cache/pages/products-lime-plaster-solo-mesh.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Reinforcement Mesh for Lime Plaster",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77168,
+      "content_hash": "sha256:f6e4841dab6b4d152ce516d329f4d37979622dc122df7a033c4e95b029508ce0",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/duro",
+      "path": "data/cache/pages/products-lime-render-duro.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Duro Lime Render Base Coat | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79456,
+      "content_hash": "sha256:d8afe02ed07ef0160be619f69fd2007b71cd222e69209eb3c109a8322031b0f9",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/natural-finish",
+      "path": "data/cache/pages/products-lime-render-natural-finish.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Breathable lime render for external walls | Natural Finish",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 90875,
+      "content_hash": "sha256:14a1c272764934afa4613100f578d0ba59a56d619d7bf3768a9673a1ad231c16",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/finish-wp",
+      "path": "data/cache/pages/products-lime-render-finish-wp.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Finish WP External Lime Render | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 86528,
+      "content_hash": "sha256:7328f22930ac6427134a52c0411617ffaa2cb91f136b2c77beb10c4f2d8a01c1",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:45+00:00",
+      "fetched_at": "2026-09-15T12:22:45+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/roman-stucco",
+      "path": "data/cache/pages/products-lime-render-roman-stucco.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Roman Stucco Exterior Wall Render | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 84245,
+      "content_hash": "sha256:32a0288246b36c8768e1e0f4c01f90ec1a0145f0abaa14324eeb73d30a97895c",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/tradirend",
+      "path": "data/cache/pages/products-lime-render-tradirend.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Tradirend Lime Render | Coloured External Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 84995,
+      "content_hash": "sha256:2d5a8c00f217b4ceacfb8e056312beafbc7b0a03d2e1c441bd29f2ff539ba351",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/ultra-render",
+      "path": "data/cache/pages/products-lime-render-ultra-render.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Ultra Insulating Lime Render Base Coat | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79209,
+      "content_hash": "sha256:f29bb65511b0c967eb567a7d576e468c0ae291b04c574b55a0dcdd27f74dacc6",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/silicate-finish-render",
+      "path": "data/cache/pages/products-lime-render-silicate-finish-render.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silicate Mineral Finish Render | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78964,
+      "content_hash": "sha256:7f610db251face817c56a653a4db40fbae0f512bac6a272dc093f8669c157477",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/warmshell-meshcoat",
+      "path": "data/cache/pages/products-lime-render-warmshell-meshcoat.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Warmshell Meshcoat for EWI",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79699,
+      "content_hash": "sha256:87f94997fa5b02e3c72b143e828614193d6e4b5f5eb41168cd184f7312c7f64a",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/forte-render-base-coat",
+      "path": "data/cache/pages/products-lime-render-forte-render-base-coat.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Forte Render Base Coat | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78647,
+      "content_hash": "sha256:22891b8a046b27ade0e32d8056f8578a3ff5cdfdbf35844ad3a164e05ba72012",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/grippa",
+      "path": "data/cache/pages/products-lime-render-grippa.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Grippa | Lime Render | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76021,
+      "content_hash": "sha256:a72bc73081fa4fd7cc5b196f5a0f0c96edadf6127caa973546cc2debb4de8d25",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:46+00:00",
+      "fetched_at": "2026-09-15T12:22:46+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render/warmshell-external-mesh-660",
+      "path": "data/cache/pages/products-lime-render-warmshell-external-mesh-660.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Warmshell external re-enforcing mesh 660",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77132,
+      "content_hash": "sha256:8927a25176030578be6c02a497ed96f36456706ca8b8ae8987e0d1b310401902",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:47+00:00",
+      "fetched_at": "2026-09-15T12:22:47+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/insulation/woodfibre",
+      "path": "data/cache/pages/products-insulation-woodfibre.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Wood fibre Insulation Boards | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77591,
+      "content_hash": "sha256:5cb29a0e6a37a1a572019d36daffaa3b83c6b67afcfac09d32d120df85ae9742",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:47+00:00",
+      "fetched_at": "2026-09-15T12:22:47+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/insulation/aerogel",
+      "path": "data/cache/pages/products-insulation-aerogel.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Aerogel wall inuslation",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78028,
+      "content_hash": "sha256:7d2bbb81dec93c17a98af7690439da4b42c5cd0e307d8e941b3b29858df351f2",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:47+00:00",
+      "fetched_at": "2026-09-15T12:22:47+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/insulation/boardadhesive",
+      "path": "data/cache/pages/products-insulation-boardadhesive.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Warmshell Board Adhesive for breathable insulation",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79888,
+      "content_hash": "sha256:54266535a30ec211ef9a32dfa59f9f21a713a718ad6a53e8e98f94c923af46ee",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:47+00:00",
+      "fetched_at": "2026-09-15T12:22:47+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/insulation/hemp-lime-binder",
+      "path": "data/cache/pages/products-insulation-hemp-lime-binder.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Hemp Lime Binder for insulating existing walls or building new timber structures",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79027,
+      "content_hash": "sha256:299073ad284ba2e40d6394c7c8b67415ded48a93f17ee85098d8a68133c40400",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:47+00:00",
+      "fetched_at": "2026-09-15T12:22:47+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/ps2",
+      "path": "data/cache/pages/products-primers-and-adhesives-ps2.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 PS2 Penetrating Solution Primer | Silic8 | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76735,
+      "content_hash": "sha256:e3b6b457eea51f1af81b0cf0d082865f7fafd3323522afb8428e9593670ec533",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/mpl1",
+      "path": "data/cache/pages/products-primers-and-adhesives-mpl1.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 MPL1 Primer | Lime Render Primer | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78750,
+      "content_hash": "sha256:a188b8c49ebe8b3529e9a5336bfacfed4497ec026b7b1330a45b820f226ab427",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/aerogel-adhesive-1",
+      "path": "data/cache/pages/products-primers-and-adhesives-aerogel-adhesive-1.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 AeroGel Adhesive | Silic8 | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76531,
+      "content_hash": "sha256:8c2476178fba4bda310c70c292af135999020baf509745974fe7dc8c043c9807",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/ad2",
+      "path": "data/cache/pages/products-primers-and-adhesives-ad2.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 AD2 Adhesive | Silic8 | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77463,
+      "content_hash": "sha256:d0ebcc9d80301fb18f03eeb9a01597069a45ec7eca45403ffa25a99a4bde4479",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/silguard",
+      "path": "data/cache/pages/products-primers-and-adhesives-silguard.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 Silguard stabilising water repellent  | Silic8 | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76804,
+      "content_hash": "sha256:0d63e5f452d4272da6fa8225ad3b2975269c03ca4548458d87b4de8cf5ee39aa",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/penetrating-primer",
+      "path": "data/cache/pages/products-primers-and-adhesives-penetrating-primer.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Silic8 Penetrating Primer | Silic8 | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 76424,
+      "content_hash": "sha256:f406ba86d5bac9844a69138ee6e4f9602356897ea581b57e27ef9f86605f695d",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives/solo-primer",
+      "path": "data/cache/pages/products-primers-and-adhesives-solo-primer.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Solo Primer for lime plaster and lime finish coats",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77219,
+      "content_hash": "sha256:246db9ceb5e0a9a5ad63b855839a9f3d27a9bcb53f400e55239ae603b5a7f0ba",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:48+00:00",
+      "fetched_at": "2026-09-15T12:22:48+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/stone-repair/pure-lime-grout",
+      "path": "data/cache/pages/products-stone-repair-pure-lime-grout.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Pure Lime Grout | Repointing Brickwork | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78504,
+      "content_hash": "sha256:ef7c22dd9d6bf40da9ea3c399338747f78f58d12d64d316a62092ec41dd5b9ee",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:49+00:00",
+      "fetched_at": "2026-09-15T12:22:49+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/stone-repair/contour",
+      "path": "data/cache/pages/products-stone-repair-contour.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Contour Brick & Stone Repair | Stone Repair | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 88631,
+      "content_hash": "sha256:3a730e025eebfe73df271b60b90dbcc8e5516d4e1ba4494c90e2a8c0c3ae0829",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:49+00:00",
+      "fetched_at": "2026-09-15T12:22:49+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/stone-repair/stucco-cast",
+      "path": "data/cache/pages/products-stone-repair-stucco-cast.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Roman Stucco Cast | Stone Repair | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 80019,
+      "content_hash": "sha256:e20cc08ab990c0e2c50738bd09d821af25a3405f30c814086f31534617818f7f",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:49+00:00",
+      "fetched_at": "2026-09-15T12:22:49+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/warmshell-natural-insulation/warmshell-internal-insulation",
+      "path": "data/cache/pages/warmshell-natural-insulation-warmshell-internal-insulation.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Natural internal wall insulation | Warmshell IWI by Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 97143,
+      "content_hash": "sha256:d167b97b1096aa8945e8e5d4f481304bbcf885bc59c1993fe8648324e1b5ba5e",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:49+00:00",
+      "fetched_at": "2026-09-15T12:22:49+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/warmshell-natural-insulation/warmshell-external-insulation",
+      "path": "data/cache/pages/warmshell-natural-insulation-warmshell-external-insulation.html",
+      "kind": "page",
+      "doc_type": "product_page",
+      "title": "Natural external wall insulation | Warmshell EWI by Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 90466,
+      "content_hash": "sha256:776c5e618ad0e2391dd5c86283299c31ba0f0a0cef633d6d543717d1f4594bca",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:49+00:00",
+      "fetched_at": "2026-09-15T12:22:49+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/buildingregulationsinternalwallinsulation",
+      "path": "data/cache/pages/support-knowledgebase-buildingregulationsinternalwallinsulation.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "IWI wall insulation & Regs",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 84356,
+      "content_hash": "sha256:ab29de8790a9d2d99bffd7682c216f74402ab4bba62e6eb45d8f8a6637441c06",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/glossary-of-terms",
+      "path": "data/cache/pages/support-knowledgebase-glossary-of-terms.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Glossary of Lime terms",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 95144,
+      "content_hash": "sha256:73ffe5b1bbb3660dace422fa7902a707fbfae83725e7cf9a38c53b18377e277f",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/healthy-building",
+      "path": "data/cache/pages/support-knowledgebase-healthy-building.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Healthy Buildings - Breathable Walls",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79882,
+      "content_hash": "sha256:c99212abf0d73e4a5f177f4316cbb5276e17b2e1585740504762cf14a31b9847",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/lime-composition",
+      "path": "data/cache/pages/support-knowledgebase-lime-composition.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "What Is Lime Mortar?| Our Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 80402,
+      "content_hash": "sha256:ee5153bed82cc9ed9ff29112419c63ee8a7775f70833da28a47371c1c73eeb16",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/the-importance-of-breathability",
+      "path": "data/cache/pages/support-knowledgebase-the-importance-of-breathability.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "The Importance Of Breathability| Our Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 84388,
+      "content_hash": "sha256:8f6bd54fc26111a297a6a4979ae5b329b8009a67ae3bd4c67d12864728cbee48",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/why-lime",
+      "path": "data/cache/pages/support-knowledgebase-why-lime.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Why Use Lime Building Materials? | Our Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 83615,
+      "content_hash": "sha256:2c6b4e8b416d7944d77518b6ada82532e40a144c771cd93d09f14d0cb4be3d59",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:50+00:00",
+      "fetched_at": "2026-09-15T12:22:50+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/render-checklist",
+      "path": "data/cache/pages/support-knowledgebase-render-checklist.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Lime Rendering Checklist & Guide| Our Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 81483,
+      "content_hash": "sha256:b1bdcbe043452a3da8b843c2479813ff84ad72d7bed900a8b8599e7e401b418d",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:51+00:00",
+      "fetched_at": "2026-09-15T12:22:51+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/colour-and-colour-consistency",
+      "path": "data/cache/pages/support-knowledgebase-colour-and-colour-consistency.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Colour & Colour Consistency Of Lime Building Materials | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 85416,
+      "content_hash": "sha256:0b179241da18ea6d02508845a9b7d9595f010cb3e5420605ba32379675558c0c",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:51+00:00",
+      "fetched_at": "2026-09-15T12:22:51+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/conservation",
+      "path": "data/cache/pages/support-knowledgebase-conservation.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Lime products for conservation and listed buildings | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77882,
+      "content_hash": "sha256:2500ed75f1ae320eac6249587b0931069b4ade1df5cd82231664aa36e16f7a41",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:51+00:00",
+      "fetched_at": "2026-09-15T12:22:51+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/lime-for-new-build",
+      "path": "data/cache/pages/support-knowledgebase-lime-for-new-build.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Hydraulic Lime Mortars for New Builds | Our Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77951,
+      "content_hash": "sha256:734922dc1cfe2f97f42ca2624444549075c088507046bf5695cdbc46a418b210",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:51+00:00",
+      "fetched_at": "2026-09-15T12:22:51+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/lime_buying_guide",
+      "path": "data/cache/pages/support-knowledgebase-lime_buying_guide.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Lime Building Materials Buying Guide | Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 79382,
+      "content_hash": "sha256:23ea8ddf7dff3377094b1bce2330ce7b5f65f63236f0fb03ff58a0caca76972f",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:51+00:00",
+      "fetched_at": "2026-09-15T12:22:51+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/hydraulic_or_hydrated_lime",
+      "path": "data/cache/pages/support-knowledgebase-hydraulic_or_hydrated_lime.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Hydraulic Lime, Hydrated Lime Or Non-Hydraulic Lime | Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 81900,
+      "content_hash": "sha256:06b94d99906cbdbfefd3c1c26350d113943442a5d879b144eb74ed603a1742c8",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:52+00:00",
+      "fetched_at": "2026-09-15T12:22:52+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/plastering_onto_laths",
+      "path": "data/cache/pages/support-knowledgebase-plastering_onto_laths.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Lime Plastering On To Laths Guide | Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 82114,
+      "content_hash": "sha256:de1ea4d750b68c8d5367aa3b346181f0ab740938b98768f617b99e38e195f0d0",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:52+00:00",
+      "fetched_at": "2026-09-15T12:22:52+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/what-is-lime",
+      "path": "data/cache/pages/support-knowledgebase-what-is-lime.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "What Is Lime | Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 82486,
+      "content_hash": "sha256:4bf9aeb93f0dabba17d32cdd6237f7c918e80e5a750032ae2dbb60c12ec5d0e4",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:52+00:00",
+      "fetched_at": "2026-09-15T12:22:52+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/background-preparation-for-rendering",
+      "path": "data/cache/pages/support-knowledgebase-background-preparation-for-rendering.html",
+      "kind": "page",
+      "doc_type": "knowledge_base",
+      "title": "Background Preparation For Lime Rendering | Knowledge Base | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 93592,
+      "content_hash": "sha256:b659978cc25daaad76bd557394f4d8b4fb25a5b09c35c2cd0f3153ba6abef4f3",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:52+00:00",
+      "fetched_at": "2026-09-15T12:22:52+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/faq",
+      "path": "data/cache/pages/support-faq.html",
+      "kind": "page",
+      "doc_type": "faq",
+      "title": "Frequently Asked Questions about Lime Green products",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 99212,
+      "content_hash": "sha256:183a729c931150167aa82091bbe9647108dcd53515a79d70a37f3c5f62e50d7a",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:52+00:00",
+      "fetched_at": "2026-09-15T12:22:52+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/order-a-sample",
+      "path": "data/cache/pages/order-a-sample.html",
+      "kind": "page",
+      "doc_type": "commercial",
+      "title": "Order a sample",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 90270,
+      "content_hash": "sha256:289e0b8520013cc6a5e1d1529d7594d0bbbdf33d4468a76ea4f8b6b535a095be",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/find-a-supplier",
+      "path": "data/cache/pages/find-a-supplier.html",
+      "kind": "page",
+      "doc_type": "commercial",
+      "title": "Find a Lime Green supplier",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 78767,
+      "content_hash": "sha256:ad01bab2d82dcf60d42bfb404844e4064c011f0f36bbfb328fa2e5f520bf3eea",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/contact",
+      "path": "data/cache/pages/contact.html",
+      "kind": "page",
+      "doc_type": "commercial",
+      "title": "Lime Green Products Ltd Contact Details | Lime Green",
+      "link_text": "",
+      "product": "",
+      "status": 200,
+      "bytes": 77002,
+      "content_hash": "sha256:92df1e2c4cf769454fb9d03be46bc4a0c2c057a9bfdd477db9052b454ea606ca",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Design%20Guide%20-%20IWI_1.pdf",
+      "path": "data/cache/documents/Design-Guide---IWI_1.pdf",
+      "kind": "system_guide",
+      "doc_type": "system_guide",
+      "title": "",
+      "link_text": "system guide",
+      "product": "Warmshell system",
+      "status": 200,
+      "bytes": 576901,
+      "content_hash": "sha256:f6d084c516669ace0ec4082e620cb596c61fbbae1c142d9febb94fcc5fba623d",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Installation%20Guide%20-%20IWI.pdf",
+      "path": "data/cache/documents/Installation-Guide---IWI.pdf",
+      "kind": "system_guide",
+      "doc_type": "system_guide",
+      "title": "",
+      "link_text": "system guide",
+      "product": "Warmshell system",
+      "status": 200,
+      "bytes": 11152255,
+      "content_hash": "sha256:b7f17015e6bb57601263002103e99a0994dcd082c4087ce685991c44f3aee36a",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/warmshell-roof-design-guide-and-installation-details-v2.pdf",
+      "path": "data/cache/documents/warmshell-roof-design-guide-and-installation-details-v2.pdf",
+      "kind": "system_guide",
+      "doc_type": "system_guide",
+      "title": "",
+      "link_text": "system guide",
+      "product": "Warmshell system",
+      "status": 200,
+      "bytes": 7986284,
+      "content_hash": "sha256:60e4a583d922018dc4190d804c1a58cba49bf84b0375e6bc72828db5fa151851",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/medium-mortar-tds.pdf",
+      "path": "data/cache/documents/medium-mortar-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data sheet Medium",
+      "product": "Natural Lime Mortar for Old Buildings, Repointing, Pointing Repair and Stone Walls | Lime Green",
+      "status": 200,
+      "bytes": 120841,
+      "content_hash": "sha256:3b376efc0c5d0dcf2f9b6511884e866ea34c2099c208043755f3f5327f081f49",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/strong-mortar-tds.pdf",
+      "path": "data/cache/documents/strong-mortar-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data sheet Strong",
+      "product": "Natural Lime Mortar for Old Buildings, Repointing, Pointing Repair and Stone Walls | Lime Green",
+      "status": 200,
+      "bytes": 120523,
+      "content_hash": "sha256:0a5491b1a5032fd9518148cff4b645e54fbeeed256c66a537c0fb2c6c507287c",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenAshlarMortar.pdf",
+      "path": "data/cache/documents/140919LimeGreenAshlarMortar.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Ashlar Lime Mortar | Hydraulic Lime Mortar | Lime Green",
+      "status": 200,
+      "bytes": 140303,
+      "content_hash": "sha256:f5300048c1ff935aa786a91d45b293f76daed228b9488e13ff8f77f808c45bd3",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Coloured Cement Mortar TDS.pdf",
+      "path": "data/cache/documents/Coloured-Cement-Mortar-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Coloured Cement Mortar | Cement Mortar | Lime Green",
+      "status": 200,
+      "bytes": 166723,
+      "content_hash": "sha256:e482bfa902bd50d9e567d06afe77e22e9895c7d6ba878e210e764c885230c576",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenNaturalStipple.pdf",
+      "path": "data/cache/documents/140919LimeGreenNaturalStipple.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Stipple Coat Lime Preparation and primer for lime render walls",
+      "status": 200,
+      "bytes": 126958,
+      "content_hash": "sha256:abae87d2beb216a853ec08eb6a8736fb636dd06929fcf7ff4b7a4f4af231a7e3",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenUltraPlaster.pdf",
+      "path": "data/cache/documents/140919LimeGreenUltraPlaster.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Ultra Insulated Lime Render Base Coat | Lime Green",
+      "status": 200,
+      "bytes": 94416,
+      "content_hash": "sha256:db71b32e2a3b84b6b608e5d78504c2b2dd10eb92d0e56705c6f8e14a4a906417",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Duro TDS_1.pdf",
+      "path": "data/cache/documents/Duro-TDS_1.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Lime plaster for old buildings and new eco builds | Duro by Lime Green",
+      "status": 200,
+      "bytes": 146689,
+      "content_hash": "sha256:47b0c505fb48e9f525d335839231fb63a8d6d2f9d0a092754dc304079256b9bd",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/solo-one-coat-lime-plaster-tds.pdf",
+      "path": "data/cache/documents/solo-one-coat-lime-plaster-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Solo Datasheet",
+      "product": "Solo Onecoat Lime Plaster |Lime Plaster | Lime Green",
+      "status": 200,
+      "bytes": 141725,
+      "content_hash": "sha256:683ae77f02490830e0b342798bcf7e3173c991444159ec6f328e75301d5c9abe",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Fine Stuff TDS.pdf",
+      "path": "data/cache/documents/Fine-Stuff-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Lime Green Fine Stuff Lime Putty Plaster | Lime Green",
+      "status": 200,
+      "bytes": 134863,
+      "content_hash": "sha256:ea85f8cab3cf30d87feb0dfbedaa8dee2f2d90c19f6e04347021fd00433ee777",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/fibrelime-tds.pdf",
+      "path": "data/cache/documents/fibrelime-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Fibrelime, a soft, flexible plaster and render made from air setting lime",
+      "status": 200,
+      "bytes": 114089,
+      "content_hash": "sha256:a26c22080a0126e111397170be626804ca765fd2fde6ef79da28d6fc96d4e266",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Lime Green Solo Mesh TDS.pdf",
+      "path": "data/cache/documents/Lime-Green-Solo-Mesh-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "TDS",
+      "product": "Reinforcement Mesh for Lime Plaster",
+      "status": 200,
+      "bytes": 100581,
+      "content_hash": "sha256:a835be66ff3b9f63f2b62610a5e60f3a4f4aa7569339850ecafabdc7836a7bb1",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Duro TDS.pdf",
+      "path": "data/cache/documents/Duro-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Duro Lime Render Base Coat | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 146689,
+      "content_hash": "sha256:47b0c505fb48e9f525d335839231fb63a8d6d2f9d0a092754dc304079256b9bd",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919EcoRenderNaturalFinish.pdf",
+      "path": "data/cache/documents/140919EcoRenderNaturalFinish.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Breathable lime render for external walls | Natural Finish",
+      "status": 200,
+      "bytes": 98607,
+      "content_hash": "sha256:23c8942101c899a18f1c9657fc0cd48346ce4a56fa4b05d209b2db7263dc6406",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenFinishWP.pdf",
+      "path": "data/cache/documents/140919LimeGreenFinishWP.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Finish WP External Lime Render | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 94877,
+      "content_hash": "sha256:b7ef1bc073a83e2c3c89d3e2f4a9852e4570543e395eaadefdb7398ba366b0c0",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/roman-stucco-classic-finish-tds.pdf",
+      "path": "data/cache/documents/roman-stucco-classic-finish-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data sheet Classic Finish",
+      "product": "Roman Stucco Exterior Wall Render | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 132855,
+      "content_hash": "sha256:08b72ac9ddb44befc459d46a8f751957bdc432ccd7c951a7deb4dde0e0a63d89",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenTradirend.pdf",
+      "path": "data/cache/documents/140919LimeGreenTradirend.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Tradirend Lime Render | Coloured External Render | Lime Green",
+      "status": 200,
+      "bytes": 122128,
+      "content_hash": "sha256:bb0a1dffa0df27c2ad9e704d5bc041a3bec617470549204d08ffece1d64ca0e8",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenUltra.pdf",
+      "path": "data/cache/documents/140919LimeGreenUltra.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Ultra Insulating Lime Render Base Coat | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 94416,
+      "content_hash": "sha256:db71b32e2a3b84b6b608e5d78504c2b2dd10eb92d0e56705c6f8e14a4a906417",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/lime-green-silicate-render-3.pdf",
+      "path": "data/cache/documents/lime-green-silicate-render-3.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Silicate Mineral Finish Render | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 65102,
+      "content_hash": "sha256:167fe272e6dc89183020c76c27c5909acb9312adf83554d12ebc4892c05fa984",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/warmshell-mesh-coat-tds.pdf",
+      "path": "data/cache/documents/warmshell-mesh-coat-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Warmshell Meshcoat for EWI",
+      "status": 200,
+      "bytes": 121660,
+      "content_hash": "sha256:7bb65200b85614fe531ca736715f3317d5191503cabd6c8e825de0b834892c1a",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/LimeGreen Forte.pdf",
+      "path": "data/cache/documents/LimeGreen-Forte.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data sheet",
+      "product": "Forte Render Base Coat | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 81917,
+      "content_hash": "sha256:93058d8b7bf8e100dfc74343c7637f8a10005c7ae965b98176455d833b6aa259",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Grippa TDS.pdf",
+      "path": "data/cache/documents/Grippa-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "TDS",
+      "product": "Grippa | Lime Render | Lime Green",
+      "status": 200,
+      "bytes": 337034,
+      "content_hash": "sha256:164c3a35a485941d2ad32115f1cc71274b38777b0ef69732522f162e05945cf2",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:53+00:00",
+      "fetched_at": "2026-09-15T12:22:53+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/warmshell-woodfibre-boards-tds.pdf",
+      "path": "data/cache/documents/warmshell-woodfibre-boards-tds.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Wood fibre Insulation Boards | Lime Green",
+      "status": 200,
+      "bytes": 157307,
+      "content_hash": "sha256:f77190e63e31c46a7d40a88ee297f3ebc637565dfa0ceb72d501e6326ebb7094",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Warmshell Aerogel Insualtion Board.pdf",
+      "path": "data/cache/documents/Warmshell-Aerogel-Insualtion-Board.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "TDS",
+      "product": "Aerogel wall inuslation",
+      "status": 200,
+      "bytes": 116154,
+      "content_hash": "sha256:ce0393ae99d212e81549daed4a8b64f24ed1a56bf4e128bf3897b63a8e6a6f5a",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Warmshell Board Adhesive Datasheet.pdf",
+      "path": "data/cache/documents/Warmshell-Board-Adhesive-Datasheet.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Datasheet",
+      "product": "Warmshell Board Adhesive for breathable insulation",
+      "status": 200,
+      "bytes": 176889,
+      "content_hash": "sha256:070e3916ddc02946839e4fe4bdffaccb88d4cfb2793f118238f918b231540504",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Hemp binder TDS.pdf",
+      "path": "data/cache/documents/Hemp-binder-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "TDS",
+      "product": "Hemp Lime Binder for insulating existing walls or building new timber structures",
+      "status": 200,
+      "bytes": 121200,
+      "content_hash": "sha256:42051a946096ae6cf198e6b77e693de9ebfa4588e214077f49062cee48b609f0",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/User information Silic8 PS2 Penetrating Solution.pdf",
+      "path": "data/cache/documents/User-information-Silic8-PS2-Penetrating-Solution.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "DATA SHEET",
+      "product": "Silic8 PS2 Penetrating Solution Primer | Silic8 | Lime Green",
+      "status": 200,
+      "bytes": 436463,
+      "content_hash": "sha256:b62980a385aa4d4fb94b069d2595993f68b26a7ac4f23d528c03c495821219a5",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/User information Silic8 MPL1 coarse.pdf",
+      "path": "data/cache/documents/User-information-Silic8-MPL1-coarse.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "DATA SHEET",
+      "product": "Silic8 MPL1 Primer | Lime Render Primer | Lime Green",
+      "status": 200,
+      "bytes": 516087,
+      "content_hash": "sha256:e9cb4bfe1a8430625084718a5b2eb44820ca301446596728bda7d09b4f4210c2",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/User information Silic8 AD2 outline for individal spec.pdf",
+      "path": "data/cache/documents/User-information-Silic8-AD2-outline-for-individal-spec.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "DATA SHEET",
+      "product": "Silic8 AD2 Adhesive | Silic8 | Lime Green",
+      "status": 200,
+      "bytes": 426310,
+      "content_hash": "sha256:990ecf0c26fe45266fb1312d18376a6b574cd3d96d03a4ef30d82c987be3a528",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/silgaurd-datasheet-oct-25.pdf",
+      "path": "data/cache/documents/silgaurd-datasheet-oct-25.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Silic8 Silguard stabilising water repellent  | Silic8 | Lime Green",
+      "status": 200,
+      "bytes": 182087,
+      "content_hash": "sha256:401704c33fc8cc6ebc2ad233b04877e53916a2d478461de498f4d7d24c0d40b7",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Penetrating Primer TDS.pdf",
+      "path": "data/cache/documents/Penetrating-Primer-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "TDS",
+      "product": "Silic8 Penetrating Primer | Silic8 | Lime Green",
+      "status": 200,
+      "bytes": 106282,
+      "content_hash": "sha256:c38a742c2fe45af3fe101aa85ffcbd7ca617878a94ff7a29013ffd369ee34b79",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Solo Primer TDS.pdf",
+      "path": "data/cache/documents/Solo-Primer-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "datasheet",
+      "product": "Solo Primer for lime plaster and lime finish coats",
+      "status": 200,
+      "bytes": 140067,
+      "content_hash": "sha256:0ab00a72bdb7024352d2c18b4f83dfc75e871a2e8383add279641dec9ed72a55",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/140919LimeGreenPureLimeGrout.pdf",
+      "path": "data/cache/documents/140919LimeGreenPureLimeGrout.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Pure Lime Grout | Repointing Brickwork | Lime Green",
+      "status": 200,
+      "bytes": 81483,
+      "content_hash": "sha256:fd49393d2a403234c34faa5fe9007c66201facce5297552c5d6eda5ae4dee279",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Contour Brick and Stone Repair TDS.pdf",
+      "path": "data/cache/documents/Contour-Brick-and-Stone-Repair-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheet",
+      "product": "Contour Brick & Stone Repair | Stone Repair | Lime Green",
+      "status": 200,
+      "bytes": 166073,
+      "content_hash": "sha256:ea29cdadea628fe783acfb5a0c4f8030e3042a3a62541b6fc7943042aa43d73d",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Roman Stucco Cast TDS.pdf",
+      "path": "data/cache/documents/Roman-Stucco-Cast-TDS.pdf",
+      "kind": "datasheet",
+      "doc_type": "datasheet",
+      "title": "",
+      "link_text": "Data Sheets",
+      "product": "Roman Stucco Cast | Stone Repair | Lime Green",
+      "status": 200,
+      "bytes": 96223,
+      "content_hash": "sha256:b5a2c2af811066724ceb4887bb615c060450be7e7b22ec19ba107c8910348542",
+      "etag": "",
+      "last_modified": "",
+      "version": 1,
+      "first_seen_at": "2026-09-15T12:22:54+00:00",
+      "fetched_at": "2026-09-15T12:22:54+00:00",
+      "is_active": true
+    }
+  ],
+  "skipped": [
+    {
+      "url": "https://www.lime-green.co.uk/",
+      "reason": "outside the corpus boundary"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products",
+      "reason": "category pages are boilerplate over the product pages"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-mortar",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-plaster",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/lime-render",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/insulation",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/primers-and-adhesives",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products/stone-repair",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour",
+      "reason": "outside the corpus boundary"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/chalk",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/tallow",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/grinshill",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/penrhyn",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/purbeck",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/honeysuckle",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/barley",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/bath",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/cotswold",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/stone",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/earth",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/salmon",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/birch",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/york",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/warmshell-internal",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/warmshell-external-lime-render-finish-coarse",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/ochre",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/ironstone",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/corfton",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/bracken",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/harnage",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/tugford",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/autumn",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/terracotta",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/farringdon",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/cinders",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/solo-sample",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/colour-brochure",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/products-by-colour/solo-brochure",
+      "reason": "24 near-identical colour pages; retrieval pollution"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/warmshell-natural-insulation",
+      "reason": "marketing landing page; the system guides carry the figures"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/warmshell-natural-insulation/about-warmshell",
+      "reason": "duplicate of the landing page as served"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/warmshell-natural-insulation/warmshell-roof-insulation",
+      "reason": "marketing; the linked roof design guide is indexed instead"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/how-to-videos",
+      "reason": "an index of videos; 35 words, no procedures"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/knowledgebase/buildingregsinternalwallinsulation",
+      "reason": "superseded duplicate of buildingregulationsinternalwallinsulation"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/lime-green-helps-deliver-contemporary-home-for-emmerdale-star",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/chelsea-retrofit-delivers-homes-for-another-century",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/cotswold-revival",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/lime-mortar-creates-a-stunning-backdrop-for-chelsea-show-garden",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/the-tower-of-london",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/westminster-firestation",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/sustainably-retrofitting-a-north-london-apartment",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/creating-healthy-homes-lime-green-and-retrofitworks",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/restoring-historical-fire-damaged-home",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/globe-theatre-improvements",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/house-of-the-northern-gate",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/london-homes",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/griffin-island-case-study",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/cannock-mill-co-housing-project",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/houlston-manor-bungalow",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/roseisle-house",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/warmshell-lambeth-social-housing",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/newport-street-gallery",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/gunnersbury-park-museum",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/warmshell-ashfield-mews-much-wenlock",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/project-houlston-manor-shropshire",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/project-sir-peter-scott-lighthouse",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/project-the-bomber-command-memorial",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/project-londons-kings-cross-station",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/support/case-studies/project-the-ribblehead-viaduct",
+      "reason": "no technical content for the question types in scope"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/joe-dinsdale-appointment",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/we-are-hiring-technical-advisor",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/new-event-22-october-locking-up-carbon-with-hempcrete-and-woodfibre-insulations",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/the-brick-tile-company-recommending-lime-green-mortar",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/new-products-launched-at-customer-open-day",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lime-green-invests-in-plant",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lime-green-turns-21",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-andy-mitchell-from-avad-consulting",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-will-kirkman-from-ecomerchant",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-ian-shaw-from-mtec",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-ian-womersley-from-womersleys",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-derek-march-brick-and-lime-supplies",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-michael-tincknell-avv-solutions",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-jonathan-garlick-spab",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-russell-brewis-artisan-plastercraft",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lg21-harry-paticas-from-raft",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/chelsea-flower-show",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/the-benefits-of-external-wall-insulation",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/why-use-healthy-building-materials",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/solo-lime-plaster-featured-in-the-times-magazine",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/internal-wall-insulation-vs-external-wall-insulation",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/construction-how-can-we-reduce-our-reliance-on-plastic",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/interesting-lime-buildings",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/lime-greens-mortars-used-on-riba-stirling-prize-winning-gallery",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/news/ashfield-mews",
+      "reason": "no technical content"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/inspirations",
+      "reason": "imagery and marketing copy"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/inspirations/interior-plaster-inspiration",
+      "reason": "imagery and marketing copy"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/inspirations/exterior-mortar-inspiration",
+      "reason": "imagery and marketing copy"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/inspirations/exterior-render-inspiration",
+      "reason": "imagery and marketing copy"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/inspirations/conservation-and-restoration-inspiration",
+      "reason": "imagery and marketing copy"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/about-lime-green",
+      "reason": "company background, not technical"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/terms",
+      "reason": "legal, not technical"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/terms-and-conditions",
+      "reason": "legal, not technical"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/privacy-policy",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/dashboard/register/",
+      "reason": "excluded by rule"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/601044_Lime Green Produc_Natural Lime Mortar_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/517604_Lime Green Produc_Ashlar Lime Mortar_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/UK Declaration of Performance Coloured Cement Mortars.pdf",
+      "reason": "document link text 'UK DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/604960_Lime Green Produc_Coloured Cement_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/EU Declaration of Performance Coloured Cement Mortars.pdf",
+      "reason": "document link text 'EU DoP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/517884_Lime Green Produc_Natural Stipple_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Ultra-Declaration-of-Peformance.pdf",
+      "reason": "document link text 'CE DoP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/517663_Lime Green Produc_ Ultra _GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/518093_Lime Green Produc_Duro Lime Render_00021_GB-en_v2_0_1.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/UK  Declaration of Performance Duro 22_1.pdf",
+      "reason": "document link text 'UK DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/EUDeclaration of Performance Duro_1.pdf",
+      "reason": "document link text 'EU DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/EU Declaration of Performance Solo.pdf",
+      "reason": "document link text 'EU DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/604958_Lime Green Produc_Solo One Coat Lime_GB-en_v3_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/UK Declaration of Performance Solo.pdf",
+      "reason": "document link text 'UK DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/carbon footprint - solo.pdf",
+      "reason": "document link text 'Carbon Footprint' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/light-reflectance-value.pdf",
+      "reason": "document link text 'LRV Light Value' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/EPD_Lime_Green_Products_Ltd_Solo (warmshell System) Verified(1)_1.pdf",
+      "reason": "document link text 'Solo EPD' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/1296866-fibrelime-fibrelime-gb-en-v2-0_1.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/757916_Lime Green Produc_Solo Filler_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/UK  Declaration of Performance Duro 22.pdf",
+      "reason": "document link text 'UK DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/518093_Lime Green Produc_Duro Lime Render_00021_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/EUDeclaration of Performance Duro.pdf",
+      "reason": "document link text 'EU DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/821894_Lime Green Produc_Natural Finish _GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/518173_Lime Green Produc_Finish WP Exter_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/653469_Lime Green Produc_Roman Stucco Underco_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS undercoat' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/653129_Lime Green Produc_Roman Stucco Finish _GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS Finish Coat' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/use-of-roman-stucco.pdf",
+      "reason": "document link text 'The History and use of Roman Stucco' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Lime Green premix SDS_13.pdf",
+      "reason": "document link text 'MSDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Ultra-DoP.pdf",
+      "reason": "document link text 'CE DoP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/517663_Lime Green Produc_ Ultra _GB-en_v1_0_1.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Lime Green Silicate MSDS.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/1222988-lime-green-produc-warmshell-meshcoat-gb-en-v2-0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/eu-declaration-of-performace-warmshell-meshcoat.pdf",
+      "reason": "document link text 'EU DOP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/ukca-declaration-of-conformity-warmshell-meshcoat.pdf",
+      "reason": "document link text 'UK DoC' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/604968_Lime Green Produc_Forte Render Base_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/604975_Lime Green Produc_Grippa_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Warmshell Woodfibre Board MSDS.pdf",
+      "reason": "document link text 'MSDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Warmshell Woodfibre Board DoP.pdf",
+      "reason": "document link text 'DoP' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/MSDS AMAGEL A2- REV.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/silic8-aerogel-adhesive-installation-details-lime-green-products-2.pdf",
+      "reason": "document link text 'System Information' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/611840_Lime Green Produc_Warmshell Board_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/carbon footprint - warmshell board adhesive.pdf",
+      "reason": "document link text 'Carbon Footprint' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/615297_Lime Green Produc_Spray Hemp Lime_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS Spray' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/641527_Lime Green Produc_Hand-cast Hemp Bi_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS hand' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/615297_Lime Green Produc_Spray Hemp Lime_GB-en_v1_0_1.pdf",
+      "reason": "document link text 'SDS Spray' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/epd-hemp-binder.pdf",
+      "reason": "document link text 'Hemp Binder EPD' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/carbon-footprint-hemp-binder.pdf",
+      "reason": "document link text 'Carbon Footprint' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/705501_Lime Green Produc_Silic8 Concentra_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/812297_Lime Green Produc_Silic8 MPL1_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/Silic8 Aerogel Adhesive Installation Details - Lime Green Products 2_1.pdf",
+      "reason": "document link text 'Installation guide' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/766591_Lime Green Produc_Silic8 Aerogel Adhes_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/810299_Lime Green Produc_Silic8 AD2_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/798155_Lime Green Produc_Silic8 Silgaurd_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/813123_Lime Green Produc_Silic8 Penetrati_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/798741_Lime Green Produc_Solo Primer_GB-en_v2_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/601050_Lime Green Produc_Pure Lime Grout_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/604965_Lime Green Produc_Contour Brick a_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Datasheets/653924_Lime Green Produc_Roman Stucco Cast_GB-en_v1_0.pdf",
+      "reason": "document link text 'SDS' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Warmshell%20Internal%20-%20IWI%20Site%20Assessment%20Checklist%20and%20Guide_3.pdf",
+      "reason": "document link text 'Download our site checklist and inspection guide here >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Warmshell%20Internal%20-%20IWI%20Specification%20Clauses_3.pdf",
+      "reason": "document link text 'Architects specification clauses here >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/IWI%20Architect%20Reference%20-%20Single%20Pages%20-%200623%20Jul%2023.pdf",
+      "reason": "document link text 'Generic detail drawings here >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/EN%20Classification%20Report%20-%20REA%20-%20EUI-22-000041.pdf",
+      "reason": "document link text 'Independent fire classification here >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/BAW-22-242-S-A-UK%202024.pdf",
+      "reason": "document link text 'You can download the BDA Agrément here >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Internal%20Warmshell%20Warranty%202022_3.pdf",
+      "reason": "document link text 'Download the Warmshell IWI 25 year materials warranty >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.lime-green.co.uk/Documents/Care%20and%20Maintenance%20Guide%20-%20IWI_1.pdf",
+      "reason": "document link text 'Download Warmshell maintenance guide >' is not a technical datasheet"
+    },
+    {
+      "url": "https://www.spab.org.uk/sites/default/files/documents/MainSociety/Advice/SPAB%20Building%20Performance%20Survey%20Final%20Report%202019-small.pdf",
+      "reason": "document link text 'Download SPAB insulation research >' is not a technical datasheet"
+    },
+    {
+      "url": "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1019707/iwi-guidance.pdf",
+      "reason": "document link text 'Department for Business, Energy & Industrial Strategy, Retrofit Internal Wall Insulation Guide to Best Practice, 2021' is not a technical datasheet"
+    },
+    {
+      "url": "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1057372/ADL1.pdf",
+      "reason": "document link text 'Approved Document L' is not a technical datasheet"
+    }
+  ]
+}

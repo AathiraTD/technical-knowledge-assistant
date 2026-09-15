@@ -1,0 +1,114 @@
+{
+  "_comment": "Corpus boundary, per DECISIONS.md entry 1. The crawl takes the sitemap and applies these rules; anything excluded is recorded in the manifest by name and link so the assistant can answer 'why isn't that in here?'.",
+
+  "site": "https://www.lime-green.co.uk",
+  "sitemap": "https://www.lime-green.co.uk/sitemap.xml",
+  "user_agent": "LimeGreenTechnicalAssistant/0.1 (KTP take-home exercise; one-off crawl)",
+  "delay_seconds": 1.0,
+  "timeout_seconds": 30,
+
+  "include_prefixes": [
+    "/products/",
+    "/support/knowledgebase/",
+    "/support/faq",
+    "/warmshell-natural-insulation/",
+    "/contact",
+    "/find-a-supplier",
+    "/order-a-sample"
+  ],
+
+  "exclude_prefixes": [
+    "/products-by-colour/",
+    "/support/case-studies",
+    "/news",
+    "/inspirations",
+    "/terms",
+    "/terms-and-conditions",
+    "/privacy-policy",
+    "/dashboard/",
+    "/about-lime-green"
+  ],
+
+  "exclude_exact": [
+    "/products",
+    "/products/lime-mortar",
+    "/products/lime-plaster",
+    "/products/lime-render",
+    "/products/insulation",
+    "/products/primers-and-adhesives",
+    "/products/stone-repair",
+    "/support",
+    "/support/knowledgebase",
+    "/warmshell-natural-insulation",
+    "/warmshell-natural-insulation/about-warmshell",
+    "/warmshell-natural-insulation/warmshell-roof-insulation",
+    "/support/knowledgebase/how-to-videos",
+    "/support/knowledgebase/buildingregsinternalwallinsulation"
+  ],
+
+  "exclusion_reasons": {
+    "/products-by-colour/": "24 near-identical colour pages; retrieval pollution",
+    "/products": "category pages are boilerplate over the product pages",
+    "/support/case-studies": "no technical content for the question types in scope",
+    "/news": "no technical content",
+    "/inspirations": "imagery and marketing copy",
+    "/support/knowledgebase/how-to-videos": "an index of videos; 35 words, no procedures",
+    "/support/knowledgebase/buildingregsinternalwallinsulation": "superseded duplicate of buildingregulationsinternalwallinsulation",
+    "/warmshell-natural-insulation": "marketing landing page; the system guides carry the figures",
+    "/warmshell-natural-insulation/about-warmshell": "duplicate of the landing page as served",
+    "/warmshell-natural-insulation/warmshell-roof-insulation": "marketing; the linked roof design guide is indexed instead",
+    "/about-lime-green": "company background, not technical",
+    "/terms": "legal, not technical"
+  },
+
+  "document_link_text": {
+    "_comment": "Documents are classified by the text of the link that points at them, never by filename: filenames on this site carry spaces, typos and inconsistent prefixes. Only technical datasheets are indexed.",
+    "include": [
+      "datasheet",
+      "data sheet",
+      "data sheets",
+      "tds",
+      "technical data sheet",
+      "technical information"
+    ],
+    "exclude": [
+      "sds",
+      "msds",
+      "safety data sheet",
+      "dop",
+      "declaration of performance",
+      "declaration of conformity",
+      "epd",
+      "carbon footprint",
+      "lrv",
+      "light reflectance",
+      "brochure",
+      "warranty",
+      "agrement",
+      "agrément",
+      "specification clauses",
+      "installation guide"
+    ]
+  },
+
+  "system_guides": {
+    "_comment": "Warmshell system guides carry the thermal figures that product pages do not. Per-product installation guides stay excluded; these three are the stated exception.",
+    "include_urls": [
+      "/Documents/Design%20Guide%20-%20IWI_1.pdf",
+      "/Documents/Installation%20Guide%20-%20IWI.pdf",
+      "/Documents/warmshell-roof-design-guide-and-installation-details-v2.pdf"
+    ]
+  },
+
+  "authority_rank": {
+    "_comment": "Conflict resolution, per DECISIONS.md entry 12. Lower number wins; newest wins within a rank.",
+    "datasheet": 1,
+    "system_guide": 2,
+    "product_page": 3,
+    "knowledge_base": 4,
+    "faq": 5,
+    "commercial": 6
+  },
+
+  "audience_default": "public"
+}
