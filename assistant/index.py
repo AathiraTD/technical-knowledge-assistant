@@ -250,6 +250,7 @@ def _classify(log: dict, ledger: dict, known: dict[str, str]
         url = entry["url"]
         entries[url] = entry
         if not (ROOT / entry["path"]).exists():
+            entry["failure"] = "cached file missing"
             failed.append(url)
             continue
         fresh = "sha256:" + hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest()
@@ -263,6 +264,7 @@ def _classify(log: dict, ledger: dict, known: dict[str, str]
             normalized = ("sha256:" + hashlib.sha256(
                 (ROOT / entry["path"]).read_text(encoding="utf-8").encode("utf-8")).hexdigest()) if legacy else ""
             if expected != normalized:
+                entry["failure"] = "source hash mismatch; previous version retained"
                 failed.append(url)
                 continue
         record["content_hash"] = fresh
@@ -544,7 +546,7 @@ def _build(repo, verbose, rebuild, staff_dir) -> dict:
                                 "quality": "failed", "detector": "-",
                                 "sections": 0, "chunks": 0, "chars": 0,
                                 "date": "", "caveats": 0, "change": "failed",
-                                "note": "source fetch or integrity check failed; previous version retained"})
+                                "note": entries.get(url, {}).get("failure", "source fetch failed; previous version retained")})
 
         updates += fixture_updates
         report_rows += fixture_rows
