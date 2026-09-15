@@ -5,11 +5,22 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Generated index — rebuilt from the shipped cache by `python -m assistant.index`
+# Generated index — rebuilt by `python -m assistant.index`. Not committed: it is
+# tied to the embedding model on the machine that built it.
 data/index/
+
+# data/embeddings.db IS committed, deliberately — decision 17. It is keyed by
+# content hash and model tag, so it either hits correctly or misses and
+# recomputes, and it turns a fifteen-minute first build into a few seconds.
 
 # Evaluation output that is regenerated on each run
 eval/results/*.tmp
+
+# Secrets. deploy/.env.example is committed; deploy/.env never is.
+.env
+deploy/.env
+*.env
+!deploy/.env.example
 
 # Tooling
 .playwright-mcp/

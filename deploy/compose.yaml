@@ -1,0 +1,103 @@
+# A production-shaped stack: the application, PostgreSQL with pgvector, and
+# Ollama. Three services because three are needed; nothing here is present to
+# look like infrastructure.
+#
+#   docker compose -f deploy/compose.yaml up -d
+#   docker compose -f deploy/compose.yaml exec app python -m assistant.index
+#   docker compose -f deploy/compose.yaml exec app python -m eval.run
+#
+# Inside the network, services are reached by their names — db:5432 and
+# ollama:11434 — never localhost, which inside a container is the container.
+#
+# STATUS: written, not yet booted. Docker's daemon is not running on the build
+# machine, so this has not been verified end to end and is not claimed as
+# working. See README.
+
+name: lime-green-assistant
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-assistant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-assistant}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Not exposed to the host by default. Uncomment only to inspect it with a
+    # local client; the application reaches it over the compose network.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      # Readiness, not liveness: the server answering is not the same as the
+      # database being there to serve.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assistant} -d ${POSTGRES_DB:-assistant}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.12.3
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  # Pulls the two models once, then exits. Keeping this separate from the app
+  # means a restart of the app does not re-check a 4 GB download, and a failed
+  # pull is visible as a failed service rather than a slow start.
+  model-init:
+    image: ollama/ollama:0.12.3
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        ollama pull ${GENERATION_MODEL:-qwen3.5:4b}
+        ollama pull ${EMBED_MODEL:-qwen3-embedding:0.6b}
+        echo "models ready"
+    restart: "no"
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      model-init:
+        condition: service_completed_successfully
+    environment:
+      ASSISTANT_POSTGRES_DSN: postgresql://${POSTGRES_USER:-assistant}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-assistant}
+      OLLAMA_HOST: http://ollama:11434
+      ASSISTANT_PORT: "8765"
+    ports:
+      - "127.0.0.1:${ASSISTANT_PORT:-8765}:8765"
+    volumes:
+      # The corpus is evidence, and evidence lives on a filesystem. Postgres
+      # holds identity, versions, chunks and vectors — not 29 MB of PDFs.
+      - ../data/cache:/app/data/cache:ro
+      - index-data:/app/data/index
+    healthcheck:
+      test: ["CMD-SHELL", "python -m assistant.health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  ollama-models:
+  index-data:
