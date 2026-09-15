@@ -501,16 +501,14 @@ def extract_pdf(path: str) -> Extracted:
         if i in heads:
             if buf:
                 body_text = clean("\n".join(buf))
-                if body_text:
-                    sections.append(Section(current or title or "Introduction",
-                                            body_text, cpage))
+                sections.append(Section(current or title or "Introduction",
+                                        body_text, cpage))
             current, buf, cpage = text, [], pno
         else:
             buf.append(text)
     if buf:
         body_text = clean("\n".join(buf))
-        if body_text:
-            sections.append(Section(current or title or "Introduction", body_text, cpage))
+        sections.append(Section(current or title or "Introduction", body_text, cpage))
 
     sections = strip_hazard(sections)
 
