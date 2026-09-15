@@ -182,6 +182,14 @@ def test_a_correct_answer_passes_every_check():
     assert failures == [], failures
 
 
+def test_an_ordinary_capitalised_word_is_not_reported_as_an_invented_name():
+    """Check 5 must not refuse an answer for capitalising 'Water' mid-sentence."""
+    sheet = passage("Add 5 litres per 25 kg sack.")
+    failures = run_checks("Add 5 litres of Water per 25 kg sack [1].",
+                          [sheet], NAMES, [])
+    assert "check 5" not in names_of(failures), failures
+
+
 if __name__ == "__main__":
     import traceback
 

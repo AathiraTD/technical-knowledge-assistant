@@ -18,6 +18,20 @@ from .retrieve import Retriever
 from .router import Decision, Path_, Router, split_by_topic
 
 
+# The architecture caps input at about 500 words. Capping characters instead
+# cut mid-word, and because the cap is applied before the message is split by
+# topic, the fragment became its own part: it matched no policy pattern, so it
+# reached retrieval as gibberish. Words are the unit the limit was written in
+# and the unit that cannot produce a fragment.
+MAX_WORDS = 500
+
+
+def cap(question: str) -> str:
+    """Trim an over-long message on a word boundary."""
+    words = question.strip().split()
+    return " ".join(words[:MAX_WORDS])
+
+
 @dataclass
 class Reply:
     """The composite answer to a message, part by part."""
@@ -50,7 +64,7 @@ class Assistant:
         self.engine.retriever = self.router
 
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",)) -> Reply:
-        question = question.strip()[:3000]
+        question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
         for part in split_by_topic(question):

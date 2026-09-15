@@ -127,12 +127,12 @@ def _normalise_number(token: str) -> str:
 
 
 def _numbers(text: str) -> list[str]:
-    out = []
-    for m in _NUMBER.finditer(text):
-        token = m.group(0).strip()
-        if re.search(r"\d", token):
-            out.append(token)
-    return out
+    """Figures with their units attached, which is the unit of comparison.
+
+    Every match necessarily contains a digit, because the pattern opens with
+    one; an earlier guard re-checked for a digit here and could never fire.
+    """
+    return [m.group(0).strip() for m in _NUMBER.finditer(text)]
 
 
 def run_checks(
@@ -183,7 +183,13 @@ def run_checks(
     # 3 — a number stays with the product it was published for.
     products_in_hits = {h.document.product.lower() for h in hits if h.document.product}
     for sentence in sentences:
-        if not _numbers(sentence):
+        # Strip the citation markers before counting figures. Check 2 already
+        # does; check 3 did not, so the digit inside "[1]" counted as a figure
+        # and this guard never fired. Harmless in effect, because the check only
+        # reports when a sentence also names another product, but it meant a
+        # sentence with no figures at all was still being examined for figure
+        # attribution.
+        if not _numbers(_CITE.sub("", sentence)):
             continue
         marks = [int(m) for m in _CITE.findall(sentence)]
         cited_products = {
@@ -501,6 +507,10 @@ class AnswerEngine:
         parts += ["", _contact_line(self.names)]
 
         answer = self._finish(decision, "\n".join(parts), decision.hits[:1])
+        # The path recorded is the path actually taken. A compose that failed
+        # its checks ends in a refusal, and reporting that as "compose" in the
+        # transcript would describe the attempt rather than the outcome.
+        answer.path = Path_.REFUSE.value
         answer.refused = True
         answer.diagnostics["refusal_reason"] = why
         return answer

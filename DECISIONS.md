@@ -232,6 +232,19 @@ Two gate rows are unverified and must be checked when the model is pulled, not a
 
 **Depends on.** The unanswerable evaluation questions must be verified absent before they are fixed: grep the built corpus for the property, its synonyms and its units (vapour permeability, µ value, thermal conductivity, lambda, W/mK). If the property turns out to be published under another name, the assistant answers it correctly and the evaluation scores that as a failure, in front of the panel.
 
+**Prove it.** The threshold sweep, run over the four retrieval situations, produced a result worth stating plainly because it is the opposite of what a threshold is supposed to do:
+
+| Situation | Top score | Should |
+|---|---|---|
+| S1 — how much water does Solo need | 0.595 | answer |
+| S6 — how many bags for 20 square metres | 0.615 | answer |
+| S7 — the pot life of Duro, published nowhere | 0.717 | refuse |
+| S2 — the U-value of Solo, published nowhere | 0.739 | refuse |
+
+The two questions the corpus **cannot** answer retrieve **more** confidently than the two it can. At 0.35, 0.45 and 0.55 the sweep reports the same thing: four answered, none wrongly refused, and two wrongly admitted. No threshold anywhere in that range separates them, and no threshold could — a question about the U-value of Solo is a well-formed question about a real product, so the Solo datasheet is genuinely its nearest neighbour.
+
+That is the measured case for this decision. Abstention by distance alone would have admitted both near-misses; the relevance gate refuses both, on step 4, by observing that the asked-for term appears in no retrieved passage. The threshold still earns its place against genuinely off-topic questions, but it is not the mechanism that catches the near-miss, and the sweep is what turns that from an argument into a fact.
+
 **Where it breaks.** It is lexical. A passage that names the property without answering it passes the gate — and what then prints is what the sheet actually says ("high breathability", no figure), which is the honest result rather than a hallucination. The property vocabulary is seeded from the datasheets' own field names at ingestion plus hand-written synonyms; an unknown property falls through to the threshold and citation checks.
 
 ## 10. Load-bearing slots
@@ -428,7 +441,7 @@ Shipping the cache rather than the index is the part worth defending. The index 
 |---|---|---|
 | Embedding model | Building the index with each and comparing five known-answer questions | Slice 1 |
 | Generation latency, and so live demo versus transcript | Warm timing of a five-passage compose | Slice 1 |
-| Abstention threshold value | The sweep, printed at the chosen value and at plus and minus 0.1 | Evaluation |
+| ~~Abstention threshold value~~ | **Closed: 0.45, and the sweep showed why the number matters less than expected.** The two unanswerable situations score higher than the two answerable ones, so no threshold in the swept range separates them. The relevance gate does. See decision 9 | Measured |
 | ~~HTML extraction library~~ | **Closed: BeautifulSoup + lxml.** The pipeline needs the DOM regardless — link-text classification and name-list harvesting both require it, and trafilatura's automatic main-content extraction would discard the colour block that must be harvested before stripping | Decided |
 
 Five decisions of no consequence — the Ollama client (raw HTTP, to avoid a dependency wrapping two endpoints), argument parsing (`argparse`), the configuration format (JSON), dependency pinning (a pinned `requirements.txt`) and **no headless browser** (the site is server-rendered: plain fetches return the sitemap, full FAQ text, document links and the stockist list, so Playwright would add a browser download and an install step for nothing) — are recorded only so nobody assumes they were overlooked.

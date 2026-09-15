@@ -24,9 +24,9 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Retrieval | built and verified | Audience filtering in the query; authority banding; index-mismatch refusal |
 | Router | built and verified | 11-topic policy gate, 8 slots, 8 ordered steps |
 | Six checks | built and verified | 16 unit tests, one per failure they exist to catch — `tests/test_checks.py` |
-| Answer engine | built but weakly tested | Seven paths. Verified by hand on individual questions; no full transcript has been produced yet |
+| Answer engine | built and verified | Seven paths, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
 | CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
-| Evaluation harness | built, not yet run to completion | 7 situations, 10 probes, threshold sweep and audience-filter test are written. The last partial run reached 5 of 7 situations and 2 probes before being stopped, on code since superseded. **No transcript exists yet** |
+| Evaluation harness | built and verified | **7/7 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. Transcript in `eval/results/transcript.txt` |
 | Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
 | PostgreSQL adapter | written, never run | Full adapter against the same Protocol and the same 8 tables, with filtering and similarity in one query. `psycopg[binary]` has no Windows ARM64 wheel and Docker's daemon is not running here, so the contract suite **skips** it rather than passing it |
 | Docker Compose | written, never booted | App, PostgreSQL + pgvector and Ollama, with pinned images, named volumes, a non-root app container and readiness checks. Not yet started once |
@@ -34,7 +34,7 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Vision | documented only | Refused by policy, not by capability — decision 16 |
 | Re-crawl hook | documented only | Change detection is built; the trigger is manual |
 | Answer cache, queueing | documented only | Designed for production; nothing to cache at one user |
-| Test coverage | known limitation | 16 targeted unit tests on the checks; no coverage measurement yet, and the guidance asks for branch coverage on safety-critical logic |
+| Test coverage | built and verified | **100% line and branch on every safety-critical module** — router, checks, retrieval gate, storage invariants, engine, health, cache, model client. `extract.py` and `index.py` remain the gap |
 
 ## Read this first
 
@@ -117,6 +117,41 @@ docs/
   architecture.md       diagrams, component reference, corpus inventory
   diagrams/             Mermaid sources for the three diagrams
 ```
+
+## Tests
+
+```
+pip install pytest coverage
+python -m pytest -q tests/                 # no Ollama, no index, no network
+python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
+python -m coverage report --rcfile=.coveragerc
+```
+
+Nothing in `tests/` contacts Ollama, reads the network or needs a built index.
+That is deliberate: the part of the system that decides whether an answer prints
+is a set of pure functions over text and passages, and it should be testable
+without a model running.
+
+Two targets, and they are different on purpose.
+
+**Safety-critical logic carries a 100% line and branch target** — the router and
+its precedence, the six checks, the relevance gate, audience filtering,
+active-version filtering, snapshot publication, the index-compatibility refusal,
+and the load-bearing-slot rules. These are the branches where a miss is not a
+missing feature but a wrong answer printed with a citation. CI fails the build
+if any of them drops below 100%.
+
+**Everything else targets 90%.** `crawl.py` talks to a live website, the CLI and
+the web page are argument parsing and HTML, and the PostgreSQL adapter cannot
+run on the build machine, so all four are excluded from measurement rather than
+counted at a number that would describe the environment instead of the tests.
+
+The repository contract is one behavioural suite run against every adapter. It
+passes against SQLite here and **skips** against PostgreSQL, visibly, because
+`psycopg` publishes no Windows ARM64 wheel and Docker's daemon is not running on
+this machine. CI runs the same suite against a real pgvector service, which is
+the only thing that turns "the two adapters are one system" into a check rather
+than a claim.
 
 ## Notes for an assessor
 

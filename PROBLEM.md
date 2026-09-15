@@ -45,7 +45,7 @@ Everything runs locally. No data leaves the machine.
 | Router | Eleven-topic policy gate, eight slots, eight ordered decisions |
 | Answering | Five paths plus two composites, six post-generation checks, hand-off rendering |
 | Interfaces | A CLI and a web page, both over one library |
-| Evaluation | 7 situations, 10 guardrail probes, 16 unit tests, a threshold sweep, an audience-filter test |
+| Evaluation | **7/7 situations, 10/10 probes**, audience filter passing both ways, a threshold sweep, and 284 unit tests |
 
 ## What was not built, and why
 
@@ -56,11 +56,14 @@ caller — but nothing stops a caller asserting `--audience staff`. Identity is
 the first thing a deployment adds, and it slots in above the retrieval call
 without changing it.
 
-**The PostgreSQL adapter.** The schema is written, in the same eight tables with
-the same version semantics, and the boundary exists so that swapping it changes
-nothing above. But the submission runs on SQLite, so the Postgres adapter is
-designed-for rather than exercised. Parity of design is not parity of testing
-and it would be dishonest to present it as more than that.
+**The PostgreSQL adapter runs nowhere yet.** It is written in full, against the
+same Protocol and the same eight tables, putting the audience filter, the
+active-version join, the authority ordering and the distance operator into one
+query. It has never executed. `psycopg` publishes no Windows ARM64 wheel and
+Docker's daemon is not running on the build machine, so the contract suite
+**skips** it rather than passing it, and the CI workflow runs it against a real
+pgvector service precisely because this machine cannot. Parity of design is not
+parity of testing, and until that job goes green the claim is unproven.
 
 **Vision.** Users want to photograph a wall and be told what to plaster it with.
 The model family chosen has a vision sibling, so this is a capability question
@@ -82,6 +85,37 @@ that must be read whole and current, and quoting them in fragments is the wrong
 behaviour, not a missing feature. The exclusion is on file and the assistant can
 say why.
 
+## What the evaluation shows
+
+Every expectation in the harness is mechanical: a path taken, a source cited, a
+refusal state, or a string that must or must not appear. The transcript is in
+`eval/results/transcript.txt` and regenerates with `python -m eval.run`.
+
+| | |
+|---|---|
+| Situations | 7 of 7 |
+| Guardrail probes | 10 of 10 |
+| Audience filter | staff material invisible to a public caller, visible to staff |
+| Unit tests | 284, passing with every outbound socket blocked |
+| Safety-critical coverage | 100% line and branch |
+
+The threshold sweep produced the result worth arguing about. The two questions
+the corpus cannot answer retrieve **more** confidently than the two it can:
+
+| Situation | Top score | Should |
+|---|---|---|
+| How much water does Solo need | 0.595 | answer |
+| How many bags for 20 square metres | 0.615 | answer |
+| The pot life of Duro, published nowhere | 0.717 | refuse |
+| The U-value of Solo, published nowhere | 0.739 | refuse |
+
+No threshold in the swept range separates them, and none could: a question about
+the U-value of Solo is a well-formed question about a real product, so the Solo
+datasheet genuinely is its nearest neighbour. Abstention by distance alone would
+have admitted both. The relevance gate refuses both, by observing that the
+asked-for term appears in no retrieved passage. That is the measured case for
+the design, and it is the opposite of what a similarity score is assumed to do.
+
 ## Known weaknesses
 
 - Retrieval was measurably wrong before chunks carried their product name into
@@ -89,7 +123,10 @@ say why.
   Fixed, but it is a reminder that a passage which reads clearly to a person can
   be unfindable, and only measurement showed it.
 - Caveat tagging is rule-based, so an unusually worded limit is missed.
-- The abstention threshold is one number chosen against a small sweep.
+- The abstention threshold does less work than its name suggests. The sweep
+  shows it cannot separate the answerable from the unanswerable in this
+  corpus; the relevance gate does that, and the threshold only catches
+  genuinely off-topic questions.
 - Every document in the corpus is public, so the audience filter is exercised
   against a synthetic fixture rather than real staff material.
 - One 34-page guide yields passages whose headings are drawing references, so
@@ -105,5 +142,10 @@ python -m assistant.index      # builds from the shipped cache; no network
 python -m assistant.cli        # ask a question
 python -m assistant.ui         # the same library behind a web page
 python -m eval.run             # situations, probes, sweep, audience filter
-python tests/test_checks.py    # the six checks, no Ollama needed
+python -m assistant.health     # is it actually able to answer?
+
+pip install pytest coverage
+python -m pytest -q tests/     # 284 tests, no Ollama, no network, no index
+python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
+python -m coverage report --rcfile=.coveragerc
 ```

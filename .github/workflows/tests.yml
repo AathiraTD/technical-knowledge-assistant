@@ -1,0 +1,108 @@
+# Deterministic CI: no live website, no paid service, no multi-gigabyte model.
+#
+# Everything here runs without Ollama, because the parts that decide whether an
+# answer prints are pure functions over text and passages. The parts that do
+# need a model — the evaluation harness and the embedding benchmark — are local
+# opt-in checks and are deliberately not run here; a green build must mean the
+# guardrails hold, not that a download succeeded.
+#
+# The PostgreSQL job is the exception worth having: the repository contract is
+# one behavioural suite, and running it against a real pgvector instance is the
+# only thing that turns "the two adapters are one system" from a claim into a
+# check. The build machine cannot do that; a Linux runner can.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: unit and contract (SQLite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt pytest coverage
+      - name: Tests
+        run: python -m pytest -q tests/
+      - name: Coverage, line and branch reported separately
+        run: |
+          python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
+          python -m coverage report --rcfile=.coveragerc
+      - name: Safety-critical modules must stay at 100% branch coverage
+        run: |
+          python -m coverage json --rcfile=.coveragerc -o coverage.json
+          python - <<'PY'
+          import json, sys
+          CRITICAL = [
+              "assistant/router.py", "assistant/answer.py", "assistant/retrieve.py",
+              "assistant/store/embedded.py", "assistant/engine.py",
+              "assistant/model.py", "assistant/repository.py",
+          ]
+          data = json.load(open("coverage.json"))
+          files = {k.replace("\\", "/"): v for k, v in data["files"].items()}
+          failed = []
+          for name in CRITICAL:
+              entry = files.get(name)
+              if entry is None:
+                  failed.append(f"{name}: not measured")
+                  continue
+              summary = entry["summary"]
+              line = summary["percent_covered"]
+              branch = (100.0 if not summary["num_branches"] else
+                        100.0 * summary["covered_branches"] / summary["num_branches"])
+              print(f"{name:34} line {line:6.1f}%  branch {branch:6.1f}%")
+              if line < 100 or branch < 100:
+                  failed.append(f"{name}: line {line:.1f}%, branch {branch:.1f}%")
+          if failed:
+              print("\nBelow the safety-critical target:")
+              for f in failed:
+                  print("  " + f)
+              sys.exit(1)
+          PY
+
+  contract-postgres:
+    name: repository contract (PostgreSQL + pgvector)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: assistant
+          POSTGRES_PASSWORD: assistant
+          POSTGRES_DB: assistant
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U assistant -d assistant"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt "psycopg[binary]" pytest
+      - name: The same contract, against a real pgvector instance
+        env:
+          ASSISTANT_POSTGRES_DSN: postgresql://assistant:assistant@localhost:5432/assistant
+        run: python -m pytest -q tests/test_repository_contract.py -v
+
+  container:
+    name: production container builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the application image
+        run: docker build -f deploy/Dockerfile -t lime-green-assistant:ci .
+      - name: The image must not run as root
+        run: |
+          user=$(docker run --rm lime-green-assistant:ci id -u)
+          test "$user" != "0" || { echo "container runs as root"; exit 1; }
+          echo "runs as uid $user"

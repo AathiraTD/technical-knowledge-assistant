@@ -29,3 +29,8 @@ deploy/.env
 # OS
 .DS_Store
 Thumbs.db
+
+# Coverage output, regenerated on every run
+.coverage
+coverage.json
+htmlcov/

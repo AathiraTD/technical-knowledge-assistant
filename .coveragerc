@@ -1,0 +1,26 @@
+# Coverage is measured on what it means something to cover. The crawler talks to
+# a live website, the two interfaces are argument parsing and HTML, and the
+# PostgreSQL adapter cannot run on this machine — measuring them would report a
+# number about the environment rather than about the tests.
+#
+# Safety-critical modules carry a 100% branch target: router, checks, retrieval
+# gate, storage invariants. Everything else in `assistant/` targets 90%.
+
+[run]
+branch = True
+source = assistant
+omit =
+    assistant/crawl.py
+    assistant/cli.py
+    assistant/ui.py
+    assistant/store/postgres.py
+    assistant/__init__.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    \.\.\.$
