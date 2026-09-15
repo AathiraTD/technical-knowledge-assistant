@@ -136,9 +136,8 @@ CAVEAT_PATTERNS = (
 # four sensors S1 to S4 and writes "S2 and S3 were stable throughout the data",
 # which a code-only pattern deletes — six years of published measurement lost
 # to a regular expression that could not tell a sensor from a safety phrase.
-# Case-sensitive inside a case-insensitive pattern, deliberately: the codes and
-# the capital are both printed conventions, and matching them loosely is what
-# deleted the sensor lines in the first place.
+# Hence the scoped `(?-i:)`: the surrounding patterns are case-insensitive, and
+# under that flag `[A-Z]` matches "and" as happily as "Avoid".
 _PHRASE = (r"(?-i:(?:EUH\s?\d{3}|[RSHP]\s?\d{1,3}(?:\s*/\s*\d{1,3})*)"
            r"\s+(?=[A-Z]))")
 
@@ -248,16 +247,43 @@ class Extracted:
 # --------------------------------------------------------------- normalising
 
 
+# A PDF draws a superscript by positioning a smaller glyph, not by encoding one,
+# so the text layer returns "1.5m 2" where the sheet prints 1.5m². The same
+# happens to "N/mm 2" and to the gap a degree sign leaves in "800 ° C".
+#
+# Closing that gap is whitespace repair, not a rewrite: no digit and no unit
+# changes, and the alternative is an answer that quotes a coverage figure as
+# "1.5m 2", which reads as a defect in the assistant rather than a quirk of the
+# source. Each pattern requires a digit on the left, so a sentence that merely
+# ends in "m" before a numbered list is untouched.
+_SPLIT_UNITS = (
+    # Only the exponent gap closes. The space between a figure and its unit is
+    # the sheet's own spacing and is left alone, so "1.5 N/mm 2" becomes
+    # "1.5 N/mm2" rather than "1.5N/mm2".
+    (re.compile(r"(?<=\d)(\s*)(m|cm|km|N/mm|kN/m)\s+([23])(?![\d.])"), r"\1\2\3"),
+    # A performance table prints the unit as a column header with the value in
+    # the next cell, so "Adhesion N/mm 2 EN 1015-12" has no digit to anchor to.
+    # N/mm and kN/m are unambiguous standing alone; a bare "m" is not.
+    (re.compile(r"\b(N/mm|kN/m)\s+([23])(?![\d.])"), r"\1\2"),
+    (re.compile(r"(?<=\d)(\s*)°\s*([CF])\b"), r"\1°\2"),
+    (re.compile(r"(?<=\d)\s+(%)"), r"\1"),
+)
+
+
 def clean(text: str) -> str:
     """Normalise whitespace without touching the characters that carry meaning.
 
     Units, dashes and degree signs are left exactly as published: a figure is
     only allowed to print if it is found word-for-word in a cited passage, so
-    rewriting '5-6 litres' here would break the check that depends on it.
+    rewriting '5-6 litres' here would break the check that depends on it. The
+    one exception is a unit the PDF text layer split apart, rejoined above,
+    which restores what the document prints rather than altering it.
     """
     text = text.replace("\xa0", " ").replace("​", "")
     text = unicodedata.normalize("NFC", text)
     text = re.sub(r"[ \t]+", " ", text)
+    for pattern, replacement in _SPLIT_UNITS:
+        text = pattern.sub(replacement, text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -381,9 +407,7 @@ def strip_hazard_lines(text: str) -> str:
             continue
         if HAZARD_LINE.match(line) or PPE_SENTENCE.match(line):
             continue
-        line = _without_ppe(line)
-        if line:
-            kept.append(line)
+        kept.append(_without_ppe(line))
     return clean("\n".join(kept))
 
 

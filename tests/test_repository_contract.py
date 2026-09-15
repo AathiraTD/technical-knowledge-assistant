@@ -448,3 +448,83 @@ def test_a_failed_delta_leaves_the_previous_state_intact(repo):
     assert "GOOD" in served
     assert "BAD" not in served
     assert repo.snapshot().snapshot_id == "s1"
+
+
+# ------------------------------------------------- referential integrity
+
+def _counts(repo) -> dict:
+    """Row counts straight from the tables, bypassing the active-version joins."""
+    tables = ("documents", "document_versions", "chunks", "document_caveats")
+    out = {}
+    for t in tables:
+        if hasattr(repo, "db"):                       # SQLite
+            out[t] = repo.db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        else:                                          # PostgreSQL
+            with repo.conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {t}")
+                out[t] = cur.fetchone()[0]
+    return out
+
+
+def test_a_superseded_version_keeps_its_own_chunks_and_caveats(repo):
+    """History is only auditable if the passages that produced an answer survive."""
+    url = "https://x/a"
+    repo.apply_delta([update(url, "OLD text.", A, "h1",
+                             caveats=[Caveat(url, "temperature", "Old limit.", "Mixing")])],
+                     [], snap("s1", 1, 1))
+    repo.apply_delta([update(url, "NEW text.", A, "h2",
+                             caveats=[Caveat(url, "temperature", "New limit.", "Mixing")])],
+                     [], snap("s2", 1, 1))
+
+    counts = _counts(repo)
+    assert counts["documents"] == 1, "a new version must not duplicate the document"
+    assert counts["document_versions"] == 2
+    assert counts["chunks"] == 2, "the superseded version's passage was deleted"
+    assert counts["document_caveats"] == 2
+
+
+def test_reprocessing_every_document_preserves_rather_than_replaces(repo):
+    """A rebuild is a delta against an empty comparison, not a wipe.
+
+    There is deliberately no clear-and-refill path. Clearing first is how a
+    rebuild that fails halfway leaves nothing serving, and it also discards the
+    history that makes an old answer explicable. Reprocessing writes a new
+    version for every document and keeps every old one.
+    """
+    repo.apply_delta(
+        [update("https://x/a", "A one.", A, "h1",
+                caveats=[Caveat("https://x/a", "diy", "Needs a plasterer.", "Use")]),
+         update("https://x/b", "B one.", B, "h1b")],
+        [], snap("s1", 2, 2))
+
+    # What a rebuild does: submit every document again, ignoring the hashes.
+    repo.apply_delta(
+        [update("https://x/a", "A two.", A, "h1"),
+         update("https://x/b", "B two.", B, "h1b")],
+        [], snap("s2", 2, 2))
+
+    counts = _counts(repo)
+    assert counts["documents"] == 2, "reprocessing duplicated a document row"
+    assert counts["document_versions"] == 4
+    assert counts["chunks"] == 4, "a superseded passage was deleted"
+
+    served = " ".join(h.chunk.content for h in repo.retrieve(A, top_k=10))
+    assert "A two" in served
+    assert "A one" not in served, "a superseded version was retrievable"
+
+
+def test_a_delta_that_fails_leaves_every_row_where_it_was(repo):
+    """Half an applied delta is a corrupt index, so it is all or nothing."""
+    repo.apply_delta([update("https://x/a", "GOOD.", A, "h1")], [], snap("s1", 1, 1))
+    before = _counts(repo)
+
+    broken = update("https://x/b", "BAD.", A, "h1b")
+    broken.chunks[0].embedding = ["not a number"]
+    try:
+        repo.apply_delta([broken], [], snap("s2", 1, 1))
+    except Exception:
+        pass
+
+    assert _counts(repo) == before, "a failed delta left rows behind"
+    assert "GOOD" in " ".join(h.chunk.content for h in repo.retrieve(A, top_k=5))
+    assert repo.snapshot().snapshot_id == "s1"

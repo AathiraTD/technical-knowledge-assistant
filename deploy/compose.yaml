@@ -2,9 +2,13 @@
 # Ollama. Three services because three are needed; nothing here is present to
 # look like infrastructure.
 #
+#   cp deploy/.env.example deploy/.env      # then set POSTGRES_PASSWORD
 #   docker compose -f deploy/compose.yaml up -d
-#   docker compose -f deploy/compose.yaml exec app python -m assistant.index
 #   docker compose -f deploy/compose.yaml exec app python -m eval.run
+#
+# The first command is not optional: POSTGRES_PASSWORD has no default, so
+# `up` fails on a missing variable rather than starting a database with a
+# password someone committed. The index builds itself as part of `up`.
 #
 # Inside the network, services are reached by their names — db:5432 and
 # ollama:11434 — never localhost, which inside a container is the container.
@@ -24,10 +28,22 @@ x-application: &application
     EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
     EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-1024}
     GENERATION_MODEL: ${GENERATION_MODEL:-qwen3.5:4b}
-    ASSISTANT_EMBEDDING_CACHE: /app/data/index/embeddings.db
   volumes:
-    - source-data:/app/data/cache
-    - index-data:/app/data/index
+    # The corpus is bind-mounted, not a named volume. A named volume starts
+    # empty, so the indexer had nothing to index and the stack came up serving
+    # an empty knowledge store — the failure looked like a model problem and was
+    # a mount problem. Mounting the repository's own data directory also means
+    # the shipped embedding cache is the one used, so a first build takes
+    # seconds rather than re-embedding 552 passages inside a CPU container.
+    #
+    # It is read-write because the crawler archives each fetched original by
+    # content hash under data/cache/versions, and a refresh cannot do that on a
+    # read-only mount.
+    #
+    # A real deployment would keep named volumes and seed them from a release
+    # artefact; this is the assessment shape, where the corpus ships with the
+    # code and being able to inspect what the container built is worth more.
+    - ../data:/app/data
     - ../data/staff:/app/data/staff:ro
 
 services:
@@ -112,5 +128,3 @@ services:
 volumes:
   db-data:
   ollama-models:
-  index-data:
-  source-data:

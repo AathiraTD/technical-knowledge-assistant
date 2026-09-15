@@ -18,6 +18,7 @@ Each test names the failure it stands for rather than the function it calls.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -736,3 +737,204 @@ def test_a_whole_paragraph_is_not_appended_as_a_caveat():
     """A caveat is a sentence; a 400-character paragraph under an answer buries the answer."""
     long_sentence = "Do not use this product " + ("in any circumstance whatsoever " * 15)
     assert caveats([Section("Notes", long_sentence)]) == []
+
+
+# ------------------------------------------------- hazard, PPE and GHS blocks
+
+
+def text_of(extracted) -> str:
+    return "\n".join(s.heading + "\n" + s.text for s in extracted.sections)
+
+
+SAFETY_PHRASE = re.compile(r"^(?:EUH\s?\d{3}|[RSHP]\s?\d{1,3}(?:/\d{1,3})*)\s+[A-Z]")
+
+
+@pytest.mark.parametrize("sheet", [ULTRA, STIPPLE, SOLO_TDS, FORTE])
+def test_a_safety_phrase_is_never_published_as_a_section_name(sheet):
+    """A citation reading 'Data Sheet, S36 Wear suitable protective clothing' is one nobody can look up."""
+    got = extract_pdf(str(sheet))
+    assert got.sections
+    assert not [s.heading for s in got.sections if SAFETY_PHRASE.match(s.heading)]
+
+
+def test_the_ghs_block_on_fortes_second_page_never_reaches_a_passage():
+    """Page 2 of Forte is a hazard block with no heading of its own; indexed, a question about render retrieves a poison centre."""
+    raw = "\n".join(page.get_text() for page in pymupdf.open(str(FORTE)))
+    assert "POISON CENTRE" in raw            # the block really is in the document
+
+    got = extract_pdf(str(FORTE))
+    assert "Danger" not in headings(got)
+    assert "POISON CENTRE" not in text_of(got)
+    assert "skin irritation" not in text_of(got)
+
+
+def test_the_performance_table_survives_the_safety_block_printed_under_it():
+    """The compressive strength and the EN standard are what a specifier asks for; the risk phrases below them are not."""
+    got = extract_pdf(str(ULTRA))
+    performance = next(s for s in got.sections if s.heading == "Performance")
+    assert "Compressive strength" in performance.text
+    assert "EN 1015" in performance.text
+    assert "Risk Phrases" not in performance.text
+    assert "R36/37/38" not in performance.text
+
+
+def test_cleaning_instructions_survive_the_ppe_sentence_printed_beside_them():
+    """'Clean tools with plenty of water' is a real instruction; losing it to strip the PPE line would cost more than it saved."""
+    got = extract_pdf(str(SOLO_TDS))
+    cleaning = next(s for s in got.sections if s.heading == "Cleaning & Disposal")
+    assert "Clean tools with plenty of water" in cleaning.text
+    assert "approved waste disposal plant" in cleaning.text
+    assert "Wear PPE" not in cleaning.text
+
+
+def test_a_wrapped_line_keeps_its_instruction_when_the_ppe_sentence_goes():
+    """A PDF line wraps mid-sentence, so dropping the whole line here would delete 'cut the insulation with a sharp knife'."""
+    got = extract_pdf(str(AEROGEL))
+    body = text_of(got)
+    assert "Cut the insulation with a sharp knife" in body
+    assert "Wear PPE including gloves" not in body
+
+
+def test_the_ingredients_declaration_is_not_a_retrievable_passage():
+    """A passage of percentage bands retrieves on 'what is in it' and answers with a table cell reading 'Prompt'."""
+    got = extract_pdf(str(STIPPLE))
+    body = text_of(got)
+    assert "Full declaration of ingredients" not in body
+    assert "Cellulose, citric acid, clay and tallow" not in body
+    assert "Lime Green Natural Stipple" in body      # the sheet itself still extracts
+
+
+def test_an_ewc_waste_code_is_not_a_retrievable_passage():
+    """'16 03 03* Inorganic wastes containing dangerous substances' is a regulatory code, not something a plasterer asks."""
+    got = extract_pdf(str(SOLO_TDS))
+    assert "EWC Code" not in headings(got)
+    assert "16 03 03" not in text_of(got)
+
+
+def test_a_soluble_salts_limit_is_not_stripped_as_an_ingredient_band():
+    """A bare percentage is an ingredient band under a declaration heading and a published limit anywhere else."""
+    kept = strip_hazard_lines(
+        "Soluble Salts\n≤0.25%\nThermal Conductivity w/m.K\n0.47")
+    assert "≤0.25%" in kept
+
+    dropped = strip_hazard_lines(
+        "Full declaration of ingredients\n20%+\n"
+        "Natural Hydraulic Lime, sands and aggregate\n≤1%")
+    assert dropped == ""
+
+
+def test_a_sensor_label_is_not_mistaken_for_a_safety_phrase():
+    """The breathability article labels its sensors S1 to S4; read as safety phrases, six years of published data is deleted."""
+    got, _ = extract_html(str(BREATHABILITY), "knowledge_base")
+    body = text_of(got)
+    assert "S2 and S3 were stable throughout the data" in body
+    assert "S4 varied the most over the period" in body
+
+
+def test_a_section_left_empty_by_stripping_is_dropped_rather_than_published():
+    """A heading with nothing under it is a citation that leads to a blank passage."""
+    sections = [
+        Section("Safety", "Wear goggles, gloves and appropriate PPE. See MSDS for detail."),
+        Section("Mixing", "Add between 5 and 6 litres of clean water per 25kg sack."),
+    ]
+    assert [s.heading for s in strip_hazard(sections)] == ["Mixing"]
+
+
+def test_a_hazard_block_ends_where_the_sheet_returns_to_its_own_subject():
+    """A block running to the end of the section would take the disclaimer and anything printed after it."""
+    kept = strip_hazard_lines(
+        "Risk Phrases\n"
+        "R36/37/38 Irritating to eyes, respiratory\n"
+        "system and skin\n"
+        "Coverage\n"
+        "One 25kg bag will cover approximately 1m2 at 15mm thick.")
+    assert "R36/37/38" not in kept
+    assert "system and skin" not in kept
+    assert "One 25kg bag will cover approximately 1m2 at 15mm thick." in kept
+
+
+@pytest.mark.parametrize("resumes", [
+    "Aftercare",                                        # a named section
+    "Keep the wall damp for 5 days after application.",  # a published figure
+    "Trials should be undertaken on old surfaces to ensure compatibility, "
+    "because a lime plaster does not set like gypsum.",  # a sentence of prose
+])
+def test_three_kinds_of_line_bring_a_sheet_back_out_of_its_safety_block(resumes):
+    """The block is scoped by where content resumes, so a resume rule that misses costs the rest of the section."""
+    kept = strip_hazard_lines(f"Safety Phrases\nS22 Do not breathe dust\n{resumes}")
+    assert "S22" not in kept
+    assert resumes in kept
+
+
+def test_a_temperature_caveat_is_still_tagged_after_hazard_stripping():
+    """Caveats are read off the extracted sections, so anything stripped here is a caveat the answer never appends."""
+    tagged = caveats(extract_pdf(str(FINE_STUFF)).sections)
+    assert any(c["type"] == "temperature" and "8" in c["sentence"] for c in tagged)
+    assert any(c["type"] == "diy" for c in tagged)
+
+
+# ------------------------------------------------------------ citable headings
+
+
+@pytest.mark.parametrize("heading, title, expected", [
+    ("Mixing", "Solo | Lime Green", "Mixing"),
+    # nine words and a numbered prefix: long for a heading, still a heading
+    ("3.3) Brickwork Masonry and Hollow Core Clay Blocks (HCCB’s)", "Notes",
+     "3.3) Brickwork Masonry and Hollow Core Clay Blocks (HCCB’s)"),
+    # cut at the dash clause, which is where the sentence names its subject
+    ("There are essentially two sorts of lime available - hydraulic lime or non "
+     "hydraulic lime. Below is a quick guide.", "Hydraulic Or Hydrated Lime",
+     "There are essentially two sorts of lime available"),
+    # nothing citable to cut to, so the document's own name is used
+    ("Why is lime more relevant now than it has been for over 100 years?",
+     "Healthy Buildings | Lime Green", "Healthy Buildings"),
+    ("Using hydraulic lime mortars in new builds makes a lot of sense.",
+     "Lime Mortars for New Builds", "Lime Mortars for New Builds"),
+    # a trailing ellipsis is a sentence mark, not part of the name
+    ("Breathe easy...", "Warmshell", "Breathe easy"),
+    # no title either, so the passage still gets a name it can be cited by
+    ("A sentence with no boundary to cut at and no title to fall back on here", "",
+     "Introduction"),
+])
+def test_a_heading_is_shortened_to_something_that_reads_as_a_citation(
+        heading, title, expected):
+    """A citation has to be checkable against the document, and a 150 character sentence is not."""
+    assert citable_heading(heading, title) == expected
+
+
+def test_a_lead_sentence_styled_as_a_heading_does_not_become_the_citation():
+    """The conservation article opens with a 150 character sentence in a heading style; cited, it reads as an answer."""
+    got, _ = extract_html(str(CONSERVATION), "knowledge_base")
+    assert got.sections
+    assert all(len(s.heading) <= 60 for s in got.sections)
+    assert got.sections[0].heading == "Lime products for conservation and listed buildings"
+
+
+def test_a_sentence_heading_keeps_the_half_that_names_its_subject():
+    """Falling back to the title everywhere would give one article several identically cited passages."""
+    got, _ = extract_html(str(HYDRAULIC_OR_HYDRATED), "knowledge_base")
+    assert "There are essentially two sorts of lime available" in headings(got)
+
+
+def test_a_numbered_heading_of_nine_words_is_not_shortened():
+    """The technical note's own section names are the citations; shortening them costs the reference they exist to give."""
+    got, _ = extract_html(str(TECHNICAL_NOTE), "knowledge_base")
+    assert any(h.startswith("3.3) Brickwork Masonry") for h in headings(got))
+
+
+def test_a_table_cell_reading_none_is_not_published_as_a_section_name():
+    """'Other: None' closes the ingredients table, and the layout detector read that value as a heading."""
+    assert _is_heading_text("None") is False
+    assert _is_heading_text("N/A") is False
+
+    got = extract_pdf(str(ASHLAR_TDS))
+    assert "None" not in headings(got)
+    assert "Coverage" in headings(got)       # the sheet still splits as it did
+
+
+def test_a_faq_question_keeps_its_full_text_as_the_citation():
+    """The question is the citable unit and the thing retrieval matches; shortened, it stops being either."""
+    got, _ = extract_html(str(FAQ_PAGE), "faq")
+    assert len(got.sections) == 32
+    assert any(len(s.heading) > 60 for s in got.sections)
+    assert any(h.endswith("?") for h in headings(got))

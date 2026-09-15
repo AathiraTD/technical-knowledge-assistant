@@ -16,7 +16,19 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt "psycopg[binary]==3.3.3"
+# PIP_INDEX_URL is declared above and has to be used here, not merely accepted.
+# On a network that intercepts TLS, a container reaching pypi.org directly fails
+# with an SSLV3 handshake alert while the host installs perfectly well through
+# its own proxied index; passing that index in is the difference between the
+# deployment adapter being verifiable and being theoretical.
+#
+#   docker build -f deploy/Dockerfile \
+#     --build-arg PIP_INDEX_URL="$(pip config get global.index-url)" -t assistant .
+#
+# It defaults to PyPI, so an unproxied network needs no argument.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" \
+        -r requirements.txt "psycopg[binary]==3.3.3"
 
 COPY assistant/ ./assistant/
 COPY config/ ./config/
