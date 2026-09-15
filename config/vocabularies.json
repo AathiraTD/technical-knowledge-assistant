@@ -1,0 +1,124 @@
+{
+  "_comment": "Slot vocabularies and retrieval synonyms, per DECISIONS.md entries 9 and 10. Hand-written rather than learned: the list is short, the domain is stable, and a panel can check it. Synonyms exist because the relevance gate compares the asked-for term against the cited passage, and a customer says 'bag' where a datasheet says 'sack'.",
+
+  "slots": {
+    "substrate": {
+      "_note": "Load-bearing. Uncued means ask back — decision 10. The substrate decides the product more than anything else the customer can tell us.",
+      "load_bearing": true,
+      "values": {
+        "brick": ["brick", "brickwork", "bricks", "engineering brick"],
+        "stone": ["stone", "stonework", "rubble", "ashlar", "masonry"],
+        "cob": ["cob", "earth wall", "clay lump"],
+        "lath": ["lath", "laths", "lathe", "timber lath", "riven lath"],
+        "plasterboard": ["plasterboard", "drywall", "gypsum board", "dot and dab"],
+        "woodfibre": ["woodfibre", "wood fibre", "wood-fibre board", "insulation board"],
+        "aerogel": ["aerogel", "aerogel board"],
+        "existing_plaster": ["existing plaster", "old plaster", "re-skim", "reskim", "skim over"],
+        "cement_render": ["cement render", "sand and cement", "cementitious render", "pebbledash"],
+        "block": ["block", "blockwork", "concrete block", "aircrete", "thermalite"]
+      }
+    },
+
+    "location": {
+      "_note": "Load-bearing. Uncued means answer per option — inside and outside — rather than ask back, because both answers are short.",
+      "load_bearing": true,
+      "values": {
+        "internal": ["internal", "inside", "indoors", "interior", "inner", "internally"],
+        "external": ["external", "outside", "outdoors", "exterior", "outer", "externally", "facade", "elevation"]
+      }
+    },
+
+    "exposure": {
+      "load_bearing": false,
+      "values": {
+        "sheltered": ["sheltered", "protected", "inland"],
+        "moderate": ["moderate exposure", "normal exposure"],
+        "severe": ["severe", "exposed", "coastal", "driving rain", "west facing", "weather beaten"]
+      }
+    },
+
+    "symptom": {
+      "load_bearing": false,
+      "values": {
+        "damp": ["damp", "damp patch", "wet wall", "moisture", "rising damp", "penetrating damp"],
+        "crack": ["crack", "cracking", "crazing", "hairline", "map cracking", "shrinkage crack"],
+        "salts": ["efflorescence", "salt", "salts", "white deposit", "white bloom", "crystals"],
+        "spalling": ["spalling", "blown", "blowing", "delaminating", "coming away", "falling off"],
+        "mould": ["mould", "mold", "black spot", "mildew", "fungus"],
+        "staining": ["stain", "staining", "discolour", "discolor", "patchy", "shading"]
+      }
+    },
+
+    "cause_asked": {
+      "_note": "Router step 3. A cause or defect question goes to diagnosis, which is a composite of published causes plus a hand-off — never a judgement.",
+      "load_bearing": false,
+      "values": {
+        "cause": ["why is", "why has", "what caused", "what is causing", "what's causing", "reason for", "what went wrong", "diagnose", "why did"]
+      }
+    },
+
+    "calculation": {
+      "_note": "Router step 6. Calculation words take the extract path and the sum is refused: the assistant prints the published coverage and pack size, and does not multiply them.",
+      "load_bearing": false,
+      "values": {
+        "quantity": ["how many bags", "how many sacks", "how much do i need", "how many do i need", "quantity", "calculate", "work out", "coverage for", "how many kg", "how many tonnes", "square metres", "m2", "sq m"]
+      }
+    },
+
+    "photograph": {
+      "_note": "Adds the cannot-see-photographs line to whatever path is taken. It does not by itself route to diagnosis — decision 16.",
+      "load_bearing": false,
+      "values": {
+        "photo": ["photo", "photograph", "picture", "image", "attached", "see this", "look at this", "sent you a", "as you can see", "in the photo", "jpg", "jpeg", "png", "heic"]
+      }
+    },
+
+    "property_asked": {
+      "_note": "Decision 9, the relevance gate. The asked-for property, or a synonym, must appear in a cited passage or the answer refuses — a confident retrieval of the right product's wrong property is the near-miss this catches.",
+      "load_bearing": false,
+      "values": {
+        "coverage": ["coverage", "cover", "spread rate", "how far", "yield", "per bag", "per sack"],
+        "water": ["water", "mixing water", "litres", "how much water", "gauging"],
+        "thickness": ["thickness", "thick", "depth", "mm", "how thick", "build up", "pass"],
+        "drying": ["drying", "dry", "set", "setting", "cure", "curing", "how long", "before painting", "overcoat"],
+        "temperature": ["temperature", "cold", "frost", "degrees", "warm", "hot", "weather"],
+        "breathability": ["breathable", "breathability", "vapour", "vapor", "permeability", "sd value", "moisture movement"],
+        "strength": ["strength", "compressive", "n/mm2", "mpa", "flexural", "hard"],
+        "thermal": ["u value", "u-value", "thermal", "insulation value", "lambda", "conductivity", "heat loss"],
+        "colour": ["colour", "color", "shade", "pigment", "tint"],
+        "storage": ["storage", "shelf life", "store", "keep", "how long does it last"],
+        "coats": ["coat", "coats", "pass", "passes", "layer", "layers", "how many coats"],
+        "tools": ["trowel", "hawk", "spray", "sprayed", "machine applied", "mixer", "paddle", "gun"],
+        "finish": ["finish", "texture", "smooth", "rustic", "float", "sponge", "polish"],
+        "painting": ["paint", "painting", "decorate", "decoration", "limewash", "emulsion", "breathable paint"]
+      }
+    }
+  },
+
+  "retrieval_synonyms": {
+    "_comment": "Applied to the question before embedding and to the relevance gate. The vocabulary gap is the entire reason retrieval is semantic rather than keyword, but a handful of terms are worth stating outright.",
+    "bag": ["sack"],
+    "sack": ["bag"],
+    "render": ["rendering"],
+    "plaster": ["plastering"],
+    "wall's gone damp": ["damp", "moisture"],
+    "u value": ["u-value", "thermal transmittance"],
+    "breathable": ["vapour permeable", "breathability"],
+    "skim": ["finish coat", "finishing plaster"],
+    "undercoat": ["base coat", "basecoat"],
+    "base coat": ["undercoat", "basecoat"]
+  },
+
+  "deferral_markers": {
+    "_comment": "Router step 2. If the top passage itself says 'ask us', that published deferral beats any quantity the system could compute — quoting it is more honest than answering around it.",
+    "patterns": [
+      "please (contact|call|ask|consult|enquire)",
+      "contact (us|our|the technical|lime green)",
+      "ask (us|our|for) (about|advice|samples)",
+      "speak to (us|our|the)",
+      "we (can|will) advise",
+      "seek (professional|specialist|expert) advice",
+      "consult (a|an|the) (engineer|surveyor|architect|specialist)"
+    ]
+  }
+}

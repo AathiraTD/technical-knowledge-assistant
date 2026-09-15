@@ -1,0 +1,126 @@
+{
+  "_comment": "The policy gate, per DECISIONS.md entry 8. These topics never reach retrieval: they are not questions the published corpus can answer, and a retrieval-shaped answer to them would be confident and wrong. Each topic carries a fixed referral written once, reviewed once, and printed verbatim — the model never sees these paths. {contact} and {hours} are substituted from the contact line harvested at ingestion, so the assistant cannot invent a phone number.",
+
+  "topics": {
+    "price": {
+      "patterns": [
+        "\\bprice(s|d|ing)?\\b", "\\bcost(s|ing)?\\b", "how much (is|are|does|do|would)",
+        "\\bquote\\b", "\\bquotation\\b", "\\bcheap(er|est)?\\b", "\\bdiscount\\b",
+        "\\bper (bag|sack|tonne|pallet) cost\\b", "£"
+      ],
+      "referral": "The website does not publish prices. Lime Green does not sell products online; they are sold through a network of regional stockists, who quote for supply.",
+      "next_step": "Use the supplier finder at https://www.lime-green.co.uk/find-a-supplier, or contact the team on {contact} ({hours}).",
+      "grounded_in": "FAQ: 'Lime Green does not sell any products online... support a network of regional stockists.'"
+    },
+
+    "stock": {
+      "patterns": [
+        "\\bin stock\\b", "\\bstock level", "\\bavailability\\b", "\\bavailable now\\b",
+        "\\bhow (long|soon).{0,20}(deliver|arrive|get)", "\\blead time", "\\bback ?order"
+      ],
+      "referral": "Stock for a specific product at a specific branch is not published. The site does publish general lead times: fast-selling lines are available from stock, and other products are made to order and usually available within five to seven working days from order confirmation.",
+      "next_step": "For stock at a branch, ask your stockist, or contact the team on {contact} ({hours}).",
+      "grounded_in": "FAQ: 'What are the lead times on your products?'"
+    },
+
+    "delivery": {
+      "patterns": [
+        "\\bdeliver(y|ies|ed)?\\b", "\\bshipping\\b", "\\bpostage\\b", "\\bcourier\\b",
+        "\\bcut ?off\\b", "\\bdispatch\\b", "\\bsame day\\b"
+      ],
+      "referral": "Delivery arrangements are made by the stockist, not published per order. The site does publish the order cut-off for same-day dispatch: 12 noon.",
+      "next_step": "Your stockist arranges delivery. For anything else, contact the team on {contact} ({hours}).",
+      "grounded_in": "FAQ: 'What time is your orders cut off for same day dispatch?' — '12 Noon.'"
+    },
+
+    "where_to_buy": {
+      "patterns": [
+        "where (can|do) i (buy|get|purchase|order)", "\\bstockist", "\\bsupplier\\b",
+        "\\bmerchant\\b", "\\bnearest\\b.{0,20}\\b(shop|branch|store)", "\\bbuy online\\b",
+        "\\border (online|direct)\\b", "\\bwho sells\\b"
+      ],
+      "referral": "Lime Green does not sell products online. They are sold through a network of approved regional stockists, who can also help calculate quantities.",
+      "next_step": "Find your nearest stockist with the postcode search at https://www.lime-green.co.uk/find-a-supplier, or call {contact} ({hours}).",
+      "grounded_in": "FAQ and the find-a-supplier page."
+    },
+
+    "colour_matching": {
+      "patterns": [
+        "\\bmatch(ing)?\\b.{0,25}\\bcolou?r", "\\bcolou?r\\b.{0,25}\\bmatch",
+        "\\bsame colou?r as\\b", "\\bbespoke colou?r", "\\bcustom colou?r",
+        "\\bwill it look like\\b", "\\bexact shade\\b"
+      ],
+      "referral": "Colour matching cannot be judged from published material. Colour varies with substrate, suction, application and drying conditions, and a screen cannot represent it.",
+      "next_step": "Order a physical sample at https://www.lime-green.co.uk/order-a-sample, and ask the technical team on {contact} ({hours}).",
+      "grounded_in": "The colour-and-colour-consistency knowledge-base article and the sample ordering page."
+    },
+
+    "warranty": {
+      "patterns": [
+        "\\bwarrant(y|ies|ed)\\b", "\\bguarantee", "\\binsurance backed\\b",
+        "\\bclaim\\b", "\\bliable\\b", "\\bliability\\b"
+      ],
+      "referral": "Warranty terms are contractual and are not something this assistant should state. The Warmshell external wall insulation systems are covered by a warranty arrangement described on the site, but the terms that apply to a specific project are not published.",
+      "next_step": "Ask the technical team on {contact} ({hours}) for the warranty terms that apply to your project.",
+      "grounded_in": "FAQ: 'Do your Warmshell EWI systems with lime render have a warranty?'"
+    },
+
+    "structural_judgement": {
+      "patterns": [
+        "\\bstructural(ly)?\\b", "\\bload ?bearing\\b", "\\bsubsidence\\b",
+        "\\bis it safe\\b", "\\bwill it collapse\\b", "\\bcrack.{0,30}\\bserious\\b",
+        "\\bstructural engineer\\b", "\\bmovement\\b.{0,20}\\bbuilding\\b"
+      ],
+      "referral": "A structural judgement is not something published material can support, and not something this assistant will attempt.",
+      "next_step": "This needs a structural engineer or a qualified surveyor who can inspect the building. For product questions once that assessment exists, contact {contact} ({hours}).",
+      "grounded_in": "Policy: outside the corpus and outside the system's remit."
+    },
+
+    "compliance_signoff": {
+      "patterns": [
+        "\\bsign ?off\\b", "\\bcertif(y|ied|icate|ication)\\b", "\\bapprove(d|s)? (it|this|my)\\b",
+        "\\bbuilding control\\b.{0,20}\\b(accept|approve)", "\\bdoes (it|this) comply\\b",
+        "\\bpart [a-l]\\b.{0,25}\\bcomply\\b", "\\bmeets? (the )?regulations?\\b"
+      ],
+      "referral": "Whether a specific build complies is a decision for building control, not for a product assistant. The site explains how the Warmshell systems relate to the regulations, but explaining a regulation is not certifying a project against it.",
+      "next_step": "Your building control body decides compliance. For the published guidance and U-value calculations, contact the technical team on {contact} ({hours}).",
+      "grounded_in": "The 'Building Regs and internal wall insulation' knowledge-base article."
+    },
+
+    "health": {
+      "patterns": [
+        "\\bburn(s|ed|t)?\\b", "\\beye(s)?\\b.{0,20}\\b(splash|got|in)\\b",
+        "\\bswallow(ed)?\\b", "\\bingest(ed)?\\b", "\\bskin (irritation|reaction|rash)\\b",
+        "\\bhospital\\b", "\\bpoison", "\\ballerg(y|ic)\\b", "\\basthma\\b",
+        "\\binhal(e|ed|ation)\\b.{0,20}\\bdust\\b"
+      ],
+      "referral": "This assistant does not give health advice, and the safety data sheets are deliberately not indexed — they are controlled documents that must be read in full and in their current version, not quoted in fragments.",
+      "next_step": "For a medical concern seek medical advice or call 111. The safety data sheet for each product is on its product page, and the team is on {contact} ({hours}).",
+      "grounded_in": "DECISIONS.md entry 1: safety data sheets are excluded from the corpus by rule."
+    },
+
+    "complaint": {
+      "patterns": [
+        "\\bcomplain(t|ing)?\\b", "\\brefund\\b", "\\bfaulty\\b", "\\bdefective\\b",
+        "\\bwrong (product|colour|order)\\b", "\\bdamaged (bag|delivery|pallet)\\b",
+        "\\bunhappy\\b", "\\bfailed\\b.{0,20}\\b(job|wall|render)\\b", "\\bcompensation\\b"
+      ],
+      "referral": "A complaint needs a person, and needs the project details this assistant does not have.",
+      "next_step": "Contact the technical team directly on {contact} ({hours}) so it can be looked at properly.",
+      "grounded_in": "Policy: escalation, not retrieval."
+    },
+
+    "document_request": {
+      "patterns": [
+        "\\b(send|get|find|where).{0,25}\\b(datasheet|data sheet|tds)\\b",
+        "\\bsafety data sheet\\b", "\\bsds\\b", "\\bmsds\\b",
+        "\\bdeclaration of performance\\b", "\\bdop\\b", "\\bepd\\b",
+        "\\bcarbon footprint\\b", "\\blrv\\b", "\\bwhich (datasheet|document)\\b"
+      ],
+      "referral": "",
+      "next_step": "",
+      "from_manifest": true,
+      "grounded_in": "Answered from the manifest — document name, type, date and link — rather than by retrieval, so the answer is the document list itself."
+    }
+  }
+}
