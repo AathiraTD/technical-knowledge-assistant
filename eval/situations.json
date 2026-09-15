@@ -1,0 +1,101 @@
+{
+  "_comment": "Seven situations, one per thing the system claims to do. Each names the path it must take and what must be true of the answer. A situation that merely 'looks good' proves nothing, so every expectation here is mechanical: a path, a source, a refusal state, or a string that must or must not appear.",
+  "situations": [
+    {
+      "id": "S1",
+      "name": "The straightforward product question",
+      "question": "How much water does Solo Onecoat need per bag?",
+      "why": "The brief's first recommended test. A published figure must come back verbatim with its source, and must not be paraphrased into drift.",
+      "expect": {
+        "path_in": [
+          "extract",
+          "compose"
+        ],
+        "refused": false,
+        "source_contains": "solo",
+        "must_cite": true
+      }
+    },
+    {
+      "id": "S2",
+      "name": "The near-miss: right product, wrong property",
+      "question": "What is the U-value of Solo Onecoat plaster?",
+      "why": "Decision 9. Retrieval will confidently return the Solo datasheet, which says nothing about U-values. A confident retrieval is not an answer.",
+      "expect": {
+        "path_in": [
+          "refuse"
+        ],
+        "refused": true,
+        "answer_contains": "does not state"
+      }
+    },
+    {
+      "id": "S3",
+      "name": "The policy question that must never reach retrieval",
+      "question": "How much does a bag of Solo cost?",
+      "why": "Price is not published. Retrieval would find a passage mentioning bags and the model would be tempted to help.",
+      "expect": {
+        "path_in": [
+          "route"
+        ],
+        "refused": false,
+        "answer_contains": "does not publish prices",
+        "must_not_contain_digits_with_pound": true
+      }
+    },
+    {
+      "id": "S4",
+      "name": "The published deferral beats the computed answer",
+      "question": "Can you match the colour of my existing render?",
+      "why": "Decision 8, router step 2. The company has already decided this needs a person.",
+      "expect": {
+        "path_in": [
+          "route",
+          "cited hand-off"
+        ],
+        "answer_contains": "sample"
+      }
+    },
+    {
+      "id": "S5",
+      "name": "The load-bearing slot is uncued",
+      "question": "Which plaster should I use?",
+      "why": "Decision 10. Substrate decides the product. Answering without it is guessing in a liability-sensitive domain.",
+      "expect": {
+        "path_in": [
+          "ask back",
+          "compose",
+          "refuse"
+        ],
+        "answer_contains": "built of"
+      }
+    },
+    {
+      "id": "S6",
+      "name": "The quantity question where the sum is refused",
+      "question": "How many bags of Duro do I need for 20 square metres?",
+      "why": "Decision: print the published coverage and pack size; do not multiply. The arithmetic depends on background and thickness.",
+      "expect": {
+        "path_in": [
+          "extract",
+          "compose",
+          "refuse"
+        ],
+        "must_cite": true
+      }
+    },
+    {
+      "id": "S7",
+      "name": "The question the corpus genuinely cannot answer",
+      "question": "What is the pot life of Duro lime plaster in minutes?",
+      "why": "The honest refusal. 'Pot life' was chosen by grepping the whole extracted corpus for candidate topics and keeping one that returns zero matches — an unanswerable question has to be verified unanswerable, or the test proves nothing. The first candidate, a BS 476 fire rating, was discarded on exactly that check: the corpus does publish Euroclass reaction-to-fire figures, so it was a near-miss and not an absence.",
+      "expect": {
+        "path_in": [
+          "refuse"
+        ],
+        "refused": true,
+        "verified_absent": "pot life — 0 matches across all 94 extracted documents"
+      }
+    }
+  ]
+}

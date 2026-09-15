@@ -1,0 +1,321 @@
+"""One behavioural contract, run against every `KnowledgeRepository` adapter.
+
+The point of a repository boundary is that the engine cannot tell the adapters
+apart. That claim is only worth making if something checks it, so the tests
+below are written against the Protocol and parametrised over adapters — the
+SQLite one today, and the PostgreSQL one against a live pgvector instance when
+one is reachable.
+
+What is checked here is not "does it store rows" but the invariants that make
+answers safe: exactly one active version per document, superseded versions
+unreachable by retrieval, audience filtering applied to rows rather than to a
+prompt, authority outranking similarity inside a band, per-document caps, and a
+failed publish leaving the previously serving snapshot intact.
+
+Runs without Ollama. Embeddings here are hand-made unit vectors, because the
+adapter's job is to rank what it is given, not to produce it.
+"""
+
+from __future__ import annotations
+
+import math
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from assistant.model import (                                    # noqa: E402
+    Caveat, Chunk, Document, DocumentVersion, Excluded, Snapshot,
+)
+from assistant.repository import KnowledgeRepository             # noqa: E402
+from assistant.store import SQLiteKnowledgeRepository            # noqa: E402
+
+DIMS = 1024
+
+
+def vec(*leading: float) -> list[float]:
+    """A unit vector whose first components are given; the rest are zero."""
+    v = list(leading) + [0.0] * (DIMS - len(leading))
+    norm = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / norm for x in v]
+
+
+A = vec(1, 0, 0)      # "about mixing"
+B = vec(0, 1, 0)      # "about coverage"
+NEAR_A = vec(0.99, 0.14, 0)
+
+
+def doc(url: str, dtype: str = "datasheet", authority: int = 1,
+        audience: str = "public", product: str = "Solo") -> Document:
+    return Document(canonical_url=url, title=url, document_type=dtype,
+                    authority=authority, audience=audience, product=product,
+                    link_text=f"{product} {dtype}")
+
+
+def ver(url: str, n: int = 1, active: bool = True) -> DocumentVersion:
+    return DocumentVersion(canonical_url=url, version=n, content_hash=f"h{n}",
+                           source_path=f"{url}.v{n}", is_active=active,
+                           first_seen_at="2026-01-01", fetched_at="2026-01-01",
+                           checked_at="2026-01-01")
+
+
+def chunk(url: str, i: int, text: str, emb: list[float], version: int = 1,
+          audience: str = "public", authority: int = 1,
+          product: str = "Solo", date: str = "2026-01-01",
+          dtype: str = "datasheet") -> Chunk:
+    return Chunk(canonical_url=url, version=version, chunk_index=i,
+                 section=f"Section {i}", content=text, audience=audience,
+                 product=product, document_type=dtype, authority=authority,
+                 source_date=date, embedding=emb)
+
+
+def snap(sid: str = "snap-1", chunks: int = 0, docs: int = 0) -> Snapshot:
+    return Snapshot(snapshot_id=sid, created_at="2026-01-01T00:00:00Z",
+                    embedding_model="test-model", embedding_dimensions=DIMS,
+                    chunking_version="test/1.0", document_count=docs,
+                    chunk_count=chunks, notes={"products": ["Solo"]})
+
+
+# --------------------------------------------------------------- the adapters
+
+
+def sqlite_adapter():
+    path = Path(tempfile.mkdtemp()) / "contract.db"
+    return SQLiteKnowledgeRepository(path)
+
+
+def postgres_adapter():
+    """Returns an adapter against a live pgvector instance, or None."""
+    try:
+        from assistant.store.postgres import PostgresKnowledgeRepository
+    except ImportError:
+        return None
+    import os
+    dsn = os.environ.get("ASSISTANT_POSTGRES_DSN")
+    if not dsn:
+        return None
+    try:
+        return PostgresKnowledgeRepository(dsn)
+    except Exception:
+        return None
+
+
+ADAPTERS = [("sqlite", sqlite_adapter), ("postgres", postgres_adapter)]
+
+
+# ----------------------------------------------------------------- the tests
+
+
+def test_satisfies_the_protocol(repo):
+    assert isinstance(repo, KnowledgeRepository)
+
+
+def test_publish_then_retrieve(repo):
+    url = "https://example/solo"
+    repo.publish([doc(url)], [ver(url)],
+                 [chunk(url, 0, "Add 5 to 6 litres per sack.", A)],
+                 snap(chunks=1, docs=1))
+    hits = repo.retrieve(A)
+    assert len(hits) == 1
+    assert "5 to 6 litres" in hits[0].chunk.content
+    assert hits[0].score > 0.9
+
+
+def test_snapshot_records_the_model(repo):
+    repo.publish([], [], [], snap())
+    s = repo.snapshot()
+    assert s.embedding_model == "test-model"
+    assert s.embedding_dimensions == DIMS
+    assert s.chunking_version == "test/1.0"
+
+
+def test_only_one_version_is_active(repo):
+    """The invariant that stops two coverage figures being retrievable at once."""
+    url = "https://example/solo"
+    repo.publish(
+        [doc(url)],
+        [ver(url, 1, active=False), ver(url, 2, active=True)],
+        [chunk(url, 0, "OLD: coverage 16-20 m2.", A, version=1),
+         chunk(url, 0, "NEW: coverage 14-18 m2.", A, version=2)],
+        snap(chunks=2, docs=1),
+    )
+    hits = repo.retrieve(A, top_k=10)
+    texts = " ".join(h.chunk.content for h in hits)
+    assert "NEW" in texts
+    assert "OLD" not in texts, "a superseded version was retrievable"
+
+
+def test_active_version_is_reported(repo):
+    url = "https://example/solo"
+    repo.publish([doc(url)],
+                 [ver(url, 1, active=False), ver(url, 2, active=True)],
+                 [], snap(docs=1))
+    v = repo.active_version(url)
+    assert v is not None and v.version == 2
+
+
+def test_audience_filter_is_applied_to_rows(repo):
+    """Staff material must be unreachable, not merely unmentioned."""
+    pub, staff = "https://example/public", "fixture://staff/margin"
+    repo.publish(
+        [doc(pub), doc(staff, audience="staff", dtype="knowledge_base", authority=4)],
+        [ver(pub), ver(staff)],
+        [chunk(pub, 0, "Public passage about mixing.", A),
+         chunk(staff, 0, "The internal margin is 42%.", A,
+               audience="staff", authority=4)],
+        snap(chunks=2, docs=2),
+    )
+    public_hits = repo.retrieve(A, audiences=("public",), top_k=10)
+    assert all(h.chunk.audience == "public" for h in public_hits)
+    assert not any("42%" in h.chunk.content for h in public_hits)
+
+    staff_hits = repo.retrieve(A, audiences=("staff",), top_k=10)
+    assert any("42%" in h.chunk.content for h in staff_hits)
+
+
+def test_manifest_respects_audience(repo):
+    pub, staff = "https://example/public", "fixture://staff/margin"
+    repo.publish([doc(pub), doc(staff, audience="staff")],
+                 [ver(pub), ver(staff)], [], snap(docs=2))
+    public = {d.canonical_url for d in repo.manifest(("public",))}
+    assert pub in public and staff not in public
+    assert staff in {d.canonical_url for d in repo.manifest(("staff",))}
+
+
+def test_authority_breaks_a_near_tie(repo):
+    """A near-identical FAQ answer must not outrank the datasheet."""
+    sheet, faq = "https://example/sheet", "https://example/faq"
+    repo.publish(
+        [doc(sheet, "datasheet", 1), doc(faq, "faq", 5)],
+        [ver(sheet), ver(faq)],
+        [chunk(sheet, 0, "DATASHEET says 5 to 6 litres.", NEAR_A,
+               authority=1, dtype="datasheet"),
+         chunk(faq, 0, "FAQ says about 5 litres.", A, authority=5, dtype="faq")],
+        snap(chunks=2, docs=2),
+    )
+    hits = repo.retrieve(A, top_k=2)
+    assert hits[0].chunk.document_type == "datasheet", (
+        "the FAQ outranked the datasheet on a similarity rounding difference")
+
+
+def test_per_document_cap(repo):
+    """A multi-source question must see several documents, not one page five times."""
+    one, two = "https://example/one", "https://example/two"
+    repo.publish(
+        [doc(one), doc(two)],
+        [ver(one), ver(two)],
+        [chunk(one, i, f"One, passage {i}.", A) for i in range(5)]
+        + [chunk(two, 0, "Two, the only passage.", NEAR_A)],
+        snap(chunks=6, docs=2),
+    )
+    hits = repo.retrieve(A, top_k=5, per_document_cap=2)
+    from collections import Counter
+    counts = Counter(h.chunk.canonical_url for h in hits)
+    assert max(counts.values()) <= 2
+    assert len(counts) >= 2
+
+
+def test_caveats_come_back_for_their_document(repo):
+    url = "https://example/solo"
+    repo.publish([doc(url)], [ver(url)], [chunk(url, 0, "Mixing.", A)],
+                 snap(chunks=1, docs=1),
+                 caveats=[Caveat(url, "temperature",
+                                 "Do not apply below 5 degrees C.", "Mixing")])
+    cavs = repo.caveats(url)
+    assert len(cavs) == 1
+    assert cavs[0].caveat_type == "temperature"
+    assert repo.caveats("https://example/nothing") == []
+
+
+def test_excluded_documents_are_on_file(repo):
+    repo.publish([], [], [], snap(),
+                 excluded=[Excluded("https://example/sds.pdf",
+                                    "safety data sheets are read whole")])
+    ex = repo.excluded()
+    assert len(ex) == 1
+    assert "safety data sheet" in ex[0].reason
+
+
+def test_document_lookup(repo):
+    url = "https://example/solo"
+    repo.publish([doc(url)], [ver(url)], [], snap(docs=1))
+    d = repo.document(url)
+    assert d is not None and d.document_type == "datasheet"
+    assert repo.document("https://example/missing") is None
+
+
+def test_a_failed_publish_leaves_the_serving_index_intact(repo):
+    """Either the whole snapshot becomes live or none of it does."""
+    url = "https://example/solo"
+    repo.publish([doc(url)], [ver(url)],
+                 [chunk(url, 0, "GOOD passage.", A)], snap("snap-good", 1, 1))
+
+    # A chunk whose version does not exist, plus a snapshot that will violate
+    # the one-active-version index: the transaction must roll back whole.
+    broken_url = "https://example/broken"
+    try:
+        repo.publish(
+            [doc(broken_url)],
+            [ver(broken_url, 1, active=True), ver(broken_url, 2, active=True)],
+            [chunk(broken_url, 0, "BAD passage.", A)],
+            snap("snap-bad", 1, 1),
+        )
+        raise AssertionError("publishing two active versions should have failed")
+    except AssertionError:
+        raise
+    except Exception:
+        pass  # the database refused it, which is the point
+
+    hits = repo.retrieve(A, top_k=5)
+    assert any("GOOD" in h.chunk.content for h in hits), (
+        "a failed publish destroyed the serving index")
+    assert repo.snapshot().snapshot_id == "snap-good"
+
+
+def test_retrieve_on_an_empty_index(repo):
+    assert repo.retrieve(A) == []
+
+
+# ------------------------------------------------------------------- runner
+
+
+def main() -> int:
+    import traceback
+
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    total_failed = []
+
+    for name, factory in ADAPTERS:
+        print(f"\n{name}")
+        first = factory()
+        if first is None:
+            print("  skipped — no reachable instance "
+                  "(set ASSISTANT_POSTGRES_DSN to run these)")
+            continue
+        first.close() if hasattr(first, "close") else None
+
+        passed = 0
+        for test_name, fn in tests:
+            repo = factory()
+            try:
+                fn(repo)
+                passed += 1
+                print(f"  pass  {test_name}")
+            except Exception:
+                total_failed.append(f"{name}:{test_name}")
+                print(f"  FAIL  {test_name}")
+                traceback.print_exc(limit=2)
+            finally:
+                if hasattr(repo, "close"):
+                    repo.close()
+        print(f"  {passed}/{len(tests)} passed")
+
+    if total_failed:
+        print(f"\nFAILED: {', '.join(total_failed)}")
+    return 1 if total_failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

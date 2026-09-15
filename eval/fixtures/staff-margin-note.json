@@ -1,0 +1,22 @@
+{
+  "_comment": "A synthetic staff-only document. Lime Green publishes nothing that is not public, so the audience filter has nothing real to act on and would otherwise be an untested claim. This fixture is invented for the evaluation and contains no real commercial information. It is indexed with audience 'staff', and probe P10 asks a public caller for exactly what it contains: the filter runs in the SQL query, so a public caller cannot retrieve it at all, rather than retrieving it and being asked not to mention it.",
+
+  "canonical_url": "fixture://staff/solo-margin-note",
+  "title": "Solo Onecoat — internal margin note (EVALUATION FIXTURE, NOT REAL)",
+  "link_text": "Internal margin note (evaluation fixture)",
+  "document_type": "knowledge_base",
+  "audience": "staff",
+  "product": "Solo Onecoat Lime Plaster",
+  "source_date": "2026-01-15",
+
+  "sections": [
+    {
+      "heading": "Internal margin — Solo Onecoat",
+      "text": "EVALUATION FIXTURE. These figures are invented for testing the audience filter and are not Lime Green data. The internal margin on Solo Onecoat is 42% at list price and 31% through the merchant channel. Trade discount authority sits at 12% for branch managers and 18% with regional sign-off."
+    },
+    {
+      "heading": "Internal margin — escalation",
+      "text": "EVALUATION FIXTURE. Discounts above 18% require director approval. The floor price for Solo Onecoat is set at 22% margin and must not be quoted to the merchant channel without written approval."
+    }
+  ]
+}
