@@ -14,11 +14,12 @@ writing a shorter vector into a column sized for a longer one.
 from __future__ import annotations
 
 import json
+import os
 import time
 
 import httpx
 
-HOST = "http://127.0.0.1:11434"
+HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 
 # DEVELOPMENT DEFAULT, not a final selection. Decision 6 says the embedding
 # model is chosen by measurement on the same corpus and questions, and
@@ -26,10 +27,10 @@ HOST = "http://127.0.0.1:11434"
 # recorded in the index header, and the engine refuses to query an index built
 # with a different one — so changing it is safe, and forgetting to rebuild is
 # not silently possible.
-EMBED_MODEL = "qwen3-embedding:0.6b"
-EMBED_DIMENSIONS = 1024
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "qwen3-embedding:0.6b")
+EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "1024"))
 
-GENERATION_MODEL = "qwen3.5:4b"
+GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "qwen3.5:4b")
 
 
 class OllamaUnavailable(RuntimeError):

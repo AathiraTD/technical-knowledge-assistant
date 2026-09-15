@@ -9,11 +9,26 @@
 # Inside the network, services are reached by their names — db:5432 and
 # ollama:11434 — never localhost, which inside a container is the container.
 #
-# STATUS: written, not yet booted. Docker's daemon is not running on the build
-# machine, so this has not been verified end to end and is not claimed as
-# working. See README.
+# Index initialization completes before the UI starts. See the knowledge
+# pipeline runbook for scheduled refreshes and verification boundaries.
 
 name: lime-green-assistant
+
+x-application: &application
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  environment:
+    ASSISTANT_POSTGRES_DSN: postgresql://${POSTGRES_USER:-assistant}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-assistant}
+    OLLAMA_HOST: http://ollama:11434
+    EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+    EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-1024}
+    GENERATION_MODEL: ${GENERATION_MODEL:-qwen3.5:4b}
+    ASSISTANT_EMBEDDING_CACHE: /app/data/index/embeddings.db
+  volumes:
+    - source-data:/app/data/cache
+    - index-data:/app/data/index
+    - ../data/staff:/app/data/staff:ro
 
 services:
   db:
@@ -69,26 +84,23 @@ services:
         echo "models ready"
     restart: "no"
 
-  app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+  index-init:
+    <<: *application
+    command: ["python", "-m", "assistant.index"]
     depends_on:
       db:
         condition: service_healthy
       model-init:
         condition: service_completed_successfully
-    environment:
-      ASSISTANT_POSTGRES_DSN: postgresql://${POSTGRES_USER:-assistant}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-assistant}
-      OLLAMA_HOST: http://ollama:11434
-      ASSISTANT_PORT: "8765"
+    restart: "no"
+
+  app:
+    <<: *application
+    depends_on:
+      index-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${ASSISTANT_PORT:-8765}:8765"
-    volumes:
-      # The corpus is evidence, and evidence lives on a filesystem. Postgres
-      # holds identity, versions, chunks and vectors — not 29 MB of PDFs.
-      - ../data/cache:/app/data/cache:ro
-      - index-data:/app/data/index
     healthcheck:
       test: ["CMD-SHELL", "python -m assistant.health || exit 1"]
       interval: 15s
@@ -101,3 +113,4 @@ volumes:
   db-data:
   ollama-models:
   index-data:
+  source-data:

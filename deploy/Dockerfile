@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
+ARG PIP_INDEX_URL
 
 # libpq is what psycopg needs at runtime; the binary wheel is unavailable on
 # some platforms, so the library is installed rather than relied upon.
@@ -15,13 +16,15 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt "psycopg[binary]==3.2.3"
+RUN pip install --no-cache-dir -r requirements.txt "psycopg[binary]==3.3.3"
 
 COPY assistant/ ./assistant/
 COPY config/ ./config/
 COPY db/ ./db/
 COPY eval/ ./eval/
 COPY tests/ ./tests/
+COPY data/cache/ ./data/cache/
+COPY data/embeddings.db ./data/index/embeddings.db
 
 RUN useradd --create-home --uid 10001 assistant \
  && mkdir -p /app/data/index \
