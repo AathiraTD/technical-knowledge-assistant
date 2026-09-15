@@ -19,14 +19,17 @@ C4Container
         }
 
         Container_Boundary(data, "Retrieval data") {
-            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, audience tags, citations, caveat sentences, crawl lists, model tag, and chunking version")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
+            ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
         }
 
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
-                Container(cli, "CLI", "Python", "Question and mode in; answer, sources, refusal, and diagnostics out")
+                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
+                Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
+                Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
             }
 
             Container_Boundary(core, "Answering and evaluation") {
@@ -46,8 +49,11 @@ C4Container
     Rel_U(indexer, emb, "Embeds chunks")
     Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
     Rel_D(user, cli, "Asks a question")
-    Rel_R(cli, engine, "Question and mode")
-    Rel_L(channels, engine, "Question and mode")
+    Rel_R(cli, engine, "Question and audience set")
+    Rel_R(channels, identity, "Request with session")
+    Rel_R(identity, serving, "Audience set: public, trade, or staff")
+    Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
+    Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
     Rel_U(engine, store, "Retrieves filtered passages and citation data")
     Rel_U(engine, config, "Reads routing and policy")
@@ -71,6 +77,9 @@ C4Container
     UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
+    UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
     UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
@@ -83,7 +92,10 @@ C4Container
     UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
     UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
     UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
-    UpdateRelStyle(channels, engine, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
+    UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(engine, answercache, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-38", $offsetY="20")
     UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
     UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
     UpdateRelStyle(engine, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="-42", $offsetY="-22")

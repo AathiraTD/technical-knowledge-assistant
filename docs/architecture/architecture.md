@@ -6,9 +6,13 @@ These repository diagrams are the reference. The presentation slide carries a co
 
 ## 1. Container view
 
-Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only** (receiver, queue, staff capture, channel adapters), **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
+Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only** (receiver, queue, staff capture, channel adapters, identity, serving layer, answer cache), **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
 
-One system boundary, three groups inside it: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (one chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag), **Question-answering path** (engine, CLI, evaluation harness; channel adapters are roadmap).
+One system boundary, three groups inside it: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (one chunk store, whose manifest holds the document list, and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the store records its model tag; the answer cache is production), **Question-answering path** (engine, CLI, evaluation harness built; channel adapters, identity and the serving layer are roadmap).
+
+**Who sees what.** Every chunk carries audience tags and retrieval filters to the caller's audience set — in code, never by prompt. There are three audiences, not two: **staff** (authenticated, full corpus plus internal material), **trade** (stockists and contractors, who in production may have portal access to trade lead times, stock and kit lists), and **public** (anonymous, published material only). In the prototype the audience set is a flag the caller asserts at the CLI; in production it comes from the identity step, which is the first thing production adds.
+
+**Concurrency.** Retrieval scales trivially — a snapshot read is lock-free, so hundreds of concurrent retrievals cost nothing. Generation is the only bottleneck, one at a time per Ollama instance. Production therefore adds a serving layer (generation queue with a visible wait, per-session rate limiting) that degrades by dropping the compose path, not by dropping a check, and an answer cache in front of it.
 
 Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd)
 
@@ -34,14 +38,17 @@ C4Container
         }
 
         Container_Boundary(data, "Retrieval data") {
-            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, citations, caveat sentences, crawl lists, model tag, and chunking version")
+            ContainerDb(store, "Chunk store", "Array + manifest; production vector database", "Embeddings, chunk metadata, audience tags, citations, caveat sentences, crawl lists, model tag, and chunking version")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
+            ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
         }
 
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
-                Container(cli, "CLI", "Python", "Question and mode in; answer, sources, refusal, and diagnostics out")
+                Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
+                Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
+                Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
             }
 
             Container_Boundary(core, "Answering and evaluation") {
@@ -61,8 +68,11 @@ C4Container
     Rel_U(indexer, emb, "Embeds chunks")
     Rel_R(indexer, store, "Writes chunks, vectors, and manifest")
     Rel_D(user, cli, "Asks a question")
-    Rel_R(cli, engine, "Question and mode")
-    Rel_L(channels, engine, "Question and mode")
+    Rel_R(cli, engine, "Question and audience set")
+    Rel_R(channels, identity, "Request with session")
+    Rel_R(identity, serving, "Audience set: public, trade, or staff")
+    Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
+    Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
     Rel_U(engine, store, "Retrieves filtered passages and citation data")
     Rel_U(engine, config, "Reads routing and policy")
@@ -86,6 +96,9 @@ C4Container
     UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
+    UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
     UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
@@ -98,7 +111,10 @@ C4Container
     UpdateRelStyle(indexer, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="34", $offsetY="18")
     UpdateRelStyle(user, cli, $textColor="#7c2d12", $lineColor="#fb923c", $offsetX="30")
     UpdateRelStyle(cli, engine, $textColor="#166534", $lineColor="#4ade80", $offsetY="-20")
-    UpdateRelStyle(channels, engine, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
+    UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
+    UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(engine, answercache, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-38", $offsetY="20")
     UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
     UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
     UpdateRelStyle(engine, config, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetX="-42", $offsetY="-22")
@@ -120,13 +136,13 @@ flowchart TD
     classDef model fill:#f5f3ff,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
     classDef stop fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
 
-    IN["Question + mode (public / staff)<br/>input capped at about 500 words"]
+    IN["Question + audience set (public / trade / staff)<br/>from the identity step in production; an asserted flag at the CLI in the prototype<br/>input capped at about 500 words"]
     SPLIT["Split by topic<br/>policy patterns + slot vocabularies; each part is gated and routed on its own;<br/>a published lead time or cut-off becomes its own part and takes the retrieval path;<br/>the symptom part of a complaint takes the diagnosis path"]
     POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
-    ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tag: name, date, link"]
+    ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tags: name, date, link"]
     SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom / photograph · property asked for;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions"]
-    RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>audience-filtered by mode; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
-    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 symptom or photograph → diagnosis · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff mode: extract (compose on request is roadmap)"}
+    RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>filtered to the caller's audience set; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
+    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 symptom or photograph → diagnosis · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
     DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
     EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
     COMPOSE["Compose — the model composes with [n] markers<br/>per option when inside / outside is uncued;<br/>regulatory asks: explained from the knowledge base, never certified; building control named;<br/>document caveats appended by code, at most three"]
@@ -134,7 +150,7 @@ flowchart TD
     REFUSE["Refuse"]
     MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
     CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
-    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff mode, on refusal: nearest candidates, scores, passage text · public mode: hand-off only"]
+    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff audience, on refusal: nearest candidates, scores, passage text · public and trade: hand-off only"]
     OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
     IN --> SPLIT --> POLICY
@@ -154,10 +170,10 @@ flowchart TD
     REFUSE --> HANDOFF
     DIAG --> HANDOFF
     DEFER --> HANDOFF
-    IN -.->|"mode"| RETRIEVE
-    IN -.->|"mode"| ROUTER
-    IN -.->|"mode"| ROUTE
-    IN -.->|"mode"| HANDOFF
+    IN -.->|"audience set"| RETRIEVE
+    IN -.->|"audience set"| ROUTER
+    IN -.->|"audience set"| ROUTE
+    IN -.->|"audience set"| HANDOFF
     ROUTE --> OUT
     EXTR --> OUT
     HANDOFF --> OUT
