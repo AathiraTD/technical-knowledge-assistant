@@ -20,11 +20,11 @@ C4Container
 
     Person(user, "Customer, trade, or staff", "Asks product questions")
     System_Ext(website, "Lime Green website", "Product pages, datasheets, FAQs, articles, guides, contact, supplier, and sample pages")
-    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, failure cases, and compatibility data")
+    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, the labelled failure library, and compatibility data")
 
     Boundary(ollama, "Ollama — local model server", "external") {
         System_Ext(emb, "Embedding model", "qwen3-embedding:0.6b or nomic-embed-text; verified at build")
-        System_Ext(gen, "Generation model", "qwen3:4b-instruct or granite4.2:3b; selected by the author")
+        System_Ext(gen, "Generation model", "qwen3.5:4b — one family for text now and vision later; qwen3:4b-instruct is the fallback")
     }
 
     Container_Boundary(assistant, "Technical Knowledge Assistant") {
@@ -48,6 +48,7 @@ C4Container
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
+                Container(vision, "Vision perception", "Production only — VLM", "Reads uploaded photographs into structured observations: value, confidence, source image, region, and what cannot be determined. Never names a product")
             }
 
             Container_Boundary(core, "Answering and evaluation") {
@@ -70,6 +71,9 @@ C4Container
     Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
     Rel_R(ui, engine, "Question and audience set")
+    Rel_D(ui, vision, "Uploaded photographs")
+    Rel_R(vision, engine, "Observations fill slots; below the confidence floor the slot stays uncued")
+    Rel_D(staff, vision, "Labelled failure library, for fine-tuning")
     Rel_R(channels, identity, "Request with session")
     Rel_R(identity, serving, "Audience set: public, trade, or staff")
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
@@ -100,6 +104,7 @@ C4Container
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(vision, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
@@ -118,6 +123,9 @@ C4Container
     UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
     UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
     UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(ui, vision, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="20")
+    UpdateRelStyle(vision, engine, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-36", $offsetY="-20")
+    UpdateRelStyle(staff, vision, $textColor="#86198f", $lineColor="#e879f9", $offsetX="40")
     UpdateRelStyle(engine, answercache, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-38", $offsetY="20")
     UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
     UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
@@ -148,9 +156,9 @@ flowchart TD
     SPLIT["Split by topic<br/>policy patterns + slot vocabularies; each part is gated and routed on its own;<br/>a published lead time or cut-off becomes its own part and takes the retrieval path;<br/>the symptom part of a complaint takes the diagnosis path"]
     POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
     ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tags: name, date, link"]
-    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom / photograph · property asked for;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions"]
+    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom · cause asked · photograph · property asked for;<br/>the photograph slot adds the cannot-see-photographs line to whatever path is taken; it does not by itself route to diagnosis;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions<br/>[production] a vision model fills substrate, coatings, symptom and exposure from photographs,<br/>each with a confidence; below the floor the slot stays uncued and the flow is unchanged"]
     RETRIEVE["Retrieval<br/>embed the question (Ollama); cosine over the chunk store; top-k with a per-document cap;<br/>filtered to the caller's audience set; ranked by authority (datasheet > product page > knowledge-base article > FAQ),<br/>newest wins within a type"]
-    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 symptom or photograph → diagnosis · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
+    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 a cause or defect is asked → diagnosis (a photograph alone is not a diagnosis request) · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
     DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
     EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
     COMPOSE["Compose — the model composes with [n] markers<br/>per option when inside / outside is uncued;<br/>regulatory asks: explained from the knowledge base, never certified; building control named;<br/>document caveats appended by code, at most three"]
@@ -166,7 +174,7 @@ flowchart TD
     POLICY -->|"no match"| SLOTS --> RETRIEVE --> ROUTER
     ROUTER -->|"1 below threshold · 4 asked-for term absent"| REFUSE
     ROUTER -->|"2 top passage defers"| DEFER
-    ROUTER -->|"3 symptom or photograph"| DIAG
+    ROUTER -->|"3 a cause or defect is asked"| DIAG
     ROUTER -->|"5 substrate uncued: ask back"| HANDOFF
     ROUTER -->|"6 calculation words: coverage and pack-size passages, sum refused"| EXTR
     ROUTER -->|"7 one document and a factual ask"| EXTR
@@ -198,7 +206,77 @@ Four things to say out loud from this diagram:
 - **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose) or the part refuses with "not stated in the indexed material". A confident retrieval is not enough.
 - **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
 
-## 3. Component reference
+## 3. Multimodal roadmap — not built
+
+Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. The prototype detects a photograph, says it cannot see it, and hands over (DECISIONS 16). This is what reading them would look like, and the whole of it is roadmap.
+
+Three properties make it consistent with what is already built rather than a parallel system:
+
+- **The vision model never names a product.** Perception, interpretation and recommendation stay separate stages. Collapsing them — "I see rising damp, therefore use Product X" — fuses an uncertain visual inference to a commercial recommendation.
+- **Every observation is auditable.** Value, confidence, source image and the region within it. A bounding box is to a visual claim what a cited passage is to a textual one, which is the same discipline the six checks enforce today.
+- **It feeds the existing router.** Profile values fill slots; below the confidence floor a slot stays uncued and the load-bearing-slot rule already handles it. No new answer path, no new guardrail surface.
+
+Source: [`diagrams/multimodal-roadmap.mmd`](diagrams/multimodal-roadmap.mmd)
+
+```mermaid
+flowchart TD
+    classDef roadmap fill:#fffdf5,stroke:#fcd34d,color:#92400e,stroke-width:2px
+    classDef built fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
+    classDef gate fill:#fff8fa,stroke:#fda4af,color:#9f1239,stroke-width:2px
+    classDef human fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    classDef data fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
+    classDef person fill:#fff7ed,stroke:#fb923c,color:#7c2d12,stroke-width:2px
+
+    USER(("Customer or trade<br/>photographs · question · whatever detail they already know"))
+
+    subgraph PERCEPTION["ROADMAP — perception: what can actually be seen"]
+        direction TB
+        VLM["Vision model<br/>qwen3.5:4b or qwen3-vl:4b, fine-tuned on the failure library<br/>reads pixels; never names a product"]
+        OBS["Structured observations<br/>each carries: value · confidence · source image · region<br/>plus an explicit cannot_determine_from_image list"]
+        PROFILE["Building profile<br/>substrate · masonry type · existing finish · moisture evidence<br/>cracking · deterioration · interior or exterior<br/>every attribute with its own confidence"]
+        VLM --> OBS --> PROFILE
+    end
+
+    GATE{"Confidence gate<br/>are the load-bearing facts known?<br/>substrate and interior / exterior decide the product"}
+    ELICIT["Guided visual survey<br/>ask for one specific thing, not 'send more photos':<br/>an exposed section where the render has fallen away ·<br/>the ground line and drainage · a wider elevation ·<br/>or the two details no photograph can show"]
+
+    subgraph BUILTPIPE["BUILT — the existing pipeline, unchanged"]
+        direction TB
+        SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
+        RETR["Retrieval over the chunk store<br/>on the structured profile, not on the raw question"]
+        ENGINE["Deterministic router → extract or compose<br/>six checks before anything prints"]
+        SLOTS2 --> RETR --> ENGINE
+    end
+
+    HUMAN["Hand-off to the technical team<br/>photographs attached, observations listed with confidences<br/>diagnosis stays a human judgement, with or without vision"]
+    LIB[("Labelled failure library<br/>built by logging these photographs<br/>against what the advisor answered")]
+
+    OUT["Reply<br/>recommendation with numbered citations ·<br/>stated assumptions and their confidence ·<br/>what could not be determined from the images ·<br/>the next photograph or detail needed"]
+
+    USER -->|"photographs"| VLM
+    PROFILE --> GATE
+    GATE -->|"insufficient evidence"| ELICIT
+    ELICIT -.->|"one more photograph, or an answer"| USER
+    GATE -->|"load-bearing facts known"| SLOTS2
+    GATE -->|"defect or cause asked"| HUMAN
+    ENGINE --> OUT
+    HUMAN -.->|"the advisor's answer, logged"| LIB
+    LIB -.->|"fine-tuning, once enough pairs exist"| VLM
+
+    class USER person
+    class VLM,OBS,PROFILE,ELICIT roadmap
+    class SLOTS2,RETR,ENGINE,OUT built
+    class GATE gate
+    class HUMAN human
+    class LIB data
+
+    style PERCEPTION fill:#fffbeb,stroke:#d97706,stroke-width:3px,stroke-dasharray:6 4
+    style BUILTPIPE fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
+```
+
+Two things on this diagram matter more than the models. **Diagnosis still hands off to a human**, with or without vision — the reason is liability, not capability, so seeing the photograph does not license acting on it. And the **hand-off is the data-collection mechanism**: logging these photographs against what the advisor answered is what builds the labelled failure library, which is what eventually makes fine-tuning possible. The model is the easy part; the dataset is the partnership.
+
+## 4. Component reference
 
 Built = in the submission. Roadmap = drawn and argued, not built. The reason each exists is in [`DECISIONS.md`](../DECISIONS.md).
 
@@ -206,7 +284,7 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 |---|---|---|
 | **Lime Green website** | External | The only content source in scope: 94 technical units, inventoried below |
 | **Embedding model** (Ollama) | External | Turns chunks and questions into vectors; qwen3-embedding:0.6b or nomic-embed-text, verified at build |
-| **Generation model** (Ollama) | External | Composes over retrieved passages on the Compose path only; qwen3:4b-instruct, granite4.2:3b if it emits reasoning blocks |
+| **Generation model** (Ollama) | External | Composes over retrieved passages on the Compose path only; qwen3.5:4b, with qwen3:4b-instruct as the fallback |
 | **Staff-knowledge capture** | Roadmap | Agreed answer set, failure library and compatibility matrix as text; the policy list goes to the authored configuration |
 | **Indexer** | Built, run once by hand | Crawl by sitemap → cache → extract (PyMuPDF for PDFs) → classify by link text → strip boilerplate and hazard blocks → chunk by heading, bullets and labelled sub-paragraphs kept whole → tag each document's caveat sentences → embed → write the index, the product, colour and merchant name lists, and the ingestion report → atomic swap |
 | **Content cache** | Built, shipped | Raw pages and PDFs on disk, so the assessors run it offline without repeating the crawl |
@@ -222,6 +300,7 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
 | **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
 | **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |
+| **Vision perception** | Roadmap | Reads uploaded photographs into structured observations — value, confidence, source image, region, and an explicit list of what cannot be determined. Fills slots on the existing router; never names a product. See DECISIONS 16.1 |
 
 ## Appendix: live site inventory (the record's decision 0, confirmed 15 September 2026)
 

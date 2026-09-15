@@ -14,7 +14,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 4 | Framework | Hand-rolled retrieval, about 150 lines. No LangChain, no LlamaIndex, no agent loop |
 | 5 | Chunking | Structure-aware: split at headings, keep bullets whole, tag caveats at document level |
 | 6 | Embedding model | Open: decided by measurement before the build finishes |
-| 7 | Generation model | qwen3:4b-instruct, granite4.2:3b if it emits reasoning blocks |
+| 7 | Generation model | qwen3.5:4b — one family for text now and vision later; qwen3:4b-instruct is the fallback |
 | 8 | Router order | Retrieval-shape steps first: threshold, then a published deferral, then the slot-driven branches |
 | 9 | Relevance gate | The asked-for term, or a synonym, must appear in a cited passage — or refuse |
 | 10 | Load-bearing slots | Substrate and inside/outside: cued means used, uncued means per-option or ask back |
@@ -23,6 +23,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 13 | Second source | Staff-knowledge capture justifies the queue; CRM is a channel, not a corpus |
 | 14 | Caching | Production only, keyed on template, slots, audience and index version |
 | 15 | Interface | CLI canonical; a thin Streamlit UI over the same library |
+| 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
 
 ---
 
@@ -92,21 +93,100 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 **Alternatives.** qwen3-embedding:0.6b; nomic-embed-text.
 
-**Why this one.** Not yet chosen, and it should not be chosen by argument. Criteria: retrieval quality on five questions with known answers; index build time over roughly 700 chunks; memory with the generation model also loaded; vector dimension, which sets the array size.
+**Why this one.** Not yet chosen, and it should not be chosen by argument. Criteria: retrieval quality on five questions with known answers; index build time over roughly 700 chunks; memory with the generation model also loaded; vector dimension, which sets the array size; and input window against chunk size — `nomic-embed-text` has a 2K-token window, and while the largest observed section (Solo's application bullets, about 2,000 characters) fits comfortably, heading-based chunks are variable by nature and a silent truncation would degrade retrieval invisibly.
+
+**Tags verified against the Ollama library, 15 September 2026.** `qwen3-embedding:0.6b` (639 MB) and `nomic-embed-text` (274 MB, default is v1.5) both exist.
 
 **Where it breaks.** Either way, the model tag goes into the index header and the engine refuses to run against a mismatch — an index built with one model and queried with another returns confident nonsense.
 
-## 7. Generation model: qwen3:4b-instruct
+## 7. Generation model: qwen3.5:4b
 
-**Why it exists.** The brief mandates a local model, and the hardware — a processor, 24 GB, no graphics card — bounds its size.
+**Why it exists.** The brief mandates a local model. The hardware — a processor, 24 GB, no graphics card — bounds its size. And the model does exactly one job in this design: compose an answer over five retrieved passages, on the Compose path only.
 
-**Alternatives.** gemma3:4b; qwen3:8b or granite4.2:8b; llama3.2; the thinking variants of Qwen 3; granite4.2:3b.
+### 7.1 The rubric
 
-**Why this one.** Apache 2.0, so commercial deployment is unencumbered — gemma3:4b is strong at this size but carries bespoke terms, and this partnership leads to deployment. Instruct-only, so there are no reasoning blocks to strip; the thinking variants double the output on a processor. 2.5 GB, the smallest download that follows quoting and refusal instructions reliably. The 8B models take thirty to sixty seconds per answer on a CPU — useful only as a transcript comparison to show what size buys. llama3.2 is older and weaker at this size.
+Two parts. Gates are pass or fail, assessed from published facts; a candidate failing any gate is not assessed further. Capability criteria are scored, and every one is measured on our own evaluation harness rather than taken from a leaderboard — general benchmarks (reasoning, maths, coding, multilingual, agentic tool use) measure almost nothing this design consumes.
 
-**Prove it.** Warm latency on a five-passage compose, measured on the build machine; that number decides whether the demonstration is live or read from the transcript.
+**Gates**
 
-**Where it breaks.** A four-billion-parameter model is weakest exactly where this design leans on it — qualitative synthesis, suitability and compatibility. That is why the guardrails carry the risk rather than the model, and why Extract does not use it. Granite is a design-time fallback chosen by the author if the instruct build emits reasoning blocks, never a runtime switch: a missing model fails loudly by name.
+| # | Gate | Why it is a gate, not a score |
+|---|---|---|
+| G1 | Licence permits commercial deployment | The partnership leads to deployment; bespoke terms are a legal question, not a trade-off |
+| G2 | Runs usefully on a processor with no graphics card | A model taking a minute per answer cannot be demonstrated in seven |
+| G3 | Published under a stable tag | An assessor pulls it from a clean clone; a preview cannot be a dependency |
+| G4 | Can be made deterministic — fixed tag, temperature zero, fixed seed | The reproducibility target is an identical transcript on a second run |
+| G5 | No mandatory reasoning tokens | Output tokens are the whole latency budget on a processor; thinking must be absent or switchable off |
+
+**Two kinds of reasoning, and only one of them is wanted.** This design needs the model to reason *over supplied passages* — recognise that a passage about solid masonry covers a 1930s solid brick wall, join a base coat to a compatible finish coat because a passage links them, pick the right curing figure when a section lists two finish coats with different waits. That is bounded, grounded reasoning and it is the entire Compose job.
+
+What it must not do is reason *from its own knowledge*. An inference like "Ultra is probably fine on cob" is the design's named weakest point, and check 1 exists to kill it: every sentence must carry word overlap with a cited passage, so a conclusion the passages do not support cannot print. Most of the reasoning a question needs has already been moved out of the model and into code — which path to take, which passages are relevant, whether to refuse, whether to answer per option, and arithmetic, which the model never performs.
+
+This is the real reason thinking variants are gated out at G5, stronger than the latency argument: a chain of thought is an invitation to reason past the evidence, and here that is a defect rather than a feature.
+
+**Capability criteria**, weighted by what each failure costs. Note the consequence peculiar to this architecture: the six checks are deterministic and run before printing, so a weaker model does not produce wrong answers here — it produces refusals. Capability shows up as **coverage**, and the weights follow the checks.
+
+| # | Criterion | Weight | How it is measured |
+|---|---|---|---|
+| C1 | Citation-marker discipline — one marker per sentence, only for supplied passages | 20 | Check 1 pass rate across the seven situations |
+| C2 | Verbatim fidelity — figures and qualifiers copied, not paraphrased | 20 | Checks 2 and 4 pass rate; the qualifier probes |
+| C3 | **Grounded reasoning** — joins two or more passages into a correct combination, without inventing the link and without reaching past the text | 20 | The two multi-source situations: does the answer actually combine the documents, or quote them side by side? Does the joining sentence itself carry a citation? Read by the technical team |
+| C4 | Refusal compliance — refuses on instruction instead of helping | 15 | Refusal state on the near-miss and far-miss |
+| C5 | Latency and length — warm five-passage compose, about 200 tokens | 15 | Timed on the build machine; word counts in the probes. Decides live demonstration versus transcript |
+| C6 | Attribution discipline — no blending across products or versions | 10 | Checks 3 and 5 pass rate; the two-product probe |
+| — | Over-refusal rate on answerable questions | tie-break | A model that trips checks constantly yields a system that refuses everything |
+
+### 7.2 Gate assessment
+
+| Candidate | G1 Licence | G2 CPU | G3 Stable | G4 Deterministic | G5 No forced thinking | Result |
+|---|---|---|---|---|---|---|
+| `qwen3.5:4b` (3.4 GB) | **Not stated — check at pull** | 4B | yes | yes | **No instruct-only variant published; default not stated** | **Chosen, with two rows to verify** |
+| `qwen3:4b-instruct` (2.5 GB) | Apache 2.0 | 4B | yes | yes | Instruct-only build | **Fallback — passes all five cleanly** |
+| `granite4.2:3b` (2.2 GB) | Apache 2.0 | 3B | yes | yes | On by default, `enable_thinking=false` | **Assess** |
+| `qwen3.8:27b` (18 GB) | Not stated | **27B — two to four minutes per answer on this hardware; 18 GB against 24 GB RAM** | yes | yes | On by default, disableable | **Out at G2** |
+| `qwen3.8-flash-next` (105 GB+) | Not stated | **Impossible** | **Experimental preview of the Qwen4 architecture** | yes | — | **Out at G2 and G3** |
+| `gemma4:e2b` / `e4b` (7.2 / 9.6 GB) | **Gemma terms** | Borderline | yes | yes | Configurable | **Out at G1** |
+| `gemma3:4b` (3.3 GB) | **Gemma terms** | yes | yes | yes | yes | **Out at G1** |
+| `llama3.2` | **Llama community terms** | yes | yes | yes | yes | **Out at G1** |
+| `qwen3:8b`, `granite4.2:8b` | Apache 2.0 | **30–60 s per answer** | yes | yes | yes | **Out at G2** |
+| `glm-5.3-flash` (18B active), `lfm2.5` (8B), `minicpm-v4.5` (8B) | Varies | **Too large** | yes | yes | Varies | **Out at G2** |
+| `qwen3.8-flash-next` | Varies | yes | **Experimental preview** | yes | Varies | **Out at G3** |
+| Qwen 3 thinking variants | Apache 2.0 | yes | yes | yes | **Thinking is the build** | **Out at G5** |
+
+Two survive. **Gemma 4 does not lose on capability — it never reaches the capability assessment**, because licence is a gate and this work leads to deployment. That is the honest answer to "why not Gemma 4": had it been Apache-licensed it would have been assessed, and its multimodality and reasoning-first design would then have counted against it on cost-per-capability-consumed rather than on quality.
+
+### 7.3 Capability assessment of the survivors
+
+Evidence status is marked, because most of this is not yet measured and pretending otherwise would repeat the error of quoting a leaderboard.
+
+| # | Criterion | Wt | `qwen3.5:4b` (chosen) | `qwen3:4b-instruct` (fallback) | `granite4.2:3b` | Evidence |
+|---|---|---|---|---|---|---|
+| C1 | Citation markers | 20 | Expected strong; newest of the three | Expected strong | Expected strong — IBM names structured JSON output | **To measure** |
+| C2 | Verbatim fidelity | 20 | Unknown | Unknown | Unknown | **To measure** — the likely discriminator; no card claims it |
+| C3 | Grounded reasoning | 20 | 4B, and the newest training run of the three | 4B | 3B, but IBM names retrieval-augmented generation explicitly | Architectural prior; **to measure** |
+| C4 | Refusal compliance | 15 | Unknown | Unknown | Unknown | **To measure** |
+| C5 | Latency and length | 15 | 3.4 GB — carries a vision encoder it will not use on the text path | 2.5 GB — lightest | 2.2 GB — lightest of all | **To measure** |
+| C6 | Attribution | 10 | Unknown | Unknown | Unknown | **To measure** |
+| — | Operational simplicity | — | No instruct-only build; thinking default unknown | No thinking path exists at all | One documented flag to set | Published fact |
+| — | Roadmap fit | — | **Same family serves the multimodal path (16.1)** | Text only | Text only | Published fact |
+
+**Reading it honestly**: C2, C4 and C6 — 45 of the 100 points — are unknown for all three, and no model card claims them, because verbatim copying and refusal-on-command are not what vendors benchmark. C5 favours the two smaller models. The rubric does not resolve on paper.
+
+### 7.4 Decision
+
+**`qwen3.5:4b` (3.4 GB), with `qwen3:4b-instruct` as the fallback and `granite4.2:3b` measured alongside.**
+
+The deciding argument is not a capability row — those are unmeasured for all three — but roadmap fit: `qwen3.5` is multimodal, so **one model family serves the text assistant now and the vision perception step in 16.1 later**. That is a real architectural economy and a coherent thing to say in the room, rather than swapping families at phase three.
+
+Two gate rows are unverified and must be checked when the model is pulled, not assumed:
+
+| To verify at pull time | If it fails |
+|---|---|
+| **Licence** — not stated on the library page. Qwen 3 is Apache 2.0, so 3.5 probably is, but "probably" is not a licence | Fall back to `qwen3:4b-instruct`, which is confirmed Apache 2.0 |
+| **Thinking default** — no instruct-only variant is published and the default is undocumented. `qwen3.8` has it on by default and disableable per request, so 3.5 likely does too | Disable it per request; if it cannot be disabled, fall back |
+
+`qwen3:4b-instruct` is the fallback precisely because it passes all five gates cleanly and has no reasoning path to switch off — the safe option if either check goes the wrong way. All three are under 3.5 GB, so pull them together and let the harness print the rubric as a table. The model carrying more answerable questions through the six checks wins, and swapping is one configuration value recorded in the index header.
+
+**Where it breaks.** A four-billion-parameter model is weakest exactly where this design leans on it — suitability and compatibility claims in prose — which is why the guardrails carry that risk rather than the model, and why Extract does not use it at all. `qwen3.5:4b` also carries a vision encoder the text path never touches, which is roughly a gigabyte of download and memory bought for the roadmap rather than for the submission: a deliberate trade, not an oversight. If both candidates score poorly on C2 or C3, the design absorbs it by refusing more often, and the honest thing on slide 3 is the over-refusal number, not a claim about the model.
 
 ## 8. Router order: retrieval shape before slots
 
@@ -126,6 +206,8 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 **Why this one.** A lexical gate is cheap, deterministic and explainable: the property or substrate asked for, or a synonym from the vocabulary, must appear in the cited passage, or the part refuses with "not stated in the indexed material". It runs as a router step on Extract and as check 6 on Compose, so both printing paths are covered. A second model call doubles latency on a CPU and is itself unverifiable.
 
+**Depends on.** The unanswerable evaluation questions must be verified absent before they are fixed: grep the built corpus for the property, its synonyms and its units (vapour permeability, µ value, thermal conductivity, lambda, W/mK). If the property turns out to be published under another name, the assistant answers it correctly and the evaluation scores that as a failure, in front of the panel.
+
 **Where it breaks.** It is lexical. A passage that names the property without answering it passes the gate — and what then prints is what the sheet actually says ("high breathability", no figure), which is the honest result rather than a hallucination. The property vocabulary is seeded from the datasheets' own field names at ingestion plus hand-written synonyms; an unknown property falls through to the threshold and citation checks.
 
 ## 10. Load-bearing slots
@@ -136,7 +218,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 **Why this one.** Two slots are load-bearing — substrate, and inside versus outside. Cued in the question, the value is used and stated. Uncued: inside/outside is answered per option, because the datasheets split that way anyway and both answers fit in the same five passages; substrate triggers an ask-back through the hand-off renderer, carrying what is published about choosing by substrate. Everything else remains a stated assumption, so the terse trade question still gets numbers.
 
-**Where it breaks.** An ask-back in a single-turn tool means the user asks again; that is a real cost of not carrying conversation state.
+**Where it breaks.** An ask-back in a single-turn tool means the user asks again; that is a real cost of not carrying conversation state. Two globally privileged slots is also a simplification: the facts a recommendation actually requires vary by intent, and the general form is required, conditional and blocking facts per intent. That generalisation is deferred, not rejected — the two chosen slots are the ones that matter for the selection questions the Ask stage found most common.
 
 ## 11. Caveats as document metadata
 
@@ -166,6 +248,17 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | Section path | heading trail | Citation granularity |
 | Caveat flags | temperature limits, DIY suitability, incompatible substrates | Appended by code whenever the document is used |
 | Exclusion list | excluded documents by name and link | Answering "why isn't the safety sheet in here?" |
+
+**Derived at ingestion, not authored.** Four artefacts are harvested from the crawl and written into the manifest, because typing them by hand would be inventing them:
+
+| Artefact | Source | What depends on it |
+|---|---|---|
+| Product name list | Crawled product pages | Check 5, real names only |
+| Colour name list | The repeated colour block on product pages — **harvested before boilerplate stripping removes it** | Check 5, and the invented-colour probe |
+| Merchant list | The find-a-supplier page (about 25 named stockists) | Check 5, and never inventing a merchant |
+| Contact line and hours | The contact page, verbatim | Every refusal and hand-off |
+
+The tagging rule in the prototype is trivial but still explicit: everything crawled from the public website is tagged `public`; nothing is tagged `trade` or `staff`, because no such material is published. The one staff-tagged document is the synthetic fixture created for the evaluation set.
 
 **Where it breaks.** Every document in the prototype corpus is public, so the filter is exercised only by a synthetic staff-tagged fixture in the evaluation set. The audience set is asserted at the command line, not authenticated — identity is the first thing production adds. Production also adds a sensitivity axis, because formulations and quality records are staff-only and belong in a separate store.
 
@@ -199,12 +292,92 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 **Where it breaks.** One more dependency that has to install cleanly from a clean clone. The UI is single-user and single-turn like everything else. If it misbehaves on the assessors' machine, the command line and the transcript still stand.
 
+## 16. Images: handled by policy, not by capability
+
+**Why it exists.** Photographs arrive in eight of the fifteen external situation archetypes — the damp bedroom wall, the crazed hallway, the patchy gable. It is the most common thing a customer attaches, and the job description names multimodal guardrails for text and images as a partnership activity. The absence of vision therefore has to be a decision, not an oversight.
+
+**Alternatives.** A multimodal generation model reading the user's photograph (`gemma4:e2b`/`e4b`, `minicpm-v4.5`). A separate vision model behind the diagnosis path. Text only, with images detected and handed off.
+
+**Why this one.** Four reasons, heaviest first.
+
+1. *Vision would not change the answer.* Rung 4 of the ask ladder — diagnosis from the user's own evidence — is refuse-and-hand-off **by policy**, because judging a wall is a liability decision the technical team makes and stands behind. The register forbids diagnosing from symptoms or photographs, judging workmanship, and promising an outcome. A model that could see the photograph would still be forbidden from acting on what it saw.
+2. *There is nothing to ground it against.* The corpus is published text. The failure library — labelled photographs of crazing, bloom and debonding with causes and remedies — is recorded in the data inventory as not existing. Vision would be reading the question, not the corpus, so a visual judgement could not be traced to a cited passage. Every other answer in this system can be.
+3. *It could not be evaluated.* With no labelled failure photographs there is no way to measure whether a reading was right. Shipping an unevaluated capability contradicts the rest of the design, where the threshold, the checks and the refusals are all measured.
+4. *A confident wrong visual diagnosis is the worst failure available here.* "That is efflorescence, it will wash off" over a photograph of sulphate attack ends in a damaged building. The thesis is that a refusal is cheaper than a wrong answer, and nowhere is that truer than on a photograph.
+
+**What is built instead.** Images are handled as a detected condition with a designed response: the photograph slot fires on any mention of one, the router takes the diagnosis path, and the hand-off renderer states plainly that the assistant cannot see photographs, quotes what the published material does say about that symptom, and asks for the two details that matter. Detected, declared, handed off.
+
+**Consequence for decision 7.** Because vision is out of scope by policy rather than by inability, a multimodal model is not a capability advantage here — it is weight, download and load time for something the design refuses to use. That is precisely what makes Gemma 4's multimodality a cost rather than a benefit in the gate assessment, and the reasoning only holds because this decision is made explicitly.
+
+### 16.1 The roadmap architecture, if and when images are read
+
+Three stages, strictly separated, with one rule that makes the whole thing safe: **the vision model never names a product.**
+
+```
+perception            interpretation          recommendation
+what can I see?  →    what does that     →    what should we advise,
+                      imply about             from the published
+                      the building?           corpus?
+```
+
+Collapsing those stages is the failure mode. "I see rising damp, therefore use Product X" fuses an uncertain visual inference with a commercial recommendation and produces confident nonsense with liability attached.
+
+**The observation contract.** The vision model returns structured observations, never prose and never an answer. Every attribute carries a value, a confidence, the image it came from and the region within it:
+
+```json
+{
+  "observation": "white crystalline deposits near wall base",
+  "confidence": 0.91,
+  "image": "IMG_002",
+  "region": [0.12, 0.67, 0.81, 0.94],
+  "possible_interpretations": [
+    { "cause": "salt deposition", "confidence": 0.63 }
+  ]
+}
+```
+
+together with a required `cannot_determine_from_image` list — existing plaster composition, moisture source, wall construction depth, substrate suction, structural movement. Forcing the model to enumerate what it *cannot* tell is the visual equivalent of refusing: it is the same discipline as declaring that something is not stated in the indexed material.
+
+**Why this fits what is already built.** The region is to a visual claim what a cited passage is to a textual one — it makes the claim auditable, so a technical advisor can see exactly which pixels produced the observation. That is the same property the six checks enforce on text: nothing prints that cannot be traced. And a confidence below the floor simply leaves the slot uncued, which the load-bearing-slot rule already handles by asking back. The vision path therefore adds **no new answer route**; it fills slots on the router that exists.
+
+**The guided visual survey.** One photograph rarely carries the recommendation-critical facts — a rendered wall hides its own substrate — so the assistant asks for more: a wider shot, an exposed section where the render has fallen away, the ground line and drainage. That turns image upload into a remote visual survey rather than a chatbot with an attachment, and it is the honest interaction, because it is what an advisor does on the phone today. It depends on carrying the situation across turns, which is already on the roadmap for the same reason.
+
+**Retrieval from a building profile, not from the question.** Retrieval would run on the structured profile — external replastering; old brick masonry; traditional solid construction; failing render; possible salts; breathability required; moisture source unknown — rather than on the embedded sentence "what plaster should I use?". Slot-driven retrieval already works this way for text; images simply fill more slots, and fill them better than a typed description does.
+
+**Candidates, verified on the Ollama library, with the hardware caveat.**
+
+| Model | Size | Note |
+|---|---|---|
+| `qwen3-vl:2b` | 1.9 GB | Smallest viable; the realistic processor-only option |
+| `qwen3-vl:4b` | 3.3 GB | Likely the balance point |
+| `qwen3-vl:8b` | 6.1 GB | Strongest of the family; needs a graphics card in practice |
+| `qwen3.5:2b` / `:4b` | 2.7 / 3.4 GB | Multimodal, 256K context, same lineage |
+| `minicpm-v4.6` | 1B | Built for on-device inference |
+| `gemma4:e4b`, `medgemma` | 9.6 GB / 4B | Gemma licence applies; `medgemma` is the precedent — a general family specialised to one visual domain |
+
+The caveat the prototype hardware imposes: vision encoders are compute-heavy, and an 8B vision-language model on a processor with no graphics card is not a demonstration, it is a wait. This architecture assumes the graphics card or hosted inference that production adds, which is consistent with it being roadmap rather than build.
+
+**Refinements to fold in when this is built.** Raised in review, correct, and deliberately not built now because none of it ships on Thursday:
+
+| Refinement | Why it matters |
+|---|---|
+| **A profile resolver between observations and the profile** | Three photographs may disagree — brick 0.82, stone 0.61, brick 0.91. The later image must not simply overwrite the earlier. Aggregate with provenance and mark attributes `CONFIRMED`, `UNCERTAIN`, `CONFLICTING` or `NOT_DETERMINABLE` |
+| **Treat model confidence as a routing band, not a probability** | A vision model reporting 0.91 is not correct 91 per cent of the time. Use `HIGH` / `UNCERTAIN` / `NOT_DETERMINABLE` at first, then set real thresholds from labelled examples with the threshold sweep the harness already does. That is what makes a claim like "at threshold X, substrate identification reached Y precision, so only observations above it may fill a recommendation-critical slot" defensible |
+| **Required facts per intent, not two privileged slots** | "Substrate and interior or exterior" is right for replastering and wrong in general. Model it as required, conditional and blocking facts per intent, using the slot vocabulary that already exists |
+| **Failure library schema** | Store image, model prediction, **expert-corrected label**, error type and visibility — not the photograph paired with the advisor's prose answer. Otherwise the model is trained on its own mistakes. Use it for **evaluation and calibration first**; fine-tune only if the measurements show it is needed |
+| **Structured outputs for the observation contract** | Ollama supports constraining a response to a JSON schema. Use it rather than parsing prose from the vision model |
+
+**The prerequisite has not changed.** None of these models diagnoses lime render off the shelf — a general vision-language model has no idea what crazing looks like against sulphate attack on a lime surface. The accuracy comes from fine-tuning on the labelled failure library, and that library is built by logging the photographs the hand-off already collects, paired with what the advisor answered. The model is the easy part; the data is the partnership.
+
+**Where it breaks.** The customer still has a photograph and still wants an answer, so the hand-off has to be good — which is why the refusal carries the published causes and the contact line rather than a bare referral. This is also the decision most likely to be revisited first: it is the strongest demand-side case for the partnership's multimodal guardrails strand, and 16.1 sets out the architecture. The prerequisite is not a model, though — it is a labelled failure library, built with the technical team as annotators, which is exactly the knowledge capture the partnership exists to do.
+
 ---
 
 ## Known weaknesses
 
+- **Compatibility is enforced by citation, not by a rules gate.** Nothing deterministic decides which products are eligible for a substrate before retrieval runs; the assistant can only say what a cited passage says, which prevents invention but does not actively exclude an incompatible product. The proper mechanism is an eligibility stage — substrate and exposure in, candidate products out, retrieval restricted to those — and it needs the product-to-substrate compatibility matrix, which the data inventory records as existing nowhere on the site, scattered across datasheets and advisors' heads. Building that matrix is partnership work; the eligibility gate follows it.
 - **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
-- **Single turn.** Real enquiries run six turns with photographs; the prototype answers turn one, says it cannot see photographs, and an uncued substrate becomes an ask-back the user answers by asking again.
+- **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
 - **The audience set is asserted, not authenticated.** The filter is real and enforced in code at retrieval; the identity behind the claim is missing.
 - **One user at a time.** No queue, no rate limit, no cache: the concurrency story is drawn and argued, not built.
 - **Staff mode always extracts.** Staff compose on request, and the staff drafting mode, are roadmap — the advisor verifies from the passage text, and time is the constraint.
@@ -217,9 +390,9 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | Embedding model | Building the index with each and comparing five known-answer questions | Slice 1 |
 | Generation latency, and so live demo versus transcript | Warm timing of a five-passage compose | Slice 1 |
 | Abstention threshold value | The sweep, printed at the chosen value and at plus and minus 0.1 | Evaluation |
-| HTML extraction library | One test across a product page, the FAQ and an article, judged on boilerplate removal | Slice 1 |
+| ~~HTML extraction library~~ | **Closed: BeautifulSoup + lxml.** The pipeline needs the DOM regardless — link-text classification and name-list harvesting both require it, and trafilatura's automatic main-content extraction would discard the colour block that must be harvested before stripping | Decided |
 
-Four decisions of no consequence — the Ollama client (raw HTTP, to avoid a dependency wrapping two endpoints), argument parsing (`argparse`), the configuration format (JSON) and dependency pinning (a pinned `requirements.txt`) — are recorded only so nobody assumes they were overlooked.
+Five decisions of no consequence — the Ollama client (raw HTTP, to avoid a dependency wrapping two endpoints), argument parsing (`argparse`), the configuration format (JSON), dependency pinning (a pinned `requirements.txt`) and **no headless browser** (the site is server-rendered: plain fetches return the sitemap, full FAQ text, document links and the stockist list, so Playwright would add a browser download and an install step for nothing) — are recorded only so nobody assumes they were overlooked.
 
 ## Quick answers
 
@@ -230,4 +403,5 @@ Four decisions of no consequence — the Ollama client (raw HTTP, to avoid a dep
 - *How do you catch the near-miss?* — Decision 9: the asked-for property, or a synonym, must appear in the cited passage, or it refuses. A confident retrieval is not enough.
 - *How would this handle hundreds of concurrent users?* — Decision 14 and the serving layer: retrieval is lock-free, generation is the bottleneck, so a queue, a rate limit and a cache go in front of it, and under load only extract, route and refuse are served. Safety never degrades; coverage does.
 - *How do you keep staff-only material out of public answers?* — Decision 12: audience tags filtered at retrieval in code, never by prompt; in production the audience set comes from an authenticated session.
+- *Why can't it read the photograph the customer attached?* — Decision 16: it could be made to see one, but it would still be forbidden to act on it. Diagnosing a wall is the technical team's call, there is no labelled failure library to ground or evaluate a reading against, and a confident wrong visual diagnosis is the worst failure this system could produce. It says it cannot see the image, quotes what the sheets do say about the symptom, and hands over.
 - *Where do the numbers come from?* — Only from a cited passage, word for word. Units are normalised for the comparison, never for the display. A figure not found in a retrieved passage does not print.

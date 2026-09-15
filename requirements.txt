@@ -1,7 +1,21 @@
-# Pinned from the build environment once slice 1 lands (see DECISIONS.md, "Still open").
-# Deliberately small: every dependency here is one the design argued for.
+# Six dependencies. Each one is argued for in DECISIONS.md; nothing here is habitual.
+# Versions are pinned from the build environment once slice 1 lands — see "Still open".
 
-httpx            # crawling, and the Ollama HTTP API — no client library for two endpoints
-pymupdf          # the only PDF extractor that returned a clean text layer in the probe
-numpy            # the chunk store: cosine over one array
-streamlit        # the web UI; the CLI has no framework dependency
+# Crawling, and the Ollama HTTP API. No Ollama client library: it would wrap two endpoints.
+httpx
+
+# HTML parsing. Chosen over trafilatura because the pipeline needs the DOM anyway —
+# documents are classified by link text (never by filename), and the product, colour and
+# merchant name lists are harvested before boilerplate stripping removes them.
+beautifulsoup4
+lxml
+
+# PDF text extraction. The only extractor that returned a clean text layer in the
+# decision-0 probe; WebFetch could not read these files at all.
+pymupdf
+
+# The chunk store: cosine similarity over one array. No vector database at this scale.
+numpy
+
+# The web UI. The CLI stays canonical and carries no framework dependency.
+streamlit

@@ -20,6 +20,7 @@ Design complete and evidenced against the live site. The build is in progress; *
 | Answer engine | Not started |
 | Evaluation harness | Not started |
 | Web UI | Not started |
+| Environment | Ollama not yet installed on the build machine |
 
 ## Read this first
 
@@ -33,12 +34,12 @@ Design complete and evidenced against the live site. The build is in progress; *
 ## Requirements
 
 - Python 3.11 or later
-- [Ollama](https://ollama.com) running locally, with two models pulled:
+- [Ollama](https://ollama.com/download) installed and running locally, with two models pulled:
   ```
-  ollama pull qwen3:4b-instruct
-  ollama pull qwen3-embedding:0.6b
+  ollama pull qwen3.5:4b            # 3.4 GB — generation, 256K context
+  ollama pull qwen3-embedding:0.6b  # 639 MB — embeddings
   ```
-  The exact tags are fixed in `config/` and the index refuses to run against a mismatch.
+  About 4 GB in total; allow time on a slow connection. `qwen3:4b-instruct` (2.5 GB) is the documented fallback if `qwen3.5` turns out to emit reasoning blocks — see `DECISIONS.md` entry 7. Tags were verified against the Ollama library on 15 September 2026. They are fixed in `config/`, recorded in the index header, and the engine refuses to run against a mismatch rather than returning confident nonsense.
 
 ## Running it
 

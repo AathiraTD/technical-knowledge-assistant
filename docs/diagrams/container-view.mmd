@@ -3,11 +3,11 @@ C4Container
 
     Person(user, "Customer, trade, or staff", "Asks product questions")
     System_Ext(website, "Lime Green website", "Product pages, datasheets, FAQs, articles, guides, contact, supplier, and sample pages")
-    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, failure cases, and compatibility data")
+    System_Ext(staff, "Staff-knowledge capture", "Production source for approved answers, the labelled failure library, and compatibility data")
 
     Boundary(ollama, "Ollama — local model server", "external") {
         System_Ext(emb, "Embedding model", "qwen3-embedding:0.6b or nomic-embed-text; verified at build")
-        System_Ext(gen, "Generation model", "qwen3:4b-instruct or granite4.2:3b; selected by the author")
+        System_Ext(gen, "Generation model", "qwen3.5:4b — one family for text now and vision later; qwen3:4b-instruct is the fallback")
     }
 
     Container_Boundary(assistant, "Technical Knowledge Assistant") {
@@ -31,6 +31,7 @@ C4Container
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
+                Container(vision, "Vision perception", "Production only — VLM", "Reads uploaded photographs into structured observations: value, confidence, source image, region, and what cannot be determined. Never names a product")
             }
 
             Container_Boundary(core, "Answering and evaluation") {
@@ -53,6 +54,9 @@ C4Container
     Rel_D(user, ui, "Asks a question")
     Rel_R(cli, engine, "Question and audience set")
     Rel_R(ui, engine, "Question and audience set")
+    Rel_D(ui, vision, "Uploaded photographs")
+    Rel_R(vision, engine, "Observations fill slots; below the confidence floor the slot stays uncued")
+    Rel_D(staff, vision, "Labelled failure library, for fine-tuning")
     Rel_R(channels, identity, "Request with session")
     Rel_R(identity, serving, "Audience set: public, trade, or staff")
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
@@ -83,6 +87,7 @@ C4Container
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(vision, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
@@ -101,6 +106,9 @@ C4Container
     UpdateRelStyle(channels, identity, $textColor="#86198f", $lineColor="#f0abfc", $offsetY="-20")
     UpdateRelStyle(identity, serving, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="-20")
     UpdateRelStyle(serving, engine, $textColor="#9f1239", $lineColor="#fda4af", $offsetY="20")
+    UpdateRelStyle(ui, vision, $textColor="#92400e", $lineColor="#fcd34d", $offsetY="20")
+    UpdateRelStyle(vision, engine, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-36", $offsetY="-20")
+    UpdateRelStyle(staff, vision, $textColor="#86198f", $lineColor="#e879f9", $offsetX="40")
     UpdateRelStyle(engine, answercache, $textColor="#92400e", $lineColor="#fcd34d", $offsetX="-38", $offsetY="20")
     UpdateRelStyle(eval, engine, $textColor="#0c4a6e", $lineColor="#38bdf8", $offsetY="20")
     UpdateRelStyle(engine, store, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="42", $offsetY="-22")
