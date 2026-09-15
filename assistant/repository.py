@@ -16,7 +16,15 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .model import Chunk, Document, DocumentVersion, Retrieved, Snapshot
+from .model import (
+    Caveat,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Excluded,
+    Retrieved,
+    Snapshot,
+)
 
 
 @runtime_checkable
@@ -31,6 +39,8 @@ class KnowledgeRepository(Protocol):
         versions: list[DocumentVersion],
         chunks: list[Chunk],
         snapshot: Snapshot,
+        caveats: list[Caveat] | None = None,
+        excluded: list[Excluded] | None = None,
     ) -> str:
         """Write a complete index and activate it atomically.
 
@@ -73,7 +83,16 @@ class KnowledgeRepository(Protocol):
         """
         ...
 
-    def excluded(self) -> list[dict]:
+    def caveats(self, canonical_url: str) -> list[Caveat]:
+        """The qualifying sentences held against a document.
+
+        Appended by code wherever any chunk of that document is printed or
+        composed over, so a temperature limit travels with the instruction it
+        qualifies even when the two sit in different sections — decision 11.
+        """
+        ...
+
+    def excluded(self) -> list[Excluded]:
         """Documents deliberately not indexed, with the reason.
 
         So that "why isn't the safety data sheet in here?" has an answer that

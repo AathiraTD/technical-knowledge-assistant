@@ -44,8 +44,15 @@ class Document:
 
     @property
     def citation_name(self) -> str:
-        """What a person would call this document, for the Sources list."""
-        return self.link_text or self.title or self.canonical_url
+        """What a person would call this document, for the Sources list.
+
+        Page titles on the site carry a pipe-separated tail for search engines —
+        "Solo Onecoat Lime Plaster |Lime Plaster | Lime Green". A citation has to
+        be checkable by a plasterer, so only the part before the first pipe is
+        used, and the link text wins over the title when the site gave one.
+        """
+        name = self.link_text or self.title or self.canonical_url
+        return name.split("|")[0].strip() or self.canonical_url
 
 
 @dataclass
@@ -94,6 +101,35 @@ class Chunk:
     @property
     def chunk_id(self) -> str:
         return f"{self.canonical_url}#v{self.version}-{self.chunk_index}"
+
+
+@dataclass
+class Caveat:
+    """A qualifying sentence, held against the document rather than a chunk.
+
+    Fine Stuff states its 8 °C limit under Mixing and again under Curing while
+    the steps a user asks about sit elsewhere, so no chunk boundary keeps the
+    limit with the instruction it qualifies. Holding caveats at document level
+    and appending them by code does — decision 11.
+    """
+
+    canonical_url: str
+    caveat_type: str  # temperature | diy | incompatibility | other
+    sentence: str
+    section: str = ""
+
+
+@dataclass
+class Excluded:
+    """A document deliberately not indexed, and why.
+
+    Kept so that "why isn't the safety data sheet in here?" has an answer on
+    file rather than an improvised one.
+    """
+
+    url: str
+    reason: str
+    link_text: str = ""
 
 
 @dataclass
