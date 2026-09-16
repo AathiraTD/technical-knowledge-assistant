@@ -618,6 +618,9 @@ class Assistant:
             rendering["caveats"] = len(answer.caveats)
             rendering["disclosure"] = bool(answer.disclosure)
             rendering["refused"] = answer.refused
+
+        # Carry detected slots into answer diagnostics so session can persist them
+        answer.diagnostics["slots"] = decision.slots
         return answer
 
 
