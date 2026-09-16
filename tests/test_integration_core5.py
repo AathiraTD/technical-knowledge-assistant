@@ -56,10 +56,10 @@ class IntegrationTestCore5(unittest.TestCase):
         # Should retrieve chunks about Solo and water/mixing
         self.assertGreater(len(chunks), 0, "No chunks retrieved")
         # Top result should mention Solo or water
-        top_chunk_text = chunks[0].text.lower()
+        top_chunk_text = chunks[0].chunk.content.lower()
         self.assertTrue(
             "solo" in top_chunk_text or "water" in top_chunk_text or "mix" in top_chunk_text,
-            f"Top chunk doesn't mention Solo/water: {chunks[0].text[:100]}"
+            f"Top chunk doesn't mention Solo/water: {chunks[0].chunk.content[:100]}"
         )
 
     def test_retrieval_respects_audience_filter(self):
@@ -76,12 +76,12 @@ class IntegrationTestCore5(unittest.TestCase):
         """Retrieval: respects per-document result limits."""
         question = "How much coverage does Solo provide?"
 
-        chunks = retrieve(self.repo, question, ["public"])
+        chunks = self.retriever.search(question, audiences=("public",))
 
         # Group by document
         docs = {}
         for chunk in chunks:
-            doc_id = chunk.document_id
+            doc_id = chunk.document.id
             docs[doc_id] = docs.get(doc_id, 0) + 1
 
         # Each document should have at most 5 results (decision 12)
