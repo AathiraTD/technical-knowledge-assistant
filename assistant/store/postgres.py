@@ -728,15 +728,15 @@ class PostgresKnowledgeRepository:
                 # indefinitely is a privacy decision nobody has asked for.
                 """INSERT INTO answer_log
                    (asked_at, question, audiences, path_taken, snapshot_id,
-                    chunk_ids, generation_model, check_failed)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    chunk_ids, generation_model, check_failed, source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (entry.asked_at or _now(), entry.question,
                  list(entry.audiences), entry.path_taken,
                  # Empty means "no snapshot was consulted", and the column is a
                  # foreign key: NULL is the only honest way to say that.
                  entry.snapshot_id or None,
                  list(entry.chunk_ids), entry.generation_model,
-                 entry.check_failed),
+                 entry.check_failed, entry.source or "unknown"),
             )
 
     def answer_log(self, limit: int = 20) -> list[AnswerLogEntry]:
@@ -744,7 +744,7 @@ class PostgresKnowledgeRepository:
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT asked_at, question, audiences, path_taken, snapshot_id,
-                          chunk_ids, generation_model, check_failed
+                          chunk_ids, generation_model, check_failed, source
                    FROM answer_log ORDER BY asked_at DESC, id DESC LIMIT %s""",
                 (limit,))
             rows = cur.fetchall()
@@ -752,7 +752,8 @@ class PostgresKnowledgeRepository:
             AnswerLogEntry(
                 question=r[1], path_taken=r[3], audiences=tuple(r[2]),
                 snapshot_id=r[4] or "", chunk_ids=list(r[5]),
-                generation_model=r[6], check_failed=r[7], asked_at=str(r[0]))
+                generation_model=r[6], check_failed=r[7], asked_at=str(r[0]),
+                source=r[8])
             for r in rows
         ]
 

@@ -99,8 +99,15 @@ class Assistant:
     """Retrieval, routing and answering behind one call."""
 
     def __init__(self, repo, threshold: float | None = None, *,
-                 cache: bool = True, log: bool = True) -> None:
+                 cache: bool = True, log: bool = True,
+                 source: str = "unknown") -> None:
         self.log = log
+        # Which surface this instance answers for, written onto every audit row.
+        # It defaults to `unknown` rather than to `cli` because a caller that
+        # did not say is a caller whose traffic cannot honestly be counted as
+        # anything — and the whole reason this parameter exists is that
+        # evaluation traffic was being counted as real. See AnswerLogEntry.
+        self.source = source
         self.repo = repo
         self.retriever = Retriever(repo, **({"threshold": threshold}
                                             if threshold is not None else {}))
@@ -386,6 +393,7 @@ class Assistant:
                                   if answer.diagnostics.get("generation_seconds")
                                   else ""),
                 check_failed="; ".join(answer.failed_checks),
+                source=self.source,
             )
             try:
                 self.repo.log_answer(entry)

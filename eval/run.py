@@ -376,7 +376,11 @@ def main(argv: list[str] | None = None) -> int:
 
     RESULTS.mkdir(parents=True, exist_ok=True)
     repo = open_repository(str(ROOT / args.db), dsn=args.dsn)
-    assistant = Assistant(repo)
+    # Tagged, not silenced. The harness asks the near-miss and far-miss probes
+    # that are supposed to refuse, so counting its rows as real traffic makes
+    # the refusal rate a measure of the question set rather than of the system
+    # — and dropping them would lose the only record of how the probes routed.
+    assistant = Assistant(repo, source="evaluation")
     snapshot = repo.snapshot()
 
     started = time.perf_counter()

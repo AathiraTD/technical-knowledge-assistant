@@ -149,7 +149,12 @@ CREATE TABLE IF NOT EXISTS answer_log (
     snapshot_id         TEXT        REFERENCES index_snapshots (id),
     chunk_ids           TEXT[]      NOT NULL DEFAULT '{}',
     generation_model    TEXT        NOT NULL DEFAULT '',
-    check_failed        TEXT        NOT NULL DEFAULT ''
+    -- `source` is the surface that asked: cli, web, evaluation, or unknown.
+    -- See db/schema.sqlite.sql for the defect it closes — evaluation traffic
+    -- and real questions shared one table, so any rate counted from it counted
+    -- the probes designed to refuse.
+    check_failed        TEXT        NOT NULL DEFAULT '',
+    source              TEXT        NOT NULL DEFAULT 'unknown'
 );
 
 -- A chunk id in this system is the string 'url#vN-i' — the citation, not a row
@@ -166,6 +171,11 @@ BEGIN
             ALTER COLUMN chunk_ids TYPE TEXT[] USING chunk_ids::text::text[];
     END IF;
 END $$;
+
+-- `source` is additive, so a database created before it migrates rather than
+-- failing on the next insert. The default is the honest answer for every row
+-- written while the column did not exist: nobody recorded which surface asked.
+ALTER TABLE answer_log ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
 
 -- Retrieval, for reference: audience and active-version filtering happen in
 -- the query, authority is the outer sort, similarity the inner one.

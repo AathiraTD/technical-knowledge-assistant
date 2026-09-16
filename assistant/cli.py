@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = _open(args)
     try:
-        assistant = Assistant(repo, threshold=args.threshold)
+        assistant = Assistant(repo, threshold=args.threshold, source="cli")
     except (IndexMismatch, ollama.OllamaUnavailable) as exc:
         # Close the store before giving up. Process exit would release it
         # anyway, but the operator's next move after an index mismatch is to

@@ -747,7 +747,7 @@ def main(argv: list[str] | None = None) -> int:
     # Threaded server, one shared store: see assistant/store/locking.py.
     repo = open_repository(args.db, thread_safe=True)
     try:
-        assistant = Assistant(repo)
+        assistant = Assistant(repo, source="web")
     except (IndexMismatch, ollama.OllamaUnavailable) as exc:
         # Let the store go before giving up on it. A refused start is followed
         # by a rebuild into the same file, and a connection left open is one
