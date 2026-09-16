@@ -655,11 +655,17 @@ the problem was solved.
 **Where it breaks.** The column records what the caller claims, not what it is,
 and nothing authenticates it — the same limitation the audience set already
 carries. A misconfigured harness run tagged `ui` pollutes the numbers exactly as
-today's untagged one does. And the parallel defect in `answer_log` is **not**
-fixed by this slice: that table stays unmarked, so the refusal rate quoted above
-stays uncorrectable for rows already written. Adding the same column there is
-the obvious follow-on, and it is deliberately out of §2's scope rather than
-smuggled into it.
+today's untagged one does.
+
+**Update: the parallel defect in `answer_log` is now fixed**, ahead of §2 rather
+than after it, because the contaminated rate was being quoted while the fix
+waited. `answer_log` carries the same `source` column with the same `unknown`
+default, the same additive migration, and a contract row proving both adapters
+round-trip it. The 196 rows written before it existed now read `unknown`, so the
+38 per cent is attributable to an unrecorded mix rather than publishable as the
+system's refusal rate — uncorrectable, as predicted, but no longer mistakable
+for a measurement. §2's `turn_traces` inherits the settled shape rather than
+re-arguing it.
 
 **Schema implication.**
 

@@ -129,6 +129,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS index_snapshots_one_active
 -- db/schema.postgres.sql; a chunk id is the citation string 'url#vN-i', never
 -- a row number. Written on a connection of its own, so an answer logged inside
 -- a read snapshot is not rolled back with it.
+--
+-- `source` names the surface that asked: cli, web, evaluation, or unknown. The
+-- evaluation harness answers through the same Assistant as a person does and
+-- logged here undifferentiated, so a refusal rate counted from this table
+-- counted the near-miss and far-miss probes that are *supposed* to refuse — the
+-- better the guardrail worked, the worse the number looked. Rows written before
+-- the column existed read 'unknown', which is exactly what they are.
+--
+-- Keep the comments out of the column list. SQLite reparses the stored DDL on
+-- ALTER TABLE ... DROP COLUMN, and a comment trailing the last column leaves it
+-- with incomplete input.
 CREATE TABLE IF NOT EXISTS answer_log (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     asked_at            TEXT    NOT NULL,
@@ -138,5 +149,6 @@ CREATE TABLE IF NOT EXISTS answer_log (
     snapshot_id         TEXT    REFERENCES index_snapshots (id),
     chunk_ids           TEXT    NOT NULL DEFAULT '[]',
     generation_model    TEXT    NOT NULL DEFAULT '',
-    check_failed        TEXT    NOT NULL DEFAULT ''
+    check_failed        TEXT    NOT NULL DEFAULT '',
+    source              TEXT    NOT NULL DEFAULT 'unknown'
 );

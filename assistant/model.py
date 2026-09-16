@@ -187,6 +187,22 @@ class AnswerLogEntry:
     anecdotal.
 
     `asked_at` may be left empty, in which case the store timestamps it.
+
+    `source` names the surface that asked, and it exists because leaving it out
+    was a measurable defect rather than a tidiness problem. The evaluation
+    harness answers through the same `Assistant` as a person does, with logging
+    on by default, so its questions landed in this table indistinguishable from
+    real ones — and the harness's question set is deliberately loaded with the
+    near-miss and far-miss probes that are *supposed* to refuse. Any refusal
+    rate counted from these rows therefore counted the probes as failures of
+    the system rather than as successes of the guardrail. The fix is to record
+    who asked, not to stop the harness logging: dropping its rows would lose
+    the only evidence of how the probes actually routed.
+
+    The default is `unknown` rather than `web` or `cli`, because a row written
+    before this column existed genuinely does not record which surface produced
+    it, and guessing would make the contamination invisible instead of
+    countable.
     """
 
     question: str
@@ -197,6 +213,7 @@ class AnswerLogEntry:
     generation_model: str = ""
     check_failed: str = ""
     asked_at: str = ""
+    source: str = "unknown"  # cli | web | evaluation | unknown
 
 
 @dataclass

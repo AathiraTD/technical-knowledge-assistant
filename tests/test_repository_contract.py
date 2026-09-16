@@ -988,3 +988,36 @@ def test_logging_an_answer_is_not_rolled_back_with_the_snapshot_it_describes(rep
     assert [e.question for e in logged] == ["Logged from inside the snapshot."]
     assert logged[0].chunk_ids == [cited]
 
+
+def test_the_surface_that_asked_survives_the_round_trip(repo):
+    """Both adapters record `source`, or a rate counted from these rows is fiction.
+
+    The evaluation harness answers through the same `Assistant` as a person
+    does, so its questions — deliberately loaded with the probes that are
+    supposed to refuse — landed here indistinguishable from real traffic. The
+    column is only worth having if every adapter carries it, which is what this
+    row of the contract is for.
+    """
+    one_answer(repo)
+    for surface in ("cli", "web", "evaluation"):
+        repo.log_answer(AnswerLogEntry(
+            question=f"Asked from {surface}.", path_taken="extract",
+            source=surface, asked_at=f"2026-01-03T09:0{len(surface) % 10}:00+00:00"))
+
+    logged = {e.question: e.source for e in repo.answer_log()}
+    assert logged["Asked from cli."] == "cli"
+    assert logged["Asked from web."] == "web"
+    assert logged["Asked from evaluation."] == "evaluation"
+
+
+def test_an_unrecorded_surface_says_so_rather_than_guessing(repo):
+    """The default is `unknown`, not `cli`.
+
+    A row written by a caller that did not say which surface it was cannot
+    honestly be counted as any of them. Defaulting to a real surface would make
+    the contamination invisible instead of countable, which is the failure this
+    column exists to end rather than to relocate.
+    """
+    one_answer(repo)
+    repo.log_answer(AnswerLogEntry(question="Nobody said.", path_taken="refuse"))
+    assert repo.answer_log()[0].source == "unknown"

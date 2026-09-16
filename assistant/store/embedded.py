@@ -104,6 +104,15 @@ class SQLiteKnowledgeRepository:
                                  ("snapshot_id", "TEXT NOT NULL DEFAULT ''")):
             if name not in columns:
                 self.db.execute(f"ALTER TABLE crawl_runs ADD COLUMN {name} {definition}")
+        # Additive in the same way and for the same reason: `CREATE TABLE IF NOT
+        # EXISTS` does not reshape a table that already exists, so a database
+        # built before `answer_log.source` would fail on the next insert rather
+        # than gain the column. Existing rows take the default, `unknown`, which
+        # is the truth about them — nobody recorded which surface asked.
+        logged = {r[1] for r in self.db.execute("PRAGMA table_info(answer_log)")}
+        if "source" not in logged:
+            self.db.execute(
+                "ALTER TABLE answer_log ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'")
         self._matrix: np.ndarray | None = None
         self._rows: list[sqlite3.Row] = []
 
@@ -719,15 +728,16 @@ class SQLiteKnowledgeRepository:
                 # indefinitely is a privacy decision nobody has asked for.
                 """INSERT INTO answer_log
                    (asked_at, question, audiences, path_taken, snapshot_id,
-                    chunk_ids, generation_model, check_failed)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                    chunk_ids, generation_model, check_failed, source)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
                 (entry.asked_at or _now(), entry.question,
                  json.dumps(list(entry.audiences)), entry.path_taken,
                  # Empty means "no snapshot was consulted", and the column is a
                  # foreign key: NULL is the only honest way to say that.
                  entry.snapshot_id or None,
                  json.dumps(list(entry.chunk_ids)),
-                 entry.generation_model, entry.check_failed),
+                 entry.generation_model, entry.check_failed,
+                 entry.source or "unknown"),
             )
             writer.commit()
         finally:
@@ -737,7 +747,7 @@ class SQLiteKnowledgeRepository:
         """Recent answers, newest first."""
         rows = self.db.execute(
             """SELECT asked_at, question, audiences, path_taken, snapshot_id,
-                      chunk_ids, generation_model, check_failed
+                      chunk_ids, generation_model, check_failed, source
                FROM answer_log ORDER BY asked_at DESC, id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -748,7 +758,8 @@ class SQLiteKnowledgeRepository:
                 snapshot_id=r["snapshot_id"] or "",
                 chunk_ids=list(json.loads(r["chunk_ids"])),
                 generation_model=r["generation_model"],
-                check_failed=r["check_failed"], asked_at=r["asked_at"])
+                check_failed=r["check_failed"], asked_at=r["asked_at"],
+                source=r["source"])
             for r in rows
         ]
 
