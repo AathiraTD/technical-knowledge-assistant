@@ -187,7 +187,7 @@ class IntegrationTestCore5(unittest.TestCase):
         q1 = "I have a solid brick wall. Should I use plaster?"
 
         with observability.correlation(observability.new_id()):
-            a1 = engine.ask(self.repo, q1, self.session_id, audience_set=["public"])
+            a1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
 
         # Check session has substrate
         carried = self.session_store.carried(self.session_id)
@@ -198,7 +198,7 @@ class IntegrationTestCore5(unittest.TestCase):
         q2 = "What about Forte?"
 
         with observability.correlation(observability.new_id()):
-            a2 = engine.ask(self.repo, q2, self.session_id, audience_set=["public"])
+            a2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
 
         # Should answer without asking for substrate again
         self.assertNotIn("substrate", a2.refusal_reason.lower() if a2.refusal_reason else "")
@@ -208,7 +208,7 @@ class IntegrationTestCore5(unittest.TestCase):
         q = "I have solid brick. What plaster for outside?"
 
         with observability.correlation(observability.new_id()):
-            engine.ask(self.repo, q, self.session_id, audience_set=["public"])
+            self.assistant.ask(q, audiences=("public",), session_id=self.session_id)
 
         # Verify session was persisted
         carried = self.session_store.carried(self.session_id)
@@ -239,7 +239,7 @@ class IntegrationTestCore5(unittest.TestCase):
         # Session A: state substrate
         q = "I have solid brick."
         with observability.correlation(observability.new_id()):
-            engine.ask(self.repo, q, sess_a, audience_set=["public"])
+            self.assistant.ask(q, audiences=("public",), session_id=sess_a)
 
         # Session B should NOT see session A's substrate
         carried_b = self.session_store.carried(sess_b)
@@ -315,14 +315,14 @@ class IntegrationTestCore5(unittest.TestCase):
         # T1: Full retrieval
         start_t1 = time.time()
         with observability.correlation(observability.new_id()):
-            a1 = engine.ask(self.repo, q1, self.session_id, audience_set=["public"])
+            a1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
         latency_t1 = time.time() - start_t1
 
         # T2: Reuse substrate (carried)
         q2 = "What about Forte instead?"
         start_t2 = time.time()
         with observability.correlation(observability.new_id()):
-            a2 = engine.ask(self.repo, q2, self.session_id, audience_set=["public"])
+            a2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
         latency_t2 = time.time() - start_t2
 
         # T2 should be faster (carried slots, possibly cached)
