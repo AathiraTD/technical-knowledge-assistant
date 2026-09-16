@@ -89,8 +89,22 @@ replaces and keeps it, and a withdrawn one is deactivated rather than deleted.
 What is still absent is the *trigger* — the pipeline runs by hand rather than
 from a change hook.
 
-**Caching of answers, queueing, and concurrency.** Designed and documented for
-production, not built. At one user on one laptop there is nothing to cache.
+**Queueing and load shedding.** A generation queue with a visible wait,
+per-session rate limiting and extract-only degradation under load are designed
+and documented, not built. Generation is one at a time per Ollama instance, so
+that is the part that would actually bind under real demand.
+
+Two things this used to disclaim have since been built, and the exclusion is
+narrowed rather than quietly dropped. The **answer cache** exists — exact-key
+rather than the template-keyed form the record designs, audience- and
+snapshot-scoped, taking a repeated question from 40.78 s to 0.017 s.
+**Concurrent serving** exists too, because the web page raised a database error
+on every question until it did: the store is opened for cross-thread use and
+serialised behind one reentrant lock, each answer pins a consistent read, and
+correlation ids are per-context so two simultaneous questions cannot pick up
+each other's trace. Neither was scope creep — the first fell out of measuring
+latency, the second out of fixing a demo-breaking bug — but both make the old
+sentence understate what ships.
 
 **Safety data sheets.** Deliberately not indexed. They are controlled documents
 that must be read whole and current, and quoting them in fragments is the wrong

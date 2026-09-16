@@ -11,7 +11,7 @@ asks a price and a coverage should not have one path chosen for both.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import observability as obs
 from . import ollama
@@ -118,7 +118,15 @@ class Assistant:
                     if self.cache is not None:
                         self.cache.put(key, answer)
                 else:
-                    answer.diagnostics["cached"] = True
+                    # Copy before annotating. The cache holds one Answer and
+                    # hands the same object to every caller, so writing this
+                    # request's correlation id onto it overwrites the last
+                    # reader's — two concurrent callers on the threading server
+                    # would each find the other's trace in their diagnostics.
+                    # The answer text was never at risk; the ability to trace it
+                    # was, which is exactly what the id is for.
+                    answer = replace(answer, diagnostics={**answer.diagnostics,
+                                                          "cached": True})
                 # Carried on the answer as well as in the log, so a diagnostics
                 # dump and a log line can be joined without the store.
                 answer.diagnostics["correlation_id"] = cid

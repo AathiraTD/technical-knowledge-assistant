@@ -561,3 +561,41 @@ def test_logging_can_be_turned_off(tmp_path, no_ollama):
         assert repo.answer_log(limit=5) == []
     finally:
         repo.close()
+
+
+def test_a_cached_answer_is_not_shared_between_callers(assistant, monkeypatch):
+    """The cache held one Answer and handed the same object to everyone.
+
+    Each caller then wrote its own correlation id onto it, so on the threading
+    server two concurrent readers of the same cached answer would each find the
+    other's trace in their diagnostics. The text was never at risk; the ability
+    to trace it was, which is the one thing the id exists for.
+    """
+    monkeypatch.setattr(
+        ollama, "generate",
+        lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
+                           "sack [1].", 0.01))
+
+    first = assistant.ask("How much water does Solo need", correlation_id="trace-one")
+    second = assistant.ask("How much water does Solo need", correlation_id="trace-two")
+
+    one, two = first.parts[0][1], second.parts[0][1]
+    assert two.diagnostics["cached"] is True, "the second ask should have hit the cache"
+    assert one is not two, "both callers were handed the same Answer object"
+    assert one.diagnostics["correlation_id"] == "trace-one"
+    assert two.diagnostics["correlation_id"] == "trace-two"
+    assert one.text == two.text
+
+
+def test_the_first_caller_of_a_cached_answer_is_not_marked_cached(assistant,
+                                                                  monkeypatch):
+    """`cached` must describe this reply, not leak backwards onto the original."""
+    monkeypatch.setattr(
+        ollama, "generate",
+        lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
+                           "sack [1].", 0.01))
+
+    first = assistant.ask("How much water does Solo need")
+    assistant.ask("How much water does Solo need")
+
+    assert "cached" not in first.parts[0][1].diagnostics
