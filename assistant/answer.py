@@ -745,21 +745,57 @@ class AnswerEngine:
             assumptions=("\nStated assumptions: " + "; ".join(context)
                          if context else ""),
         )
-        try:
-            text, seconds = ollama.generate(prompt, model=self.model,
-                                            system=SYSTEM)
-        except ollama.OllamaUnavailable as error:
-            obs.event("ollama_error", stage="generate", model=self.model,
-                      error=type(error).__name__, detail=str(error))
-            raise
-        obs.event("generation", model=self.model, seconds=round(seconds, 2),
-                  passages=len(hits), prompt_chars=len(prompt),
-                  answer_words=len(text.split()))
+        # The one span in the system where a model runs on the answering path,
+        # and the only one whose duration is ever the whole answer's duration.
+        # OTel's `gen_ai.*` names, because this is the field they were written
+        # for. No prompt and no generated text: a span may carry counts, and
+        # `answer_log` is where the question is deliberately retained.
+        with obs.span("generation",
+                      **{"gen_ai.request.model": self.model,
+                         "passages": len(hits),
+                         "prompt_chars": len(prompt)}) as generation:
+            try:
+                text, seconds = ollama.generate(prompt, model=self.model,
+                                                system=SYSTEM)
+            except ollama.OllamaUnavailable as error:
+                obs.event("ollama_error", stage="generate", model=self.model,
+                          error=type(error).__name__, detail=str(error))
+                raise
+            # Words, not tokens. The OTel field is named for tokens and this
+            # is the honest thing the code can count: Ollama's response carries
+            # no usage block through the client this system uses, and inventing
+            # a token count from a word count would be a number that looked
+            # like a measurement. The name is kept so an exporter later needs no
+            # rename; what it holds is documented here rather than implied.
+            generation["gen_ai.usage.output_tokens"] = len(text.split())
+            generation["seconds"] = round(seconds, 2)
+        # The `generation` event this span replaced carried model, seconds,
+        # passages, prompt_chars and answer_words. All five are attributes of
+        # the span, which emits one line on completion, so emitting both would
+        # have been the same fact twice under the same event name.
 
         asked = decision.slots.get("property_asked", "")
         terms = (self.retriever.slots.terms_for("property_asked", asked)
                  if hasattr(self.retriever, "slots") else [])
-        failures = run_checks(text, hits, self.names, terms)
+        # A span around the checks and not inside them. The six checks are a
+        # safety boundary and this slice observes them rather than touching
+        # them: `run_checks` is called exactly as before and decides exactly
+        # what it decided before. What the span adds is how long they cost and
+        # which ones fired, which is how over-refusal becomes countable.
+        with obs.span("checks", count=6) as checking:
+            failures = run_checks(text, hits, self.names, terms)
+            # The check *numbers*, not the failure messages. The review's table
+            # asks for "check numbers and text" and the text cannot come: check
+            # 1 quotes seventy characters of the offending sentence and check 5
+            # quotes the invented name, so a span carrying the messages would
+            # carry generated answer text into a table forbidden to hold any.
+            # The number is what the operational question needs anyway — which
+            # check fires most often — and the message is already on the
+            # `check_failed` event and in `answer_log.check_failed`, where
+            # retention was decided deliberately.
+            checking["failed"] = sorted({f.split(":", 1)[0] for f in failures})
+            checking["failures"] = len(failures)
+            checking["passed"] = not failures
 
         if failures:
             # The single most operationally important line in the system: it is

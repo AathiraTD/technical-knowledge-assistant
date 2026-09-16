@@ -120,22 +120,43 @@ class Retriever:
         from a shared system guide, and refusing those would be a silent loss.
         """
         expanded = self.expand(question)
-        with obs.timed("retrieval", audiences=list(audiences), top_k=top_k,
-                       product=product,
-                       expanded=expanded != question) as record:
-            try:
-                vector = ollama.embed_one(as_query(expanded),
-                                          model=self.embed_model)
-            except ollama.OllamaUnavailable as error:
-                # The embedding call is the first thing a question touches, so
-                # this is where a stopped model server is usually discovered.
-                obs.event("ollama_error", stage="embed", model=self.embed_model,
-                          error=type(error).__name__, detail=str(error))
-                raise
-            hits = self.repo.retrieve_for(RetrievalRequest(
-                embedding=vector, audiences=audiences, top_k=top_k,
-                per_document_cap=per_document_cap, product=product))
+        # A span rather than a plain timing, with the model call and the store
+        # call as its two children: "retrieval was slow" is not an answer, and
+        # the useful next question is always which of the two it was — the
+        # network hop to embed, or the search. The names follow OpenTelemetry's
+        # conventions (`gen_ai.request.model`, `db.system`) so an exporter later
+        # is a shim rather than a rename of every call site.
+        with obs.span("retrieval", audiences=list(audiences), top_k=top_k,
+                      per_document_cap=per_document_cap, product=product,
+                      expanded=expanded != question) as record:
+            with obs.span("embed_question",
+                          **{"gen_ai.request.model": self.embed_model,
+                             "dimension": ollama.EMBED_DIMENSIONS}):
+                try:
+                    vector = ollama.embed_one(as_query(expanded),
+                                              model=self.embed_model)
+                except ollama.OllamaUnavailable as error:
+                    # The embedding call is the first thing a question touches,
+                    # so this is where a stopped model server is usually
+                    # discovered.
+                    obs.event("ollama_error", stage="embed",
+                              model=self.embed_model,
+                              error=type(error).__name__, detail=str(error))
+                    raise
+            with obs.span("search") as search:
+                # Which adapter served this, named the way OTel names it. It is
+                # read off the repository rather than configured, because the
+                # engine is built against a Protocol and genuinely does not know
+                # which store it has until it asks.
+                search["db.system"] = ("postgresql"
+                                       if "Postgres" in type(self.repo).__name__
+                                       else "sqlite")
+                hits = self.repo.retrieve_for(RetrievalRequest(
+                    embedding=vector, audiences=audiences, top_k=top_k,
+                    per_document_cap=per_document_cap, product=product))
+                search["returned"] = len(hits)
             record["hits"] = len(hits)
+            record["returned"] = len(hits)
             record["top_score"] = self.best_score(hits)
             record["above_threshold"] = self.above_threshold(hits)
             record["documents"] = len({h.chunk.canonical_url for h in hits})
@@ -168,8 +189,19 @@ class Retriever:
         The guarantee these passages carry is lexical presence of the term,
         which is the thing the relevance gate wants to establish anyway.
         """
-        with obs.timed("targeted_retrieval", product=product,
-                       terms=list(terms), audiences=list(audiences)) as record:
+        # The terms are counted and not named, which is a change from the event
+        # this span replaced and is not cosmetic. Two callers reach here: the
+        # calculation edge, whose terms are the module constant COVERAGE_TERMS,
+        # and `Assistant._missed_evidence`, whose term is a rare word lifted
+        # straight out of the question. The second is question text, and the
+        # event stream could hold it while a persisted span cannot — the review
+        # §2.5 rule is that `answer_log.question` is the one deliberate
+        # retention point and the trace does not duplicate it. A count answers
+        # the operational question anyway: how often the second pass runs and
+        # whether it finds anything.
+        with obs.span("targeted_retrieval", product=product,
+                      terms=len(terms), audiences=list(audiences),
+                      limit=limit) as record:
             hits = self.repo.find_passages(product, terms, audiences=audiences,
                                            limit=limit)
             record["hits"] = len(hits)
