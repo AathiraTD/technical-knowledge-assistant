@@ -1,4 +1,4 @@
-"""The evaluation harness: nine situations, ten probes, one threshold sweep.
+"""The evaluation harness: situations, probes, conversations, one threshold sweep.
 
 `python -m eval.run`. Writes transcripts to eval/results/ and prints a summary.
 
@@ -35,6 +35,18 @@ is the only behaviour that passes it:
     searched wider than the answer sees. An unverified unanswerable question
     tests nothing but the threshold.
 
+The conversational half is newer and is written under a sharper constraint.
+Multi-turn behaviour — the session's three carried slots, the five it drops, the
+ask-back it holds and the provenance it prints — is built and was unevaluated,
+and the obvious way to evaluate it is the wrong one. Decision 7's G4 note
+records that the same question asked twice against the same snapshot produces
+different prose and identical evidence, so an expectation written against a
+sentence is a test that fails on a rerun for a reason nobody can act on. Every
+conversational expectation therefore reads route, numbered router step, merged
+slots, slot provenance, retrieved passages, citations, session state — or a
+published figure, which is reproducible exactly because check 2 refuses an
+answer whose numbers are not verbatim in a passage it cites.
+
 The threshold sweep exists because the abstention threshold is the one number
 in the system chosen by taste. Printing behaviour at the chosen value and at
 plus and minus 0.1 turns it into a number with evidence behind it.
@@ -47,13 +59,17 @@ import json
 import re
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from assistant.answer import Provenance                  # noqa: E402
 from assistant.engine import Assistant, render          # noqa: E402
+from assistant.router import Path_                      # noqa: E402
+from assistant.session import SessionStore              # noqa: E402
 from assistant.store.factory import open_repository     # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -266,6 +282,362 @@ def check_situation(spec: dict, reply, evidence: str = "") -> tuple[bool, list[s
     return ok, notes
 
 
+
+# ---------------------------------------------------------------- conversations
+
+
+@dataclass
+class TurnRecord:
+    """One turn of a conversation, and everything mechanical about it.
+
+    The reply is kept whole because the expectations read route, step, slots,
+    provenance, citations and figures off it; the other fields are the
+    conversational state *around* the answer, which the reply cannot carry
+    because the engine does not own it. `asked` is the question actually put to
+    the engine and differs from `question` exactly when the previous turn ended
+    in an ask-back and this one supplied the missing substrate — the behaviour
+    scenario C4 exists to pin down.
+    """
+
+    index: int
+    question: str
+    asked: str
+    reply: object
+    session_slots: dict
+    pending_after: str
+    carried_in: dict
+
+
+class Conversation:
+    """Several turns through one assistant, with the session the web page uses.
+
+    **Why the driver lives here rather than in the engine.** `Assistant.ask` is
+    deliberately single-turn and stateless: it takes `carried` and returns an
+    answer, and it neither decides what is worth remembering nor stores it.
+    `assistant/session.py` owns the memory and `assistant/ui.py` owns the
+    orchestration between the two — so the multi-turn behaviour this harness
+    evaluates is not reachable through any one component.
+
+    This driver therefore reproduces the page's orchestration, and only that:
+    read the session's carried slots, resume a pending ask-back when the new
+    turn supplies the substrate step 5 asked for, ask, then fold the turn back
+    in while dropping anything only a photograph knew. Every rule it applies
+    belongs to a component it calls — `CARRIED_SLOTS`, the pending resumption
+    and the ``OBSERVED`` exclusion are all read from `session.py`, the router's
+    own slot vocabulary and the answer's provenance respectively. None of them
+    is re-decided here.
+
+    The duplication is worth naming rather than hiding. Evaluating through the
+    HTTP server instead would test request parsing at the same time, which is
+    `tests/test_ui_server.py`'s job and would make every conversational
+    expectation depend on a socket. The risk the duplication carries — this
+    driver and the page drifting apart — is exactly why the driver is this short
+    and delegates rather than reimplements.
+
+    Traces are written with a real `session_id` and one `turn_id` per turn, so
+    the persisted `turn_traces` rows for a scenario can be read back as a
+    conversation. That is what lets `tests/test_conversation_eval.py` prefer the
+    persisted trace over the rendered prose, which decision 7's G4 note makes
+    the only honest thing to assert on.
+    """
+
+    def __init__(self, assistant, sessions: "SessionStore | None" = None,
+                 label: str = "conversation") -> None:
+        self.assistant = assistant
+        self.sessions = sessions or SessionStore()
+        self.session_id = self.sessions.open()
+        # Stamped into every turn id, so an evaluation turn is identifiable as
+        # one in the audit tables. `answer_log.source` already keeps evaluation
+        # traffic from being counted as real traffic (commit e5bd236) and the
+        # assistant handed in here carries source="evaluation"; the label adds
+        # *which scenario*, which is what a reader of the trace table wants
+        # next.
+        self.label = label
+        self.turns: list[TurnRecord] = []
+
+    def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
+            images=None) -> TurnRecord:
+        carried = self.sessions.carried(self.session_id)
+        pending = self.sessions.pending(self.session_id)
+        asked = question
+        if pending and question:
+            # The router's own vocabulary decides whether this turn answers the
+            # ask-back, never a second copy of it here: "brick" resumes the held
+            # question and "and what colour is it" does not.
+            stated = self.assistant.router.slots.detect(question)
+            if "substrate" in stated:
+                carried = {**carried, **stated}
+                asked = pending
+
+        index = len(self.turns)
+        reply = self.assistant.ask(
+            asked, audiences=audiences, carried=carried, images=images,
+            session_id=self.session_id, turn_id=f"{self.label}-t{index + 1}")
+        self._remember(question, reply)
+        record = TurnRecord(index=index, question=question, asked=asked,
+                            reply=reply,
+                            session_slots=self.sessions.carried(self.session_id),
+                            pending_after=self.sessions.pending(self.session_id),
+                            carried_in=dict(carried))
+        self.turns.append(record)
+        return record
+
+    def _remember(self, question: str, reply) -> None:
+        """Fold the turn back in, minus anything only a photograph knew.
+
+        The exclusion reads the answer's *facts* rather than its slots, for the
+        reason `assistant/ui.py` gives at the same join: a slot the photograph
+        supplied and the question also stated comes back as ``STATED`` and is
+        kept, because the person did say it. Filtering on the slot name alone
+        would silently drop a substrate somebody typed.
+        """
+        if reply is None:
+            return
+        slots: dict = {}
+        pending = ""
+        for _part, answer in reply.parts:
+            observed = {fact.slot for fact in answer.facts
+                        if fact.provenance is Provenance.OBSERVED}
+            slots.update({name: value
+                          for name, value in answer.diagnostics.get("slots", {}).items()
+                          if name not in observed})
+            if answer.path == Path_.ASK_BACK.value:
+                pending = reply.question
+        summary = "\n\n".join(answer.text for _part, answer in reply.parts)
+        self.sessions.remember(self.session_id, question, summary, slots, pending)
+
+
+# Every expectation a conversation turn may declare. An unknown key fails the
+# turn rather than passing quietly, which is the lesson the situation
+# expectations learned the hard way: an expectation nobody implemented reads
+# exactly like one that holds.
+TURN_EXPECTATIONS = frozenset({
+    "path_in", "path_not_in", "step_in", "step_not_in", "refused", "model_ran",
+    "slots_include", "slots_exclude", "facts", "no_facts_for",
+    "session_slots_after", "session_slots_exclude", "pending_after",
+    "resumes_turn", "answer_contains_all", "answer_must_not_match",
+    "must_cite", "chunks_retrieved", "top_source_must_not_match", "cached",
+})
+
+
+def turn_slots(record: "TurnRecord") -> dict:
+    """The router's merged slot view for this turn, across every part."""
+    merged: dict = {}
+    for _part, answer in record.reply.parts:
+        merged.update(answer.diagnostics.get("slots", {}))
+    return merged
+
+
+def turn_facts(record: "TurnRecord") -> dict:
+    """Every slot fact this turn printed, by slot name."""
+    return {fact.slot: fact
+            for _part, answer in record.reply.parts for fact in answer.facts}
+
+
+def check_turn(spec: dict, record: "TurnRecord") -> tuple[bool, list[str]]:
+    """One turn's expectations, none of them about wording.
+
+    Decision 7's G4 note is the constraint this function is written under. The
+    same question asked twice against the same snapshot produces different prose
+    and identical evidence: one run said Ultra "is suitable for internal walls
+    as an insulating lime plaster base coat" and the next added "that acts as a
+    draught excluder", both equally published and equally cited. An expectation
+    written against either sentence is a test that fails on a rerun for no
+    reason a reader could act on.
+
+    So everything here reads the route, the numbered router step, the merged
+    slots, the provenance of each slot, what was retrieved, what was cited and
+    the session state afterwards — or a published *figure*, which is
+    reproducible precisely because check 2 refuses any answer whose numbers are
+    not verbatim in a passage it cites. "between 10 and 30mm" came back
+    identically across both of those runs. Nothing here reads a sentence.
+    """
+    expect = spec.get("expect", {})
+    unknown = sorted(set(expect) - TURN_EXPECTATIONS)
+    if unknown:
+        return False, [f"unknown expectation(s) {unknown}; this turn asserts nothing"]
+
+    reply = record.reply
+    text = flatten(_text_of(reply))
+    slots = turn_slots(record)
+    facts = turn_facts(record)
+    steps = [str(a.diagnostics.get("step", "")) for _q, a in reply.parts]
+    notes: list[str] = []
+    ok = True
+
+    if "path_in" in expect:
+        allowed = set(expect["path_in"])
+        if not reply.paths or [p for p in reply.paths if p not in allowed]:
+            ok = False
+            notes.append(f"path was {reply.paths}, expected only {sorted(allowed)}")
+
+    for path in expect.get("path_not_in", []):
+        if path in reply.paths:
+            ok = False
+            notes.append(f"path {path!r} was taken and this turn forbids it")
+
+    if "step_in" in expect:
+        allowed = {str(s) for s in expect["step_in"]}
+        if not steps or [s for s in steps if s not in allowed]:
+            ok = False
+            notes.append(f"router step was {steps}, expected only {sorted(allowed)}")
+
+    for step in expect.get("step_not_in", []):
+        if str(step) in steps:
+            ok = False
+            notes.append(f"router step {step!r} fired and this turn forbids it")
+
+    if "refused" in expect and reply.refused != expect["refused"]:
+        ok = False
+        notes.append(f"refused={reply.refused}, expected {expect['refused']}")
+
+    if "model_ran" in expect:
+        ran = any("generation_seconds" in a.diagnostics for _q, a in reply.parts)
+        if ran != expect["model_ran"]:
+            ok = False
+            notes.append(f"the model {'ran' if ran else 'did not run'}, "
+                         f"expected model_ran={expect['model_ran']}")
+
+    # What this turn actually routed on. An inherited slot is invisible in the
+    # answer text and entirely visible here.
+    for name, value in expect.get("slots_include", {}).items():
+        if slots.get(name) != value:
+            ok = False
+            notes.append(f"slot {name!r} was {slots.get(name)!r}, expected {value!r}")
+
+    # The whole of scenario C3: a slot `session.py` deliberately drops must not
+    # be here, however few turns ago it was detected.
+    for name in expect.get("slots_exclude", []):
+        if name in slots:
+            ok = False
+            notes.append(f"slot {name!r} was inherited as {slots[name]!r}; "
+                         "session.py drops this slot on purpose")
+
+    # Provenance, which is the difference between a system that listened and one
+    # that guessed — and, for OBSERVED, between testimony and an inference.
+    for name, wanted in expect.get("facts", {}).items():
+        fact = facts.get(name)
+        if fact is None:
+            ok = False
+            notes.append(f"no slot fact for {name!r}, expected provenance {wanted!r}")
+        elif fact.provenance.value != wanted:
+            ok = False
+            notes.append(f"slot {name!r} printed as {fact.provenance.value!r}, "
+                         f"expected {wanted!r}")
+
+    for name in expect.get("no_facts_for", []):
+        if name in facts:
+            ok = False
+            notes.append(f"slot {name!r} was printed back at the caller as "
+                         f"{facts[name].provenance.value!r} and should not have been")
+
+    for name, value in expect.get("session_slots_after", {}).items():
+        if record.session_slots.get(name) != value:
+            ok = False
+            notes.append(f"the session holds {name}={record.session_slots.get(name)!r} "
+                         f"after this turn, expected {value!r}")
+
+    for name in expect.get("session_slots_exclude", []):
+        if name in record.session_slots:
+            ok = False
+            notes.append(f"the session kept {name!r} after this turn and must not")
+
+    if "pending_after" in expect:
+        held = bool(record.pending_after)
+        if held != expect["pending_after"]:
+            ok = False
+            notes.append(f"a pending question is {'held' if held else 'not held'} after "
+                         f"this turn, expected pending_after={expect['pending_after']}")
+
+    # The ask-back cycle closing: this turn re-asked an earlier question rather
+    # than answering the fragment the caller typed.
+    if "resumes_turn" in expect:
+        wanted = expect["resumes_turn"]
+        original = spec.get("_turns", [])
+        expected_question = original[wanted] if wanted < len(original) else None
+        if record.asked != expected_question:
+            ok = False
+            notes.append(f"this turn asked {record.asked!r}, expected it to resume "
+                         f"turn {wanted + 1}: {expected_question!r}")
+
+    for needle in expect.get("answer_contains_all", []):
+        if flatten(needle) not in text:
+            ok = False
+            notes.append(f"answer does not contain {needle!r} as published")
+
+    for pattern in expect.get("answer_must_not_match", []):
+        found = re.search(pattern, text, re.I)
+        if found:
+            ok = False
+            notes.append(f"answer matches {pattern!r} at {found.group(0)!r}")
+
+    if expect.get("must_cite"):
+        answered = [a for _q, a in reply.parts if not a.refused]
+        if not answered or not any(a.sources for a in answered):
+            ok = False
+            notes.append("nothing that answered carried a citation")
+
+    if "chunks_retrieved" in expect:
+        retrieved = sum(len(a.diagnostics.get("chunk_ids", []))
+                        for _q, a in reply.parts)
+        if retrieved < expect["chunks_retrieved"]:
+            ok = False
+            notes.append(f"{retrieved} passage(s) retrieved, expected at least "
+                         f"{expect['chunks_retrieved']}")
+
+    # Where a failed topic switch leaks first. Retrieval breadth is not the
+    # signal — five passages over a small corpus will contain the old product
+    # whatever the question was — but the *top* passage is what the answer is
+    # anchored on, and a switch that did not take shows up there long before it
+    # shows up in a sentence.
+    pattern = expect.get("top_source_must_not_match")
+    if pattern:
+        top = [a.sources[0]["url"] for _q, a in reply.parts if a.sources]
+        offending = [u for u in top if re.search(pattern, u, re.I)]
+        if offending:
+            ok = False
+            notes.append(f"the top passage came from {offending}, which this turn "
+                         "has switched away from")
+
+    if "cached" in expect:
+        cached = any(a.diagnostics.get("cached", False) for _q, a in reply.parts)
+        if cached != expect["cached"]:
+            ok = False
+            notes.append(f"cached={cached}, expected {expect['cached']}")
+
+    return ok, notes
+
+
+def run_conversation(assistant, spec: dict) -> tuple[bool, list[dict]]:
+    """Drive one scenario end to end and check every turn.
+
+    The turn specs are checked against the questions actually asked, which is
+    why the list is threaded in: a `resumes_turn` expectation names a turn
+    number rather than repeating that turn's text, so editing a question cannot
+    leave a stale copy of it inside an expectation that then passes for the
+    wrong reason.
+    """
+    conversation = Conversation(assistant, label=spec["id"])
+    questions = [t["question"] for t in spec["turns"]]
+    rows: list[dict] = []
+    ok = True
+    for number, turn_spec in enumerate(spec["turns"]):
+        record = conversation.ask(turn_spec["question"],
+                                  audiences=tuple(spec.get("audiences", ["public"])))
+        turn_ok, notes = check_turn({**turn_spec, "_turns": questions}, record)
+        ok = ok and turn_ok
+        rows.append({"turn": number + 1, "question": turn_spec["question"],
+                     "asked": record.asked, "pass": turn_ok, "notes": notes,
+                     "paths": record.reply.paths,
+                     "render": render(record.reply, show_diagnostics=True),
+                     "steps": [a.diagnostics.get("step", "")
+                               for _q, a in record.reply.parts],
+                     "slots": turn_slots(record),
+                     "session_slots": dict(record.session_slots)})
+    return ok, rows
+
+
+
 # ---------------------------------------------------------------------- probes
 
 
@@ -397,7 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         "",
     ]
 
-    results = {"situations": [], "probes": [], "sweep": []}
+    results = {"situations": [], "probes": [], "conversations": [], "sweep": []}
 
     # -- situations -------------------------------------------------------
     print("Situations")
@@ -457,6 +829,41 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if notes:
             transcript += ["expectations not met:"] + [f"  - {n}" for n in notes] + [""]
+
+    # -- conversations ----------------------------------------------------
+    # Run after the single-turn work and before the audience fixture, because a
+    # scenario builds state across five turns and a failure in one is easier to
+    # read once the single-turn baseline has already reported.
+    print("\nConversations")
+    for spec in _load("conversations.json")["conversations"]:
+        if args.only and spec["id"] != args.only:
+            continue
+        ok, rows = run_conversation(assistant, spec)
+        results["conversations"].append(
+            {"id": spec["id"], "name": spec["name"], "pass": ok,
+             "turns": [{k: v for k, v in row.items() if k != "render"}
+                       for row in rows]})
+        print(f"  {'pass' if ok else 'FAIL'}  {spec['id']}  {spec['name']}")
+        transcript += ["=" * 76,
+                       f"{spec['id']} — {spec['name']}   [{'pass' if ok else 'FAIL'}]",
+                       f"why: {spec['why']}", ""]
+        for row in rows:
+            resumed = ("" if row["asked"] == row["question"]
+                       else f"  (re-asked: {row['asked']})")
+            print(f"    {'pass' if row['pass'] else 'FAIL'}  turn {row['turn']}  "
+                  f"{row['question']}{resumed}")
+            for note in row["notes"]:
+                print(f"            {note}")
+            transcript += [
+                f"--- turn {row['turn']}  [{'pass' if row['pass'] else 'FAIL'}]",
+                f"Q: {row['question']}{resumed}",
+                f"slots: {row['slots']}",
+                f"session after: {row['session_slots']}",
+                "", row["render"], "",
+            ]
+            if row["notes"]:
+                transcript += ["expectations not met:"]
+                transcript += [f"  - {n}" for n in row["notes"]] + [""]
 
     # -- the staff fixture, both directions -------------------------------
     if not args.only:
@@ -521,9 +928,11 @@ def main(argv: list[str] | None = None) -> int:
     # -- summary ----------------------------------------------------------
     sit_pass = sum(1 for r in results["situations"] if r["pass"])
     probe_pass = sum(1 for r in results["probes"] if r["pass"])
+    conv_pass = sum(1 for r in results["conversations"] if r["pass"])
     elapsed = time.perf_counter() - started
     summary = (f"\nSituations {sit_pass}/{len(results['situations'])}   "
                f"Probes {probe_pass}/{len(results['probes'])}   "
+               f"Conversations {conv_pass}/{len(results['conversations'])}   "
                f"({elapsed:.0f}s)")
     print(summary)
     transcript += ["=" * 76, summary.strip()]
@@ -533,7 +942,9 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"\nTranscript: eval/results/transcript.txt")
 
-    failed = (len(results["situations"]) - sit_pass) + (len(results["probes"]) - probe_pass)
+    failed = ((len(results["situations"]) - sit_pass)
+              + (len(results["probes"]) - probe_pass)
+              + (len(results["conversations"]) - conv_pass))
     return 1 if failed else 0
 
 
