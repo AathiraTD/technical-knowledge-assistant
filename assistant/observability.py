@@ -98,6 +98,11 @@ from typing import Any, Iterator
 
 from .model import TraceSpan
 
+try:
+    from . import otel_export
+except ImportError:
+    otel_export = None  # type: ignore
+
 LOGGER_NAME = "assistant"
 
 # A library logger with a null handler: emitting is free and silent until an
@@ -328,6 +333,15 @@ def span(name: str, /, **attributes: Any) -> Iterator[dict]:
                 "span_source": record.source})
         except Exception:                              # pragma: no cover - defensive
             pass
+        # Export to OTLP if configured
+        if otel_export is not None:
+            try:
+                otel_export.export_trace(
+                    trace_id=record.trace_id, span_id=ident, parent_span_id=parent,
+                    name=name, started_at=started_at, duration_ms=duration_ms,
+                    status=status, attributes=safe)
+            except Exception:  # pragma: no cover - defensive
+                pass
 
 
 class JSONFormatter(logging.Formatter):
@@ -339,10 +353,15 @@ class JSONFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
+        import os
         payload: dict[str, Any] = {
             "at": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
             "level": record.levelname.lower(),
             "event": getattr(record, "event", record.getMessage()),
+            # OpenTelemetry resource attributes
+            "service.name": os.getenv("OTEL_SERVICE_NAME", "technical-knowledge-assistant"),
+            "service.version": os.getenv("OTEL_SERVICE_VERSION", "1.0.0"),
+            "deployment.environment": os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "development"),
         }
         # The trace ids sit above the event's own fields, so a line is legible
         # left to right: when, what, where in the tree, then the detail. Empty
