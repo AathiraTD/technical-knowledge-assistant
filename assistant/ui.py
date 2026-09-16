@@ -48,7 +48,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
-from . import observability as obs, ollama, use_utf8
+from . import metrics, observability as obs, ollama, use_utf8
 from .answer import Provenance
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
@@ -414,6 +414,15 @@ class Handler(BaseHTTPRequestHandler):
         # greps for it, and every event the answer produced comes back together.
         self.correlation_id = obs.new_id()
         url = urlparse(self.path)
+        # One line, delegating immediately. The renderer lives in
+        # assistant/metrics.py rather than here because a later slice rewrites
+        # this page wholesale and a Prometheus exposition format entangled with
+        # the HTML would be rewritten with it. Nothing about the endpoint —
+        # its window, its labels, its privacy posture — is decided in this file.
+        if url.path == "/metrics":
+            self._send_plain(metrics.render(self.assistant.repo).encode("utf-8"),
+                             metrics.CONTENT_TYPE)
+            return
         if url.path not in ("/", "/ask"):
             self.send_error(404)
             return
@@ -709,6 +718,23 @@ class Handler(BaseHTTPRequestHandler):
                 pending = reply.question
         summary = "\n\n".join(answer.text for _part, answer in reply.parts)
         self.sessions.remember(self.session_id, question, summary, slots, pending)
+
+    def _send_plain(self, body: bytes, content_type: str) -> None:
+        """A response with no session cookie, for a scraper rather than a person.
+
+        `_send` mints and returns a session on every response, which is right
+        for a page someone is going to ask a second question on and wrong for
+        `/metrics`: a scrape arriving every fifteen seconds would open a fresh
+        `SessionStore` entry each time, so an unauthenticated endpoint would
+        drive eviction of the conversations of people actually using the page.
+        A scraper has no conversation. It gets the document and nothing else —
+        no cookie, no correlation id, no state created by having asked.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
