@@ -58,7 +58,8 @@ class AnswerCache:
     @staticmethod
     def key(question: str, audiences: tuple[str, ...], snapshot_id: str,
             generation_model: str, chunking_version: str,
-            carried: dict | None = None) -> tuple:
+            carried: dict | None = None,
+            origins: dict | None = None) -> tuple:
         """Everything that can change the right answer to the same words.
 
         The audience set is sorted rather than taken as given, so ("public",
@@ -78,10 +79,25 @@ class AnswerCache:
         the same words, so without the slots in the key the cache returned the
         stored *ask-back* instead of the answer the new information had finally
         made possible — the feature defeating itself through its own cache.
+
+        `origins` is in the key for a reason the values alone cannot carry.
+        The same substrate with the same value prints a different sentence
+        depending on where it came from — "as you told me earlier in this
+        conversation" when the caller said it, "from the photograph you sent"
+        when a photograph was read for it. Two different answers to the same
+        words, so two keys. Sharing one would tell a caller they had said
+        something they never said, which is a correctness failure rather than a
+        cache miss, and it is the same class of failure as the audience leak
+        above: a key too loose is a claim about somebody that is not true.
+
+        Origins are sorted by slot and reduced to their values so the key stays
+        a tuple of plain strings, hashable and readable in a diagnostic dump.
         """
         return (normalise(question), tuple(sorted(audiences)), snapshot_id,
                 generation_model, chunking_version,
-                tuple(sorted((carried or {}).items())))
+                tuple(sorted((carried or {}).items())),
+                tuple(sorted((slot, getattr(origin, "value", origin))
+                             for slot, origin in (origins or {}).items())))
 
     def get(self, key: tuple) -> Any | None:
         with self._lock:

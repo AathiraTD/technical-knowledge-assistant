@@ -41,10 +41,15 @@ import sys
 import threading
 import webbrowser
 from http.cookies import CookieError, SimpleCookie
+from collections import OrderedDict
+from email.parser import BytesParser
+from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from . import observability as obs, ollama, use_utf8
+from .answer import Provenance
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
 from .repository import IndexMismatch
@@ -56,6 +61,102 @@ from .store.factory import open_repository
 # the page has any use for it, SameSite=Lax because a session that follows a
 # cross-site form post is a session somebody else is steering.
 SESSION_COOKIE = "tka_session"
+
+# ------------------------------------------------------------ the upload boundary
+#
+# An upload is the one place on this surface where an anonymous caller hands the
+# process arbitrary bytes, and `CLAUDE.md` names the risks by name: oversized
+# input, unsafe filenames, malformed containers, denial of service. Every guard
+# below is one of those, and each is enforced here rather than deeper in, so the
+# perception stage is never reached by something that should not have got in.
+#
+# What is deliberately *not* here is any attempt to parse an image. Nothing in
+# this file decodes a pixel: the bytes are sniffed for a recognised container
+# signature and then handed to Ollama, which is the only thing that reads them.
+# Introducing an image library to validate an image would add exactly the
+# attack surface — a C decoder fed hostile bytes — that the validation is for.
+
+# The whole request body, headers of the parts included. A photograph from a
+# phone is a few megabytes and `assistant/vision.py` refuses anything over eight
+# on its own; this is the cap that applies *before* a byte is read, which is the
+# only cap that helps against a body that never ends.
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+
+# How many photographs one request may carry. The guided visual survey of
+# decision 16.1 asks for a handful — a wider elevation, an exposed section, the
+# ground line — and a number well past that is not a survey.
+MAX_IMAGES_PER_REQUEST = 4
+
+# How many one session may send in total. Perception costs minutes of CPU per
+# image on this hardware, so an unbounded count is a denial-of-service path
+# rather than a generous allowance. Reached, it stops reading images and says
+# so; it never stops answering the question.
+MAX_IMAGES_PER_SESSION = 12
+
+# How many sessions the budget remembers. Bounded for the same reason the
+# session store is: a per-caller counter reachable by an anonymous caller is
+# only a counter while it cannot grow without limit.
+MAX_TRACKED_SESSIONS = 1024
+
+# Container signatures, by content rather than by name. The uploaded filename is
+# never consulted for anything at all — not for the media type, not for storage,
+# not for logging, not for the hand-off — because a filename is a string the
+# caller chose and "wall.png" is not evidence that anything is a PNG. These are
+# the formats a phone or a laptop actually produces, and the list is an
+# allowlist: an unrecognised signature is refused rather than passed along to
+# see what happens.
+_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+
+def sniff(data: bytes) -> str:
+    """The media type these bytes actually are, or an empty string.
+
+    WEBP is the one signature that is not a simple prefix: it is a RIFF
+    container with the format written twelve bytes in, so the check has to look
+    at both ends of the header rather than at the first four bytes, which every
+    RIFF file shares with a WAV.
+    """
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    for signature, media_type in _SIGNATURES:
+        if data.startswith(signature):
+            return media_type
+    return ""
+
+
+class UploadBudget:
+    """How many photographs each session has sent, bounded and thread-safe.
+
+    Deliberately not in `assistant/session.py`. That module carries what the
+    person told us about their building and is argued at length for carrying
+    nothing else; a rate limit is a property of this HTTP surface, expires on a
+    restart, and means nothing to the CLI. Putting it there would widen a store
+    whose narrowness is the point.
+    """
+
+    def __init__(self, limit: int = MAX_IMAGES_PER_SESSION,
+                 tracked: int = MAX_TRACKED_SESSIONS) -> None:
+        self.limit = limit
+        self.tracked = tracked
+        self._counts: "OrderedDict[str, int]" = OrderedDict()
+        self._lock = Lock()
+
+    def take(self, session_id: str, wanted: int) -> int:
+        """How many of `wanted` this session may still send, charging for them."""
+        with self._lock:
+            used = self._counts.get(session_id, 0)
+            allowed = max(0, min(wanted, self.limit - used))
+            self._counts[session_id] = used + allowed
+            self._counts.move_to_end(session_id)
+            while len(self._counts) > self.tracked:
+                self._counts.popitem(last=False)        # least recently used out
+            return allowed
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
@@ -129,6 +230,25 @@ PAGE = """<!doctype html>
   <input type="text" name="q" value="{q}" placeholder="Ask about a product…" autofocus>
   <button type="submit" id="ask">Ask</button>
 </form>
+<!-- A second form rather than one that posts everything. The ordinary question
+     stays a GET so the answer keeps a shareable address and the back button
+     works, which is how every existing link and the evaluation harness reach
+     this page; an upload cannot be a GET, so it gets its own. -->
+<details class="passage">
+  <summary>Ask about a photograph</summary>
+  <form method="post" action="/" enctype="multipart/form-data" onsubmit="working()">
+    <input type="text" name="q" placeholder="What would you like to know about it?">
+    <input type="file" name="image" accept="image/*" multiple>
+    <button type="submit">Ask</button>
+  </form>
+  <p class="empty">The photograph is read for what is visible in it — what the
+     wall is built of, inside or outside, exposure, a symptom — and for nothing
+     else. It never chooses a product and never decides what has gone wrong:
+     that stays a judgement for the technical team. Anything read this way is
+     reported as coming from the photograph rather than as something you said,
+     and the image is not stored. Expect a wait of minutes: a vision model on a
+     processor with no graphics card is slow.</p>
+</details>
 <div class="working" id="working" hidden>
   <strong>Thinking…</strong> <span id="elapsed">0s</span>
   <p>A question the model has not seen before takes tens of seconds on a
@@ -262,6 +382,9 @@ class Handler(BaseHTTPRequestHandler):
     # Conversation state, shared by every request thread. Slots only; see
     # assistant/session.py for what is carried and what is deliberately not.
     sessions: SessionStore = SessionStore()
+    # How many photographs each session has sent. Separate from the session
+    # store on purpose — see UploadBudget.
+    uploads: UploadBudget = UploadBudget()
     correlation_id: str
     session_id: str
 
@@ -295,12 +418,169 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         params = parse_qs(url.query)
-        question = (params.get("q", [""])[0] or "").strip()
-        verbose = params.get("v", [""])[0] == "1"
-        audience = params.get("a", [""])[0]
+        self._respond(url.path,
+                      (params.get("q", [""])[0] or "").strip(),
+                      params.get("v", [""])[0] == "1",
+                      params.get("a", [""])[0], [], [])
+
+    def do_POST(self) -> None:
+        """The same answer, for a request that carries photographs.
+
+        Everything after the boundary checks is the GET path unchanged, which is
+        the property worth having: an upload adds evidence to a question and
+        adds no answer route, no second renderer and no second place for the
+        audience set to be resolved.
+        """
+        self.correlation_id = obs.new_id()
+        url = urlparse(self.path)
+        if url.path not in ("/", "/ask"):
+            # Drained first. A request whose body is never read is answered on a
+            # connection the client is still writing into, and what the client
+            # then sees is a reset rather than the 404 — the status code is
+            # correct and unreadable, which is the worst of both. It showed up
+            # as an intermittently failing test rather than as a bug report,
+            # which is exactly what a race looks like from the outside.
+            self._drain()
+            self.send_error(404)
+            return
+        # Established before the body is read, because the per-session image
+        # budget is one of the things deciding how much of that body is worth
+        # looking at.
+        self.session_id = self._session()
+        fields, images, notes = self._read_upload()
+        if fields is None:
+            return                              # already answered with a status
+        params = parse_qs(url.query)
+        self._respond(url.path, fields.get("q", "").strip(),
+                      params.get("v", [""])[0] == "1" or fields.get("v") == "1",
+                      params.get("a", [""])[0] or fields.get("a", ""),
+                      images, notes, session_open=True)
+
+    def _drain(self) -> bool:
+        """Read and discard a declared body, so a refusal can be read back.
+
+        Returns whether it managed to. It refuses to drain a body larger than
+        the cap, because reading twelve megabytes in order to say "that is too
+        large" would be doing the work the cap exists to avoid — that case
+        closes the connection instead, which is the one honest way to stop a
+        client mid-upload. A body with no declared length cannot be drained at
+        all, for the same reason it cannot be accepted.
+        """
+        length = self.headers.get("Content-Length", "")
+        if not length.isdigit() or int(length) > MAX_UPLOAD_BYTES:
+            self.close_connection = True
+            return False
+        remaining = int(length)
+        while remaining > 0:
+            block = self.rfile.read(min(remaining, 64 * 1024))
+            if not block:
+                break
+            remaining -= len(block)
+        return True
+
+    def _read_upload(self):
+        """The posted fields and the photographs in them, or a refusal.
+
+        Returns `(fields, images, notes)`, or `(None, [], [])` when the request
+        has already been answered with a status code. `notes` are the things the
+        caller should be told about their own upload — a file that is not an
+        image, a count over the cap — because silently dropping an attachment
+        and answering as though none was sent is the kind of quiet failure this
+        codebase refuses everywhere else.
+
+        The order of the guards is the point of the method. The length is
+        checked before a byte is read, so an oversized body is refused rather
+        than buffered; the declared type is checked before the body is parsed;
+        the content is sniffed before anything is treated as an image; and the
+        filename is discarded at the only moment it is ever visible.
+        """
+        declared = self.headers.get("Content-Type", "")
+        length = self.headers.get("Content-Length", "")
+        if not length.isdigit():
+            # No length, or a length that is not a number. Reading until the
+            # connection closes is exactly the unbounded read the cap exists to
+            # prevent, so this is refused rather than guessed at.
+            self._drain()               # cannot, so it closes the connection
+            self._send(b"a length is required", "text/plain; charset=utf-8",
+                       status=411)
+            return None, [], []
+        size = int(length)
+        if size > MAX_UPLOAD_BYTES:
+            obs.event("upload_rejected", reason="too large", bytes=size)
+            self._drain()               # declines, and closes the connection
+            self._send(b"that is larger than this server accepts",
+                       "text/plain; charset=utf-8", status=413)
+            return None, [], []
+        if not declared.lower().startswith("multipart/form-data"):
+            self._drain()
+            self._send(b"expected a multipart form",
+                       "text/plain; charset=utf-8", status=415)
+            return None, [], []
+
+        # Parsed by the standard library's own MIME parser rather than by a
+        # hand-written boundary splitter. A multipart body is a MIME body, this
+        # is the parser that already ships, and a second implementation of it
+        # here would be a new place to get a length or a delimiter wrong.
+        raw = self.rfile.read(size)
+        message = BytesParser(policy=HTTP).parsebytes(
+            b"Content-Type: " + declared.encode("latin-1") + b"\r\n\r\n" + raw)
+        if not message.is_multipart():
+            self._send(b"expected a multipart form",
+                       "text/plain; charset=utf-8", status=415)
+            return None, [], []
+
+        fields: dict[str, str] = {}
+        candidates: list[bytes] = []
+        notes: list[str] = []
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            payload = part.get_payload(decode=True) or b""
+            # A part with a filename is an attachment whatever it claims to be,
+            # and a part without one is a form field. The filename itself is
+            # read for this test and then dropped on the floor: it is never
+            # stored, never logged, never echoed and never used to decide a
+            # type. A caller-supplied string that reaches a path or a page is
+            # the traversal and injection risk `CLAUDE.md` names.
+            if part.get_filename() is not None:
+                candidates.append(payload)
+            elif name:
+                fields[name] = payload.decode("utf-8", "replace")
+
+        candidates = [c for c in candidates if c]
+        if len(candidates) > MAX_IMAGES_PER_REQUEST:
+            notes.append(f"Only the first {MAX_IMAGES_PER_REQUEST} photographs "
+                         "were read; the rest were ignored.")
+            candidates = candidates[:MAX_IMAGES_PER_REQUEST]
+
+        images: list[bytes] = []
+        for data in candidates:
+            media_type = sniff(data)
+            if not media_type:
+                # Named by shape, not by filename, and the filename is not
+                # quoted back at the caller either: echoing it would put a
+                # string they chose into the page.
+                notes.append("One attachment was not a recognised image and was "
+                             "not read.")
+                obs.event("upload_rejected", reason="unrecognised container",
+                          bytes=len(data))
+                continue
+            images.append(data)
+
+        allowed = self.uploads.take(self.session_id, len(images))
+        if allowed < len(images):
+            notes.append("This conversation has sent as many photographs as the "
+                         "server accepts, so the rest were not read.")
+            obs.event("upload_rejected", reason="session cap",
+                      dropped=len(images) - allowed)
+            images = images[:allowed]
+        return fields, images, notes
+
+    def _respond(self, path: str, question: str, verbose: bool, audience: str,
+                 images: list, notes: list, session_open: bool = False) -> None:
         audiences = resolve(audience, self.audiences)
 
-        self.session_id = self._session()
+        if not session_open:
+            self.session_id = self._session()
         carried = self.sessions.carried(self.session_id)
         earlier = self.sessions.turns(self.session_id)
         pending = self.sessions.pending(self.session_id)
@@ -316,11 +596,11 @@ class Handler(BaseHTTPRequestHandler):
                 carried = {**carried, **stated}
                 asked = pending
 
-        if url.path == "/ask":
+        if path == "/ask":
             try:
                 reply = (self.assistant.ask(asked, audiences=audiences,
                                             correlation_id=self.correlation_id,
-                                            carried=carried)
+                                            carried=carried, images=images)
                          if question else None)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 # The HTML branch has always handled this; the JSON branch did
@@ -336,6 +616,8 @@ class Handler(BaseHTTPRequestHandler):
                 "question": question,
                 "answered": asked,
                 "session_slots": self.sessions.carried(self.session_id),
+                "images_read": len(images),
+                "upload_notes": notes,
                 "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
@@ -347,6 +629,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "provenance": f.provenance.value}
                                for f in a.facts],
                      "assumptions": a.assumptions,
+                     # Its own group, never folded into the assumptions: a
+                     # reading from a photograph is not a guess, and the heading
+                     # over `assumptions` says it is.
+                     "observed": a.observed,
                      "disclosure": a.disclosure}
                     for q, a in (reply.parts if reply else [])
                 ],
@@ -359,7 +645,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 reply = self.assistant.ask(asked, audiences=audiences,
                                            correlation_id=self.correlation_id,
-                                           carried=carried)
+                                           carried=carried, images=images)
                 self._remember(question, reply)
                 body_html = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
@@ -374,6 +660,10 @@ class Handler(BaseHTTPRequestHandler):
         options = "".join(
             f"<option value='{a}'{' selected' if a == audience else ''}>{a}</option>"
             for a in ("public", "trade", "staff"))
+        if notes:
+            body_html = ("<div class='card'><div class='empty'>"
+                         + "".join(_esc(n) + "<br>" for n in notes)
+                         + "</div></div>") + body_html
         page = PAGE.format(meta=self.meta, q=_esc(question),
                            body=render_history(earlier) + body_html,
                            vchecked="checked" if verbose else "",
@@ -388,13 +678,33 @@ class Handler(BaseHTTPRequestHandler):
         disagree about what was assumed. `pending` is set only by an ask-back
         and cleared by anything else, so a question that was answered never
         resumes later.
+
+        **A slot read off a photograph is dropped here, and that is the rule the
+        whole vision seam rests on.** `diagnostics["slots"]` is the router's
+        merged view, so once an upload can fill a slot it carries values nobody
+        said — and folding those into the session would persist a model's
+        uncalibrated reading of an image as though the caller had stated it, on
+        every later turn, invisibly, after the image has scrolled out of the
+        page. The provenance recorded on the answer is what distinguishes them,
+        which is why the exclusion reads the facts rather than the slots: a slot
+        the photograph supplied *and* the question stated comes back as
+        ``STATED`` and is kept, because the person did say it.
+
+        The cost is real and is the accepted one: a follow-up about the same
+        wall does not inherit what the photograph showed, so the caller may be
+        asked back for something the image settled. If that proves annoying the
+        fix is an expiring fourth state, not a quiet promotion into the session.
         """
         if reply is None:
             return
         slots: dict = {}
         pending = ""
         for _part, answer in reply.parts:
-            slots.update(answer.diagnostics.get("slots", {}))
+            observed = {fact.slot for fact in answer.facts
+                        if fact.provenance is Provenance.OBSERVED}
+            slots.update({name: value
+                          for name, value in answer.diagnostics.get("slots", {}).items()
+                          if name not in observed})
             if answer.path == Path_.ASK_BACK.value:
                 pending = reply.question
         summary = "\n\n".join(answer.text for _part, answer in reply.parts)
@@ -451,6 +761,7 @@ def main(argv: list[str] | None = None) -> int:
     # One store per server, rather than the class default, so a restarted
     # process never inherits a conversation from the last one.
     Handler.sessions = SessionStore()
+    Handler.uploads = UploadBudget()
     Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (
         f"{snapshot.document_count} documents · {snapshot.chunk_count} passages · "
