@@ -16,26 +16,29 @@ value remembered.
 
 **What is worth carrying, and why the list is short.**
 
-Carried: `substrate`, `location`, `exposure`. These are facts about one
-building. They do not expire between turns — a wall does not stop being brick
-because the next question is about drying times — and the answer engine already
-treats exactly these three as statable assumptions, printed back to the person
-on every answer that used one. Substrate and location are the two load-bearing
-slots of decision 10, which is the whole reason this file exists; exposure joins
-them because it is the same kind of fact and is only ever a stated assumption.
+Carried: `product`, `substrate`, `location`, `exposure`.
+
+- **Product**: The current subject of discussion. "I have a brick wall — should I
+  use Ultra?" sets `product=Ultra`. A follow-up "How much would I need?" stays
+  about Ultra. A later "what about Forte instead?" re-detects and overwrites.
+- **Substrate, location, exposure**: Facts about the building itself. They do not
+  expire between turns — a wall does not stop being brick because the next
+  question is about drying times. Substrate and location are the two
+  load-bearing slots of decision 10, which is the whole reason this file exists;
+  exposure joins them because it is the same kind of fact and is only ever a
+  stated assumption.
+
+All four are printed back as stated assumptions, so all four are worth carrying.
 
 Dropped, on purpose: `calculation`, `photograph`, `symptom`, `cause_asked`,
 `property_asked`. Every one of these describes *this question's shape* rather
-than the building, and carrying a shape forward changes the route of a later
-question that never asked for it. A `calculation` slot held from two turns ago
-sends a plain lookup down router step 6, where the sum is refused and coverage
-figures are printed at somebody who asked about colour. A held `photograph` slot
-appends "I cannot see photographs" to an answer nobody attached anything to, and
-together with `symptom` it feeds `_needs_substrate`, so a symptom mentioned once
-would turn every later catalogue question into an ask-back. `cause_asked` would
-pin the session to the diagnosis path permanently. `property_asked` is the
-question, not the context. The rule is: carry what the person told us about
-their wall, never what the last question happened to be asking for.
+than the building or its active topic, and carrying a shape forward changes the
+route of a later question that never asked for it. A `calculation` slot held from
+two turns ago sends a plain lookup down router step 6, where the sum is refused.
+A held `photograph` slot appends "I cannot see photographs" to an answer nobody
+attached. `cause_asked` pins the session to the diagnosis path. The rule is:
+carry what the person told us about their wall and what they are talking about,
+never what the last question happened to be asking for.
 
 Bounded and idle-expiring, because this is a process-local dictionary on a
 `ThreadingHTTPServer` and an unbounded one reachable by an anonymous caller is a
@@ -51,10 +54,12 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
-# The three facts about a building, as argued in the module docstring. The same
-# three that `AnswerEngine._assumptions` prints back to the person, which is not
-# a coincidence: a slot worth stating as an assumption is a slot worth holding.
-CARRIED_SLOTS = ("substrate", "location", "exposure")
+# The facts about a building and its active topic, carried across turns.
+# Substrate, location, exposure describe the wall itself; product is the current
+# subject of discussion. All four are stated back as assumptions, so all four are
+# worth carrying. A change of product in a follow-up ("what about Forte instead?")
+# re-detects it; an unmentioned product stays the prior one.
+CARRIED_SLOTS = ("product", "substrate", "location", "exposure")
 
 # A demonstration and a day of visitors. Each session is a handful of short
 # strings, so the memory is unremarkable and the bound is about refusing to grow

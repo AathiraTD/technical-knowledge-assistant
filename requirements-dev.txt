@@ -1,0 +1,21 @@
+# Test-only dependencies. Deliberately a separate file from requirements.txt,
+# which DECISIONS.md entry 4 argues down to five runtime packages: a browser
+# driver in that list would make the claim false, and the product runtime does
+# not import any of this.
+#
+# Nothing here is needed to run the assistant, build an index, or run the
+# evaluation harness. `pip install -r requirements.txt` remains the clean-clone
+# path and stays free of browser binaries.
+
+-r requirements.txt
+
+# Browser automation for the web UI's own surface -- cookies, session reset,
+# multipart upload, rendered citations. These are the behaviours the CLI cannot
+# exercise and the evaluation harness deliberately does not: decision 15 keeps
+# the CLI canonical so a UI failure never costs the evidence, which means the UI
+# needs its own thin proof rather than a share of the harness's.
+#
+# Opt-in at runtime as well as at install: tests/e2e skips unless ASSISTANT_E2E
+# is set, so a clean clone and CI are unaffected by a missing browser. Install
+# the browser itself with: python -m playwright install chromium
+playwright==1.62.0

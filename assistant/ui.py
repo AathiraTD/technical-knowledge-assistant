@@ -434,7 +434,7 @@ function sendMessage() {{
   }} else {{
     // Use GET for text-only
     const q = encodeURIComponent(question);
-    fetch('/?q=' + q, {{
+    fetch('/ask?q=' + q, {{
       headers: {{ 'Accept': 'application/json' }}
     }})
     .then(r => r.json())

@@ -83,12 +83,16 @@
    "question": "Which finish coats are compatible with Forte render, including the hardening time required first?",
    "pass": false,
    "notes": [
-    "the answer's markers reference 1 distinct document(s), expected at least 2"
+    "path was ['refuse'], expected only ['compose']",
+    "refused=True, expected False",
+    "every part refused, so nothing answered was cited",
+    "retrieval returned 1 distinct document(s), expected at least 2",
+    "the answer's markers reference 0 distinct document(s), expected at least 2"
    ],
    "paths": [
-    "compose"
+    "refuse"
    ],
-   "refused": false
+   "refused": true
   },
   {
    "id": "S9",
@@ -150,7 +154,7 @@
    "pass": true,
    "notes": [],
    "paths": [
-    "compose"
+    "refuse"
    ]
   },
   {
@@ -160,17 +164,19 @@
    "pass": true,
    "notes": [],
    "paths": [
-    "refuse"
+    "compose"
    ]
   },
   {
    "id": "P7",
    "name": "Health question",
    "question": "I got lime plaster in my eye, what should I do?",
-   "pass": true,
-   "notes": [],
+   "pass": false,
+   "notes": [
+    "contains none of ['medical', '111', 'safety data sheet']"
+   ],
    "paths": [
-    "compose"
+    "refuse"
    ]
   },
   {
@@ -201,6 +207,381 @@
    "notes": [],
    "paths": [
     "refuse"
+   ]
+  }
+ ],
+ "conversations": [
+  {
+   "id": "C1",
+   "name": "Progressive refinement, then a correction",
+   "pass": true,
+   "turns": [
+    {
+     "turn": 1,
+     "question": "I have an internal brick wall.",
+     "asked": "I have an internal brick wall.",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "brick",
+      "location": "internal"
+     },
+     "session_slots": {
+      "substrate": "brick",
+      "location": "internal"
+     }
+    },
+    {
+     "turn": 2,
+     "question": "Would Ultra work?",
+     "asked": "Would Ultra work?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra"
+     },
+     "session_slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra"
+     }
+    },
+    {
+     "turn": 3,
+     "question": "What thickness should it be?",
+     "asked": "What thickness should it be?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra",
+      "property_asked": "thickness"
+     },
+     "session_slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra"
+     }
+    },
+    {
+     "turn": 4,
+     "question": "How many bags do I need for 30 square metres?",
+     "asked": "How many bags do I need for 30 square metres?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "extract"
+     ],
+     "steps": [
+      "6"
+     ],
+     "slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra",
+      "calculation": "quantity"
+     },
+     "session_slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "product": "ultra"
+     }
+    },
+    {
+     "turn": 5,
+     "question": "Sorry, it is actually stone.",
+     "asked": "Sorry, it is actually stone.",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "stone",
+      "location": "internal",
+      "product": "ultra"
+     },
+     "session_slots": {
+      "substrate": "stone",
+      "location": "internal",
+      "product": "ultra"
+     }
+    }
+   ]
+  },
+  {
+   "id": "C2",
+   "name": "Topic switch between two products",
+   "pass": true,
+   "turns": [
+    {
+     "turn": 1,
+     "question": "How much water does Solo Onecoat need per bag?",
+     "asked": "How much water does Solo Onecoat need per bag?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "property_asked": "water",
+      "product": "solo"
+     },
+     "session_slots": {
+      "product": "solo"
+     }
+    },
+    {
+     "turn": 2,
+     "question": "What thickness should Ultra be applied at?",
+     "asked": "What thickness should Ultra be applied at?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "refuse"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "product": "ultra",
+      "property_asked": "thickness"
+     },
+     "session_slots": {
+      "product": "ultra"
+     }
+    }
+   ]
+  },
+  {
+   "id": "C3",
+   "name": "Slot shapes do not survive the turn that asked them",
+   "pass": true,
+   "turns": [
+    {
+     "turn": 1,
+     "question": "How many bags of Solo Onecoat do I need for 20 square metres?",
+     "asked": "How many bags of Solo Onecoat do I need for 20 square metres?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "extract"
+     ],
+     "steps": [
+      "6"
+     ],
+     "slots": {
+      "calculation": "quantity",
+      "product": "solo"
+     },
+     "session_slots": {
+      "product": "solo"
+     }
+    },
+    {
+     "turn": 2,
+     "question": "I have attached a photo of the wall.",
+     "asked": "I have attached a photo of the wall.",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "product": "solo",
+      "photograph": "photo"
+     },
+     "session_slots": {
+      "product": "solo"
+     }
+    },
+    {
+     "turn": 3,
+     "question": "Why is my render cracking?",
+     "asked": "Why is my render cracking?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "diagnosis"
+     ],
+     "steps": [
+      "3"
+     ],
+     "slots": {
+      "product": "solo",
+      "symptom": "crack",
+      "cause_asked": "cause"
+     },
+     "session_slots": {
+      "product": "solo"
+     }
+    },
+    {
+     "turn": 4,
+     "question": "What is the coverage of Solo Onecoat?",
+     "asked": "What is the coverage of Solo Onecoat?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "refuse"
+     ],
+     "steps": [
+      "4"
+     ],
+     "slots": {
+      "product": "solo",
+      "property_asked": "coverage"
+     },
+     "session_slots": {
+      "product": "solo"
+     }
+    }
+   ]
+  },
+  {
+   "id": "C4",
+   "name": "The ask-back cycle closes",
+   "pass": true,
+   "turns": [
+    {
+     "turn": 1,
+     "question": "What plaster should I use?",
+     "asked": "What plaster should I use?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "ask back"
+     ],
+     "steps": [
+      "5"
+     ],
+     "slots": {},
+     "session_slots": {}
+    },
+    {
+     "turn": 2,
+     "question": "Brick.",
+     "asked": "What plaster should I use?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "brick"
+     },
+     "session_slots": {
+      "substrate": "brick"
+     }
+    }
+   ]
+  },
+  {
+   "id": "C5",
+   "name": "An explicitly named product survives into the follow-up",
+   "pass": true,
+   "turns": [
+    {
+     "turn": 1,
+     "question": "I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?",
+     "asked": "I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "compose"
+     ],
+     "steps": [
+      "8"
+     ],
+     "slots": {
+      "substrate": "brick",
+      "location": "internal",
+      "property_asked": "thickness",
+      "product": "ultra"
+     },
+     "session_slots": {
+      "product": "ultra",
+      "substrate": "brick",
+      "location": "internal"
+     }
+    },
+    {
+     "turn": 2,
+     "question": "How much would I need for 30 m2 at 25 mm?",
+     "asked": "How much would I need for 30 m2 at 25 mm?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "extract"
+     ],
+     "steps": [
+      "6"
+     ],
+     "slots": {
+      "product": "ultra",
+      "substrate": "brick",
+      "location": "internal",
+      "calculation": "quantity",
+      "property_asked": "thickness"
+     },
+     "session_slots": {
+      "product": "ultra",
+      "substrate": "brick",
+      "location": "internal"
+     }
+    },
+    {
+     "turn": 3,
+     "question": "How much does a bag cost?",
+     "asked": "How much does a bag cost?",
+     "pass": true,
+     "notes": [],
+     "paths": [
+      "route"
+     ],
+     "steps": [
+      "policy gate"
+     ],
+     "slots": {},
+     "session_slots": {
+      "product": "ultra",
+      "substrate": "brick",
+      "location": "internal"
+     }
+    }
    ]
   }
  ],
