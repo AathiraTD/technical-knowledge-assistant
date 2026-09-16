@@ -17,9 +17,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 from . import observability as obs
 from . import ollama
+from .logging.diagnosis_capture import DiagnosisCapture
 from .model import Retrieved
 from .router import Decision, Path_
 
@@ -835,6 +837,22 @@ class AnswerEngine:
             "and it is worth reading before you call.\n\n"
             f"{published}\n\n{_contact_line(self.names)}"
         )
+
+        # Capture diagnosis hand-off for the failure library (fire-and-forget)
+        try:
+            capture = DiagnosisCapture()
+            chunk_ids = [h.chunk.chunk_id for h in decision.hits[:3]]
+            tags = [slot for slot in ["symptom", "cause_asked"] if slot in decision.slots]
+            capture.capture(
+                question=question,
+                images=[],
+                chunk_ids=chunk_ids,
+                refusal_reason="diagnosis_handed_off",
+                tags=tags,
+            )
+        except Exception as e:
+            obs.event("diagnosis_capture_error", error=str(e))
+
         return self._finish(decision, text, decision.hits[:3], question)
 
     def ask_back(self, decision: Decision, question: str = "") -> Answer:
