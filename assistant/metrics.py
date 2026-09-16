@@ -152,6 +152,11 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+try:
+    from . import otel_export
+except ImportError:
+    otel_export = None  # type: ignore
+
 # How many spans one scrape may read. Roughly a day of heavy development
 # traffic, by the same measurement that sized TRACE_ROW_CAP — about two thousand
 # span rows on a busy day — so a normal window covers everything and the clamp
@@ -577,3 +582,104 @@ def _summary(tally: _Tally) -> list[str]:
         lines.append(_sample("assistant_span_duration_ms_count",
                              {"source": source, "span": name}, len(ordered)))
     return lines
+
+
+def export_to_otel(repo: Any, window: int = WINDOW) -> None:
+    """Export metrics to OTLP if configured.
+
+    Reads the same trace data as render() and sends key metrics to the OTLP endpoint.
+    If endpoint is not configured or unreachable, silently continues.
+    """
+    if otel_export is None:
+        return
+
+    window = max(1, min(int(window or WINDOW), WINDOW))
+    try:
+        spans = repo.traces(limit=window) or []
+    except Exception:
+        return
+
+    tally = _Tally()
+    for span in spans:
+        try:
+            tally.add(span)
+        except Exception:
+            continue
+
+    # Build OTel metrics list
+    metrics = []
+    present = [s for s in (*SOURCES, OTHER_SOURCE) if s in tally.spans]
+
+    # Window info
+    for source in present:
+        metrics.append({
+            "name": "assistant_window_spans",
+            "gauge": {"dataPoints": [
+                {"attributes": [{"key": "source", "value": {"stringValue": source}}],
+                 "asInt": tally.spans.get(source, 0)}
+            ]}
+        })
+
+    # Answer outcomes
+    for (source, outcome), count in tally.outcomes.items():
+        metrics.append({
+            "name": "assistant_outcomes_total",
+            "gauge": {"dataPoints": [
+                {"attributes": [
+                    {"key": "source", "value": {"stringValue": source}},
+                    {"key": "outcome", "value": {"stringValue": outcome}}
+                ], "asInt": count}
+            ]}
+        })
+
+    # Cache hits
+    for source in present:
+        if source in tally.cache_lookups:
+            metrics.append({
+                "name": "assistant_cache_hits_total",
+                "gauge": {"dataPoints": [
+                    {"attributes": [{"key": "source", "value": {"stringValue": source}}],
+                     "asInt": tally.cache_hits.get(source, 0)}
+                ]}
+            })
+
+    # Check failures
+    for (source, check), count in tally.check_failures.items():
+        metrics.append({
+            "name": "assistant_check_failures_total",
+            "gauge": {"dataPoints": [
+                {"attributes": [
+                    {"key": "source", "value": {"stringValue": source}},
+                    {"key": "check", "value": {"stringValue": check}}
+                ], "asInt": count}
+            ]}
+        })
+
+    # Span errors
+    for (source, name), count in tally.errors.items():
+        metrics.append({
+            "name": "assistant_span_errors_total",
+            "gauge": {"dataPoints": [
+                {"attributes": [
+                    {"key": "source", "value": {"stringValue": source}},
+                    {"key": "span", "value": {"stringValue": name}}
+                ], "asInt": count}
+            ]}
+        })
+
+    # Latency summaries (simplified: just send one quantile per span)
+    for (source, name), values in tally.durations.items():
+        if values:
+            ordered = sorted(values)
+            p95 = _quantile(ordered, 0.95)
+            metrics.append({
+                "name": "assistant_span_duration_ms_p95",
+                "gauge": {"dataPoints": [
+                    {"attributes": [
+                        {"key": "source", "value": {"stringValue": source}},
+                        {"key": "span", "value": {"stringValue": name}}
+                    ], "asDouble": p95}
+                ]}
+            })
+
+    otel_export.export_metrics({"metrics": metrics})
