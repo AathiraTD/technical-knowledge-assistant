@@ -430,8 +430,15 @@ class Assistant:
                 added.append(h)
         return added
 
-    def _named_product(self, part: str) -> str:
-        """The product this question names, if it names one the corpus knows.
+    def _named_product(self, part: str, carried: dict | None = None) -> str:
+        """The product this question names, or the one from prior turns.
+
+        Precedence is explicit name first, carried name second, nothing third.
+        A question that names a product means that product even when an earlier
+        turn established another, so "what about Forte instead?" switches; a
+        question that names none inherits, which is what makes "how much for 30
+        square metres" a question about the product under discussion rather than
+        about the corpus at large.
 
         Matched against the harvested product list rather than guessed, so it
         cannot invent a product — the same list check 5 uses to refuse invented
@@ -445,8 +452,13 @@ class Assistant:
         lowered = part.lower()
         named = [p for p in self.engine.names.get("products", [])
                  if p and p.lower() in lowered]
+
+        # If question names a product, use it. Otherwise fall back to carried.
         if not named:
+            if carried and "product" in carried:
+                return carried["product"]
             return ""
+
         # Longest wins, then the maker's name comes off. Both halves matter.
         # "Lime Green Ultra" and "Ultra" are both harvested names, so the
         # longest match is the brand-prefixed one — and chunks are tagged with
@@ -523,7 +535,7 @@ class Assistant:
                 return self.engine.documents_for(part, audiences)
             return self.engine.route(topic, spec)
 
-        named = self._named_product(part)
+        named = self._named_product(part, carried=carried)
         hits = self.retriever.search(part, audiences=audiences, product=named)
         # A quantity question embeds as a question about quantity, so the
         # coverage figure it needs may not be in the top five at all — and a
@@ -619,8 +631,12 @@ class Assistant:
             rendering["disclosure"] = bool(answer.disclosure)
             rendering["refused"] = answer.refused
 
-        # Carry detected slots into answer diagnostics so session can persist them
-        answer.diagnostics["slots"] = decision.slots
+        # Carry detected slots into answer diagnostics so session can persist them.
+        # Include product separately since it's detected by _named_product, not router.slots.
+        slots = dict(decision.slots)
+        if named:
+            slots["product"] = named
+        answer.diagnostics["slots"] = slots
         return answer
 
 

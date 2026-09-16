@@ -1,6 +1,5 @@
 {
  "_comment": "Multi-turn scenarios, run against the real index by `python -m eval.run`. Every expectation is about route, numbered router step, slots, slot provenance, session state or a published figure — never about wording, because decision 7's G4 note records that the same question asked twice produces different prose and identical evidence. Photograph scenarios are deliberately absent here and live in tests/test_conversation_eval.py instead: perception needs a vision model, and this harness must stay runnable without one.",
-
  "conversations": [
   {
    "id": "C1",
@@ -10,43 +9,85 @@
     {
      "question": "I have an internal brick wall.",
      "expect": {
-      "slots_include": {"substrate": "brick", "location": "internal"},
-      "facts": {"substrate": "stated", "location": "stated"},
-      "session_slots_after": {"substrate": "brick", "location": "internal"},
+      "slots_include": {
+       "substrate": "brick",
+       "location": "internal"
+      },
+      "facts": {
+       "substrate": "stated",
+       "location": "stated"
+      },
+      "session_slots_after": {
+       "substrate": "brick",
+       "location": "internal"
+      },
       "pending_after": false
      }
     },
     {
      "question": "Would Ultra work?",
      "expect": {
-      "slots_include": {"substrate": "brick", "location": "internal"},
-      "facts": {"substrate": "carried", "location": "carried"},
-      "session_slots_after": {"substrate": "brick", "location": "internal"}
+      "slots_include": {
+       "substrate": "brick",
+       "location": "internal"
+      },
+      "facts": {
+       "substrate": "carried",
+       "location": "carried"
+      },
+      "session_slots_after": {
+       "substrate": "brick",
+       "location": "internal"
+      }
      }
     },
     {
      "question": "What thickness should it be?",
      "expect": {
-      "slots_include": {"substrate": "brick", "property_asked": "thickness"},
-      "facts": {"substrate": "carried"},
-      "session_slots_exclude": ["property_asked"]
+      "slots_include": {
+       "substrate": "brick",
+       "property_asked": "thickness"
+      },
+      "facts": {
+       "substrate": "carried"
+      },
+      "session_slots_exclude": [
+       "property_asked"
+      ]
      }
     },
     {
      "question": "How many bags do I need for 30 square metres?",
      "expect": {
-      "slots_include": {"calculation": "quantity", "substrate": "brick"},
-      "facts": {"substrate": "carried"},
-      "session_slots_exclude": ["calculation"]
+      "slots_include": {
+       "calculation": "quantity",
+       "substrate": "brick"
+      },
+      "facts": {
+       "substrate": "carried"
+      },
+      "session_slots_exclude": [
+       "calculation"
+      ]
      }
     },
     {
      "question": "Sorry, it is actually stone.",
      "expect": {
-      "slots_include": {"substrate": "stone"},
-      "facts": {"substrate": "stated"},
-      "session_slots_after": {"substrate": "stone", "location": "internal"},
-      "session_slots_exclude": ["calculation", "property_asked"]
+      "slots_include": {
+       "substrate": "stone"
+      },
+      "facts": {
+       "substrate": "stated"
+      },
+      "session_slots_after": {
+       "substrate": "stone",
+       "location": "internal"
+      },
+      "session_slots_exclude": [
+       "calculation",
+       "property_asked"
+      ]
      }
     }
    ]
@@ -58,14 +99,19 @@
    "turns": [
     {
      "question": "How much water does Solo Onecoat need per bag?",
-     "expect": {"must_cite": true, "chunks_retrieved": 1}
+     "expect": {
+      "must_cite": true,
+      "chunks_retrieved": 1
+     }
     },
     {
      "question": "What thickness should Ultra be applied at?",
      "expect": {
       "cached": false,
       "top_source_must_not_match": "solo",
-      "session_slots_exclude": ["property_asked"]
+      "session_slots_exclude": [
+       "property_asked"
+      ]
      }
     }
    ]
@@ -77,25 +123,54 @@
    "turns": [
     {
      "question": "How many bags of Solo Onecoat do I need for 20 square metres?",
-     "expect": {"slots_include": {"calculation": "quantity"},
-                "session_slots_exclude": ["calculation"]}
+     "expect": {
+      "slots_include": {
+       "calculation": "quantity"
+      },
+      "session_slots_exclude": [
+       "calculation"
+      ]
+     }
     },
     {
      "question": "I have attached a photo of the wall.",
-     "expect": {"slots_include": {"photograph": "photo"},
-                "session_slots_exclude": ["photograph"]}
+     "expect": {
+      "slots_include": {
+       "photograph": "photo"
+      },
+      "session_slots_exclude": [
+       "photograph"
+      ]
+     }
     },
     {
      "question": "Why is my render cracking?",
-     "expect": {"slots_include": {"cause_asked": "cause"},
-                "session_slots_exclude": ["symptom", "cause_asked"]}
+     "expect": {
+      "slots_include": {
+       "cause_asked": "cause"
+      },
+      "session_slots_exclude": [
+       "symptom",
+       "cause_asked"
+      ]
+     }
     },
     {
      "question": "What is the coverage of Solo Onecoat?",
      "expect": {
-      "slots_exclude": ["calculation", "photograph", "symptom", "cause_asked"],
-      "step_not_in": ["3", "6"],
-      "path_not_in": ["diagnosis"]
+      "slots_exclude": [
+       "calculation",
+       "photograph",
+       "symptom",
+       "cause_asked"
+      ],
+      "step_not_in": [
+       "3",
+       "6"
+      ],
+      "path_not_in": [
+       "diagnosis"
+      ]
      }
     }
    ]
@@ -107,14 +182,98 @@
    "turns": [
     {
      "question": "What plaster should I use?",
-     "expect": {"path_in": ["ask back"], "step_in": ["5"], "pending_after": true,
-                "model_ran": false}
+     "expect": {
+      "path_in": [
+       "ask back"
+      ],
+      "step_in": [
+       "5"
+      ],
+      "pending_after": true,
+      "model_ran": false
+     }
     },
     {
      "question": "Brick.",
-     "expect": {"resumes_turn": 0, "slots_include": {"substrate": "brick"},
-                "path_not_in": ["ask back"], "pending_after": false,
-                "session_slots_after": {"substrate": "brick"}}
+     "expect": {
+      "resumes_turn": 0,
+      "slots_include": {
+       "substrate": "brick"
+      },
+      "path_not_in": [
+       "ask back"
+      ],
+      "pending_after": false,
+      "session_slots_after": {
+       "substrate": "brick"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "C5",
+   "name": "An explicitly named product survives into the follow-up",
+   "why": "The regression for the drift found in browser testing: turn one named Lime Green Ultra and was answered from WarmShell passages, because both are about insulating an old solid wall internally and the corpus is semantically dense there. The product was then never carried, so the quantity question in turn two retrieved with no product at all and read a coverage figure off whichever sheet ranked first. These three turns assert the whole precedence rule rather than the symptom: an explicit name beats semantic similarity, an unmentioned product inherits, and a genuine price question still leaves retrieval for the policy gate instead of being dragged along by the inherited one.",
+   "turns": [
+    {
+     "question": "I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?",
+     "expect": {
+      "slots_include": {
+       "substrate": "brick",
+       "location": "internal",
+       "product": "ultra"
+      },
+      "session_slots_after": {
+       "product": "ultra",
+       "substrate": "brick",
+       "location": "internal"
+      },
+      "top_source_must_not_match": "warmshell",
+      "must_cite": true,
+      "refused": false
+     }
+    },
+    {
+     "question": "How much would I need for 30 m2 at 25 mm?",
+     "expect": {
+      "slots_include": {
+       "product": "ultra"
+      },
+      "session_slots_after": {
+       "product": "ultra",
+       "substrate": "brick",
+       "location": "internal"
+      },
+      "path_in": [
+       "extract"
+      ],
+      "step_in": [
+       "6"
+      ],
+      "path_not_in": [
+       "route",
+       "refuse"
+      ],
+      "top_source_must_not_match": "warmshell",
+      "answer_contains_all": [
+       "0.6"
+      ],
+      "model_ran": false,
+      "refused": false
+     }
+    },
+    {
+     "question": "How much does a bag cost?",
+     "expect": {
+      "path_in": [
+       "route"
+      ],
+      "model_ran": false,
+      "answer_contains_all": [
+       "does not publish prices"
+      ]
+     }
     }
    ]
   }

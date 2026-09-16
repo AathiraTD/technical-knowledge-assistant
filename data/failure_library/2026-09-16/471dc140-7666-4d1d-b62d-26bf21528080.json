@@ -1,0 +1,19 @@
+{
+  "case_id": "471dc140-7666-4d1d-b62d-26bf21528080",
+  "question": "what is causing the damp patches on this wall",
+  "image_hashes": [],
+  "retrieved_chunk_ids": [
+    "https://example.invalid/solo#v1-0",
+    "https://example.invalid/duro#v1-0",
+    "https://example.invalid/solo#v1-1"
+  ],
+  "refusal_reason": "diagnosis_handed_off",
+  "timestamp": "2026-09-16T17:35:27.851888+00:00",
+  "tags": [
+    "symptom",
+    "cause_asked"
+  ],
+  "expert_diagnosis": null,
+  "advisor_id": null,
+  "confidence_level": null
+}

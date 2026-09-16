@@ -1,0 +1,19 @@
+{
+  "case_id": "0c97a815-0ffd-45f0-a43d-aaf81140f214",
+  "question": "Why is my render cracking?",
+  "image_hashes": [],
+  "retrieved_chunk_ids": [
+    "https://example.invalid/ultra#v1-0",
+    "https://example.invalid/solo#v1-0",
+    "https://example.invalid/ultra#v1-1"
+  ],
+  "refusal_reason": "diagnosis_handed_off",
+  "timestamp": "2026-09-16T17:34:11.331405+00:00",
+  "tags": [
+    "symptom",
+    "cause_asked"
+  ],
+  "expert_diagnosis": null,
+  "advisor_id": null,
+  "confidence_level": null
+}

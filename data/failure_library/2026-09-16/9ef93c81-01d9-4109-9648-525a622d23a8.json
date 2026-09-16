@@ -1,0 +1,19 @@
+{
+  "case_id": "9ef93c81-01d9-4109-9648-525a622d23a8",
+  "question": "Why is my render cracking?",
+  "image_hashes": [],
+  "retrieved_chunk_ids": [
+    "https://www.lime-green.co.uk/Documents/Datasheets/lime-green-silicate-render-3.pdf#v2-3",
+    "https://www.lime-green.co.uk/Documents/Datasheets/LimeGreen Forte.pdf#v2-5",
+    "https://www.lime-green.co.uk/support/knowledgebase/background-preparation-for-rendering#v3-13"
+  ],
+  "refusal_reason": "diagnosis_handed_off",
+  "timestamp": "2026-09-16T20:44:51.606469+00:00",
+  "tags": [
+    "symptom",
+    "cause_asked"
+  ],
+  "expert_diagnosis": null,
+  "advisor_id": null,
+  "confidence_level": null
+}
