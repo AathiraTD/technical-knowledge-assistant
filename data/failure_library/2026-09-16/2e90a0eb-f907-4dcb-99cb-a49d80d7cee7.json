@@ -1,0 +1,14 @@
+{
+  "case_id": "2e90a0eb-f907-4dcb-99cb-a49d80d7cee7",
+  "question": "What thickness does Solo go on at",
+  "image_hashes": [],
+  "retrieved_chunk_ids": [
+    "https://example.invalid/solo#v1-0"
+  ],
+  "refusal_reason": "diagnosis_handed_off",
+  "timestamp": "2026-09-16T17:05:47.030298+00:00",
+  "tags": [],
+  "expert_diagnosis": null,
+  "advisor_id": null,
+  "confidence_level": null
+}

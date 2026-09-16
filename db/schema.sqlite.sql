@@ -218,3 +218,34 @@ CREATE INDEX IF NOT EXISTS turn_traces_session
 -- 200,000-row cap behind it, both enforced inside the adapter's span write; see
 -- assistant/repository.py for why on write rather than on a schedule.
 CREATE INDEX IF NOT EXISTS turn_traces_started_at ON turn_traces (started_at);
+
+-- ------------------------------------------------------------------ sessions
+-- Multi-turn conversation state, persistent across server restarts.
+-- One row per active session: facts about the building, the pending question,
+-- and the turn history. Idle sessions are swept on read/write.
+--
+-- `slots` holds the carried facts: substrate, location, exposure. Only these
+-- three carry between turns; they are the three decision 10 names as load-bearing
+-- and the three the router prints back as stated assumptions.
+--
+-- `pending` is the question waiting on a missing fact, or empty. When the user
+-- provides the missing fact, the pending question is re-asked with the new slots
+-- and then cleared.
+--
+-- `turns` is the conversation so far, capped at MAX_TURNS (8): list of
+-- [question, answer[:400]]. Newest first or oldest first per UX decision;
+-- stored as JSON for simplicity.
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id          TEXT    PRIMARY KEY,
+    audience            TEXT    NOT NULL DEFAULT 'public'
+                            CHECK (audience IN ('public', 'trade', 'staff')),
+    touched             REAL    NOT NULL,
+    slots               TEXT    NOT NULL DEFAULT '{}',
+    pending             TEXT    NOT NULL DEFAULT '',
+    turns               TEXT    NOT NULL DEFAULT '[]',
+    created_at          TEXT    NOT NULL,
+    updated_at          TEXT    NOT NULL
+);
+
+-- Touch-based LRU eviction: find and sweep expired sessions on read/write.
+CREATE INDEX IF NOT EXISTS sessions_touched ON sessions (touched);
