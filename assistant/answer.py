@@ -39,8 +39,16 @@ SYSTEM = (
     "Two or three sentences is usually the whole answer.\n"
     "\n"
     "RULES\n"
-    "- Use only the passages. If they do not answer the question, say so in "
-    "one sentence.\n"
+    # Deliberately no "say so if the passages do not answer it". That invited
+    # exactly one sentence — "The passages do not mention gypsum plaster
+    # specifically" — which check 1 then refused, because a statement about what
+    # the passages *lack* cannot cite a passage and cannot overlap one. The
+    # prompt was asking for the one thing the checks are built to kill. Writing
+    # nothing is the right behaviour: an unsupported answer fails check 1 anyway
+    # and falls into the refusal renderer, which says it better — it names what
+    # was looked for, prints what is published with its source, and gives the
+    # contact line.
+    "- Use only the passages. Write nothing you cannot cite.\n"
     "- Copy figures exactly as written, with their units. Never convert, round "
     "or add up.\n"
     "- Keep every figure with the product it was published for.\n"
@@ -88,29 +96,49 @@ class Provenance(Enum):
 
     Printing "Assumed: location external" at somebody who wrote "my external
     lime render" makes a system that listened look like a system that guessed,
-    and it invites them to correct something that was never wrong. Three states,
-    and each one is currently produced by something:
+    and it invites them to correct something that was never wrong. Four states,
+    and each one is produced by something this repository actually does:
 
     ``STATED``   the caller's own words, in the question being answered.
     ``CARRIED``  the caller's own words, in an earlier turn of the same
                  conversation — `assistant/session.py` holds exactly these three
                  slots forward. Still stated, just not in this sentence, so it
                  is printed as something they told us rather than as a guess.
+    ``OBSERVED`` read off a photograph attached to this turn. Not stated, not
+                 assumed, and the distinction is the whole reason this member
+                 exists — see below.
     ``ASSUMED``  nothing was said and the system chose. Today the only producer
                  is the per-option answer of decision 10: inside/outside was
                  uncued, so both are answered.
 
-    Decision 16.1 wants ``explicit / visually_observed / inferred / unknown``
-    when a photograph can fill a slot. That is one more member here and one more
-    row in `_PHRASE` — `assistant/vision.py` resolves observations to a
-    `carried` dict and nothing yet hands one to `Assistant.ask`, so an
-    ``OBSERVED`` member would be a state nothing in this repository can produce
-    and a claim the renderer could never make honestly. It is deliberately not
-    built; the shape is what makes it a one-line addition when it is.
+    ``OBSERVED`` used to be argued *against* here, and the argument was right
+    while it held: `assistant/vision.py` resolved observations to a `carried`
+    dict, nothing handed one to `Assistant.ask`, and a member nothing can
+    produce is a claim the renderer could never make honestly. That reasoning
+    is now obsolete rather than merely inconvenient. `Assistant.ask` takes
+    `images`, runs them through `vision.slots_from_images`, and merges the
+    resolved slots into `carried` — so the state exists, and the moment it
+    exists the *absence* of the member becomes the defect.
+
+    The defect is worth naming, because it is worse than the one the provenance
+    distinction was introduced to fix. Without ``OBSERVED``, a slot read off a
+    photograph is indistinguishable from a slot the caller stated two turns ago,
+    so the answer prints "brick (substrate), as you told me earlier in this
+    conversation" about a wall nobody described. That attributes a model's
+    uncalibrated reading of an image to the person, which is exactly the thing
+    a citation-bound system must never do: it launders an inference into
+    testimony. The photograph is the one source the caller can check against
+    their own eyes, and saying so is the whole value of the member.
+
+    ``INFERRED`` and ``UNKNOWN``, the other two states decision 16.1 lists, are
+    still deliberately absent, for the reason ``OBSERVED`` was: nothing in this
+    repository infers a slot, and an unknown fact is represented by the slot not
+    being there at all.
     """
 
     STATED = "stated"
     CARRIED = "carried"
+    OBSERVED = "observed"
     ASSUMED = "assumed"
 
 
@@ -119,6 +147,7 @@ class Provenance(Enum):
 _PHRASE = {
     Provenance.STATED: "{value} ({slot}), as you said",
     Provenance.CARRIED: "{value} ({slot}), as you told me earlier in this conversation",
+    Provenance.OBSERVED: "{value} ({slot}), from the photograph you sent",
     Provenance.ASSUMED: "{slot}: {value} — assumed, since you did not say",
 }
 
@@ -138,8 +167,23 @@ class SlotFact:
 
     @property
     def stated(self) -> bool:
-        """Did the caller say this, whether in this turn or an earlier one?"""
-        return self.provenance is not Provenance.ASSUMED
+        """Did the caller say this, whether in this turn or an earlier one?
+
+        ``OBSERVED`` answers no, and the no is the point. A substrate read off a
+        photograph was never said by anyone: the model looked at pixels and
+        matched what it saw against the vocabulary. Reporting that as something
+        the caller told us would put words in their mouth on the strength of an
+        uncalibrated confidence score.
+
+        The reading this property is *not* allowed to imply is "assumed, so it
+        belongs under the Assumed heading". An observation is not a guess
+        either, and `_finish` therefore groups on the provenance itself rather
+        than on this boolean — three groups, not two. This property survives
+        because "did the caller say it" is a question worth asking on its own,
+        and because the prompt context and the printed "Answered for" sentence
+        both want exactly the stated ones.
+        """
+        return self.provenance in (Provenance.STATED, Provenance.CARRIED)
 
 
 # ---------------------------------------------------------------- the result
@@ -157,6 +201,11 @@ class Answer:
     # prints is true of everything under it. What the caller actually said is in
     # `facts`, and is printed inside `text` as a sentence rather than as a list.
     assumptions: list[str] = field(default_factory=list)
+    # What a photograph settled, as its own group. It is already a line inside
+    # `text`, so the CLI transcript loses nothing by ignoring this; it is
+    # repeated here for the same reason `disclosure` is, so a surface wanting to
+    # present it separately does not have to parse prose out of the answer.
+    observed: list[str] = field(default_factory=list)
     failed_checks: list[str] = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
     refused: bool = False
@@ -191,11 +240,26 @@ _NUMBER = re.compile(
 _QUALIFIER = re.compile(
     r"\b(minimum|maximum|at least|up to|no more than|below|above)\b", re.I)
 
-# How close a qualifier has to sit to its figure in the passage to count as
-# attached. A sentence is the natural unit, and a datasheet sentence runs to
-# roughly this length; wider and a qualifier from the previous sentence starts
-# to count, which is the failure this window exists to stop.
-QUALIFIER_WINDOW = 60
+def _same_sentence(text: str, word: str, digits: str) -> bool:
+    """Do a qualifier and a figure share a sentence of the cited passage?
+
+    The unit is the sentence, not a character count. A count was tried first at
+    sixty characters and refused a correct answer by eight: the rendering
+    checklist says "Specify 16mm minimum thickness of lime render in moderately
+    exposed locations, or 25mm in very exposed locations", where one "minimum"
+    governs both figures and sits 68 characters from the second. The model read
+    that correctly and the arbitrary window called it an invention.
+
+    A sentence is what actually carries the relationship, and it stays strict
+    where strictness matters: "Maximum coverage is achieved on a well prepared
+    background. Apply at 10 mm per coat." keeps the qualifier in a different
+    sentence from the figure, so it still fails — which is the case this check
+    exists for.
+    """
+    for part in _SENTENCE.split(text):
+        if re.search(re.escape(word), part) and re.search(re.escape(digits), part):
+            return True
+    return False
 
 _STOP = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is", "are",
@@ -418,10 +482,7 @@ def run_checks(
         digits = re.search(r"\d+(?:[.,]\d+)?", figure.group(0)) if figure else None
         if not digits:
             continue        # a qualifier with no figure after it qualifies nothing
-        near = any(abs(w.start() - f.start()) <= QUALIFIER_WINDOW
-                   for w in re.finditer(re.escape(word), cited_text)
-                   for f in re.finditer(re.escape(digits.group(0)), cited_text))
-        if not near:
+        if not _same_sentence(cited_text, word, digits.group(0)):
             failures.append(
                 f"check 4: {qualifier.group(1)!r} and {digits.group(0)!r} are both "
                 "in the cited passage but not together"
@@ -588,8 +649,19 @@ def _caveat_lines(decision: Decision, repo, question: str = "",
     cited = dict.fromkeys(h.chunk.canonical_url for h in decision.hits[:2])
     wanted = _words(question) | _words(" ".join(decision.slots.values()))
     scored = []
+    # The same sentence, once. Several products ship two near-identical
+    # datasheets — Ultra has "Insulating" and "Insulated" versions of the same
+    # PDF — so a question answered from both printed "Lightly spray the Ultra in
+    # hot weather" twice, which reads as a defect in the assistant rather than
+    # as two documents agreeing. Deduplication is on the sentence rather than on
+    # the document, because that is the thing the reader sees repeated.
+    seen: set[str] = set()
     for url in cited:
         for cav in repo.caveats(url):
+            key = " ".join(cav.sentence.lower().split())
+            if key in seen:
+                continue
+            seen.add(key)
             overlap = len(_words(cav.sentence) & wanted)
             scored.append((overlap, len(cav.sentence), cav.sentence))
     # Prefer an overlapping caveat; failing that, the shortest, which is the
@@ -913,16 +985,41 @@ class AnswerEngine:
         return set(self.retriever.slots.detect(question)), True
 
     def _facts(self, decision: Decision, question: str) -> list[SlotFact]:
-        """Every slot value behind this answer, each with where it came from."""
+        """Every slot value behind this answer, each with where it came from.
+
+        Two sources of truth about provenance, and they are in a deliberate
+        order. Detection from the question text decides ``STATED``, because a
+        value present in this sentence was said in this sentence whatever else
+        also supplied it — the router merges `carried` *under* the question for
+        the same reason, and a caller who uploads a photograph of a stone wall
+        and then types "it's brick" is correcting the image rather than being
+        corrected by it.
+
+        Everything else reads `decision.origins`, the parallel slot-to-origin
+        mapping the engine threads in beside `carried`. This cannot be
+        re-derived here and must not be guessed at: the whole property of an
+        observed slot is that it is *not* in the question, which is precisely
+        the shape a carried slot has too. The two are indistinguishable from
+        the text, so the origin travels with the value or it is lost.
+
+        The mapping is sparse and defaults to ``CARRIED``. That is what keeps
+        every existing caller — the CLI, the evaluation harness, the web page
+        with no upload — behaving exactly as it did before this parameter
+        existed, rather than being migrated by a change nobody asked for.
+        """
         said, knowable = self._detected(question)
         facts = []
         for slot in STATABLE_SLOTS:
             value = decision.slots.get(slot)
             if value:
                 stated = not knowable or slot in said
-                facts.append(SlotFact(
-                    slot, value,
-                    Provenance.STATED if stated else Provenance.CARRIED))
+                origin = decision.origins.get(slot)
+                if origin is not None and not (knowable and slot in said):
+                    provenance = origin
+                else:
+                    provenance = (Provenance.STATED if stated
+                                  else Provenance.CARRIED)
+                facts.append(SlotFact(slot, value, provenance))
         if decision.per_option:
             # The one genuine assumption the system currently makes: decision 10
             # answers both options because neither was cued.
@@ -940,15 +1037,33 @@ class AnswerEngine:
         # answer, where it reads as the system having listened. What the system
         # genuinely assumed stays in `assumptions`, which every surface prints
         # under a heading saying "Assumed" — now truthfully.
-        told = [f.sentence for f in facts if f.stated]
+        #
+        # Three groups, not two. An observed value is neither something the
+        # caller said nor something the system assumed, and collapsing it into
+        # either prints a false sentence: "as you told me" attributes a model's
+        # reading to a person, and "assumed, since you did not say" calls a
+        # photograph a guess. So it gets its own line, and it is kept out of
+        # `assumptions` — the list every surface prints under a heading reading
+        # "Assumed", which must stay true of everything under it.
+        told = [f.sentence for f in facts
+                if f.provenance in (Provenance.STATED, Provenance.CARRIED)]
+        seen = [f.sentence for f in facts if f.provenance is Provenance.OBSERVED]
         if told:
             text = f"{text}\n\nAnswered for " + "; ".join(told) + "."
+        if seen:
+            # "Also" only when there is something for it to be additional to.
+            # The phrase itself already ends in "from the photograph you sent",
+            # so the lead-in deliberately does not repeat the photograph.
+            lead = "Also answered for" if told else "Answered for"
+            text = f"{text}\n\n{lead} " + "; ".join(seen) + "."
         return Answer(
             text=text,
             path=decision.path.value,
             sources=_source_rows(hits),
             caveats=caveats,
-            assumptions=[f.sentence for f in facts if not f.stated],
+            assumptions=[f.sentence for f in facts
+                         if f.provenance is Provenance.ASSUMED],
+            observed=seen,
             facts=facts,
             diagnostics={
                 "step": decision.step,

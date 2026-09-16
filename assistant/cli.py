@@ -55,6 +55,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="override the abstention threshold")
     parser.add_argument("--db", default="data/index/knowledge.db")
     parser.add_argument(
+        "--image", action="append", default=[], metavar="PATH",
+        help="a photograph to read slots from, repeatable. The vision stage "
+             "may fill substrate, location, exposure and symptom, and nothing "
+             "else: it never names a product and never decides a cause. A "
+             "value it reads is reported as coming from the photograph rather "
+             "than as something you said, and a reading it is not confident "
+             "about leaves the slot uncued, which asks back exactly as it "
+             "would with no photograph at all. Slow: a vision encoder on a "
+             "processor with no graphics card is minutes per image.")
+    parser.add_argument(
         "--log", action="store_true",
         help="write structured JSON events to stderr. Off by default: stdout "
              "is the transcript and the evaluation harness parses it, so log "
@@ -79,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.question:
-        return _ask_once(assistant, args.question, audiences, args.verbose)
+        return _ask_once(assistant, args.question, audiences, args.verbose,
+                         args.image)
 
     snapshot = repo.snapshot()
     print(BANNER.format(
@@ -100,12 +111,19 @@ def main(argv: list[str] | None = None) -> int:
         verbose = args.verbose
         if question.endswith(" -v"):
             question, verbose = question[:-3].strip(), True
-        _ask_once(assistant, question, audiences, verbose)
+        # The images belong to the invocation rather than to a turn, so a
+        # session re-reads them on every question. That is the honest cost of
+        # keeping perception per-turn: the slots a photograph settles are not
+        # remembered between turns (they are a model's reading, not something
+        # the caller said), so the alternative would be to promote them into
+        # memory, which is precisely what must not happen.
+        _ask_once(assistant, question, audiences, verbose, args.image)
 
 
-def _ask_once(assistant, question: str, audiences, verbose: bool) -> int:
+def _ask_once(assistant, question: str, audiences, verbose: bool,
+              images=None) -> int:
     try:
-        reply = assistant.ask(question, audiences=audiences)
+        reply = assistant.ask(question, audiences=audiences, images=images)
     except ollama.OllamaUnavailable as exc:
         print(f"\n{exc}\n", file=sys.stderr)
         return 1

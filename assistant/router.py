@@ -47,6 +47,17 @@ class Decision:
     step: str = ""
     topic: str = ""
     slots: dict = field(default_factory=dict)
+    # Where a slot value came from, for the slots whose origin is not the
+    # default. Sparse and written by `assistant/engine.py` after this decision
+    # is made, never by the routing code below: nothing in the router reads it,
+    # nothing in the router should, and a routing decision that depended on
+    # whether a substrate was typed or photographed would be a second answer
+    # path wearing a data field. It exists because `AnswerEngine._facts` cannot
+    # re-derive an origin from the question — the defining property of a
+    # carried or observed slot is that it is absent from the question — so the
+    # origin has to travel beside the value. An empty mapping means every slot
+    # is read exactly as it was before this field existed.
+    origins: dict = field(default_factory=dict)
     hits: list = field(default_factory=list)
     missing_term: str = ""
     per_option: bool = False
@@ -325,6 +336,23 @@ class Router:
         return any(t.lower() in blob for t in terms)
 
     # -- the ordered decision ---------------------------------------------
+
+    def unsupported_terms(self, question: str, hits: list[Retrieved],
+                          carried: dict | None = None) -> list[str]:
+        """The asked-for terms, when none of them appear in what was retrieved.
+
+        This is the condition step 4 refuses on, exposed before routing so the
+        caller can try once more by other means. Semantic retrieval having
+        failed to surface the term is exactly the moment a lexical lookup is
+        worth doing: the corpus may well publish the answer in a passage the
+        embedding did not rank. Empty means the gate is satisfied and nothing
+        further is needed.
+        """
+        slots = {**(carried or {}), **self.slots.detect(question)}
+        _asked, terms = self._asked_terms(question, slots)
+        if not terms or self._present(terms, hits):
+            return []
+        return terms
 
     def route(
         self,
