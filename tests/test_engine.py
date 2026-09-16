@@ -24,6 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from assistant.index import CHUNKING_VERSION
 from assistant import ollama                                      # noqa: E402
 from assistant.answer import Answer                               # noqa: E402
 from assistant.engine import MAX_WORDS, cap, Assistant, Reply, render, split_by_topic  # noqa: E402
@@ -94,7 +95,7 @@ def build_repo(tmp_path, two_documents: bool = False) -> SQLiteKnowledgeReposito
         snapshot_id="snap-test", created_at="2026-01-01T00:00:00Z",
         embedding_model=ollama.EMBED_MODEL,
         embedding_dimensions=ollama.EMBED_DIMENSIONS,
-        chunking_version="test/1.0", document_count=len(documents),
+        chunking_version=CHUNKING_VERSION, document_count=len(documents),
         chunk_count=len(chunks),
         notes={"products": ["Solo", "Duro"], "colours": ["York"],
                "merchants": ["The Lime Centre"], "contact": CONTACT})
@@ -221,7 +222,13 @@ def test_an_oversized_message_is_capped_before_anything_else_happens(
 
     reply = assistant.ask("What thickness does Solo go on at? " * 500)
 
-    assert len(reply.question.split()) == MAX_WORDS
+    # The literal, not the constant. `== MAX_WORDS` is the expression under
+    # test compared against itself: setting MAX_WORDS to 20 left this green,
+    # which mutation confirmed. `docs/architecture.md` says "capped at about
+    # 500 words", so 500 is the documented contract and the number worth
+    # pinning — a silent tightening would truncate real questions, and a
+    # silent loosening would reopen the denial-of-service path.
+    assert len(reply.question.split()) == 500 == MAX_WORDS
     assert reply.refused is True
 
 
@@ -255,11 +262,20 @@ def test_a_single_document_factual_question_prints_its_passage_without_a_model(
 
 def test_several_documents_reach_the_compose_path(two_document_assistant,
                                                   monkeypatch):
-    """The model runs on one path only, and this is the one."""
+    """The model runs on one path only, and this is the one.
+
+    The stub answers both halves of the question and cites both documents. It
+    used to answer only the water half while citing one passage, and passed
+    because check 6 then scanned every retrieved passage rather than the cited
+    ones — so an answer that never addressed coverage satisfied a gate about
+    coverage. With check 6 tightened to cited evidence, an incomplete answer is
+    correctly refused, and this test has to supply a complete one.
+    """
     monkeypatch.setattr(
         ollama, "generate",
         lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
-                           "sack [1].", 1.25))
+                           "sack [1]. Duro covers approximately 2.5 m2 per 25 kg "
+                           "bag at 11 mm [2].", 1.25))
 
     reply = two_document_assistant.ask("What water and coverage does Solo have")
     answer = reply.parts[0][1]
@@ -443,3 +459,143 @@ def test_a_single_part_is_not_labelled():
     """One question does not need a table of contents."""
     text = render(Reply(question="q", parts=[("how much water", answered())]))
     assert "Part 1" not in text
+
+
+# --------------------------------------------------- the cache and the log
+
+
+def test_an_empty_cache_is_still_a_cache(tmp_path, no_ollama):
+    """`if self.cache` was False on every call because AnswerCache has __len__.
+
+    The cache could never fill, because it was empty. Truthiness on a container
+    means emptiness, and emptiness is not absence.
+    """
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assert len(assistant.cache) == 0
+        assert not assistant.cache, "an empty cache is falsy, which is the trap"
+
+        assistant.ask("How much does Solo cost")
+        assert assistant.cache.misses == 1, "the cache was skipped while empty"
+    finally:
+        repo.close()
+
+
+def test_a_repeated_question_is_served_from_the_cache(tmp_path, no_ollama):
+    """A composed answer costs about forty seconds; a repeat should cost nothing."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assistant.ask("How much does Solo cost")
+        reply = assistant.ask("How much does Solo cost")
+
+        assert assistant.cache.hits == 1
+        assert reply.parts[0][1].diagnostics["cached"] is True
+    finally:
+        repo.close()
+
+
+def test_a_staff_answer_is_not_replayed_to_a_public_caller(tmp_path, no_ollama):
+    """Decision 14's named failure, at the level that would actually leak it."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assistant.ask("How much does Solo cost", audiences=("staff",))
+        before = assistant.cache.hits
+        assistant.ask("How much does Solo cost", audiences=("public",))
+
+        assert assistant.cache.hits == before, "a staff entry was served to public"
+    finally:
+        repo.close()
+
+
+def test_the_cache_can_be_turned_off(tmp_path, no_ollama):
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo, cache=False)
+        assistant.ask("How much does Solo cost")
+        assistant.ask("How much does Solo cost")
+        assert assistant.cache is None
+    finally:
+        repo.close()
+
+
+def test_every_answered_part_is_recorded_against_its_snapshot(tmp_path, no_ollama):
+    """The audit chain: an answer names the snapshot and the passages it used."""
+    repo = build_repo(tmp_path)
+    try:
+        Assistant(repo).ask("How much does Solo cost")
+        logged = repo.answer_log(limit=5)
+
+        assert logged, "nothing was recorded"
+        assert logged[0].path_taken == "route"
+        assert logged[0].snapshot_id == "snap-test"
+        assert logged[0].audiences == ("public",)
+    finally:
+        repo.close()
+
+
+def test_a_log_that_fails_does_not_cost_the_answer(tmp_path, no_ollama, monkeypatch):
+    """A store that cannot write the audit row still has a good answer in hand."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+
+        def refuse(_entry):
+            raise RuntimeError("the log is unavailable")
+
+        monkeypatch.setattr(repo, "log_answer", refuse)
+        reply = assistant.ask("How much does Solo cost")
+
+        assert reply.parts, "the answer was lost to an audit failure"
+        assert "does not publish prices" in reply.parts[0][1].text
+    finally:
+        repo.close()
+
+
+def test_logging_can_be_turned_off(tmp_path, no_ollama):
+    repo = build_repo(tmp_path)
+    try:
+        Assistant(repo, log=False).ask("How much does Solo cost")
+        assert repo.answer_log(limit=5) == []
+    finally:
+        repo.close()
+
+
+def test_a_cached_answer_is_not_shared_between_callers(assistant, monkeypatch):
+    """The cache held one Answer and handed the same object to everyone.
+
+    Each caller then wrote its own correlation id onto it, so on the threading
+    server two concurrent readers of the same cached answer would each find the
+    other's trace in their diagnostics. The text was never at risk; the ability
+    to trace it was, which is the one thing the id exists for.
+    """
+    monkeypatch.setattr(
+        ollama, "generate",
+        lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
+                           "sack [1].", 0.01))
+
+    first = assistant.ask("How much water does Solo need", correlation_id="trace-one")
+    second = assistant.ask("How much water does Solo need", correlation_id="trace-two")
+
+    one, two = first.parts[0][1], second.parts[0][1]
+    assert two.diagnostics["cached"] is True, "the second ask should have hit the cache"
+    assert one is not two, "both callers were handed the same Answer object"
+    assert one.diagnostics["correlation_id"] == "trace-one"
+    assert two.diagnostics["correlation_id"] == "trace-two"
+    assert one.text == two.text
+
+
+def test_the_first_caller_of_a_cached_answer_is_not_marked_cached(assistant,
+                                                                  monkeypatch):
+    """`cached` must describe this reply, not leak backwards onto the original."""
+    monkeypatch.setattr(
+        ollama, "generate",
+        lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
+                           "sack [1].", 0.01))
+
+    first = assistant.ask("How much water does Solo need")
+    assistant.ask("How much water does Solo need")
+
+    assert "cached" not in first.parts[0][1].diagnostics

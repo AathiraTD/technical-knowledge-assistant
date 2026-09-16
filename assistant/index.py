@@ -20,32 +20,42 @@ able to read, not one they should have to infer from a bad answer.
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
+import math
+import os
 import re
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import ollama, use_utf8
 from .embedcache import EmbeddingCache
+from .crawl import archive_source, atomic_write
 from .extract import (
     Section,
+    _soup,
     caveats as find_caveats,
     contact_details,
     extract_html,
     extract_pdf,
+    harvest,
 )
 from .model import (
     AUTHORITY,
     Caveat,
     Chunk,
+    CrawlRun,
     Document,
+    DocumentUpdate,
     DocumentVersion,
     Excluded,
     Snapshot,
 )
-from .store import EmbeddedRepository
+from .store.factory import open_repository
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "data" / "cache"
@@ -80,6 +90,29 @@ def _split_on_bullets(text: str) -> list[str]:
     return [p.strip() for p in pieces if p.strip()]
 
 
+# A citation is read by a person, so a heading has to stay the length of a
+# heading. Merging a short section forward joins the two names, and joining
+# three FAQ questions produced a 200-character "section" that nobody could look
+# up. Past this limit the first name is kept and the rest becomes an ellipsis,
+# because the first is the one the passage actually opens with.
+MAX_HEADING = 70
+
+
+def _merge_headings(carried: str, following: str) -> str:
+    """Join two section names, or keep the first when the join is too long."""
+    if not carried:
+        return following
+    joined = f"{carried} / {following}"
+    if len(joined) <= MAX_HEADING:
+        return joined
+    if len(carried) <= MAX_HEADING:
+        return f"{carried} …"
+    # Cut on a word boundary. "anything else to your p …" reads as a defect;
+    # "anything else to your …" reads as a heading that was too long.
+    clipped = carried[:MAX_HEADING].rsplit(" ", 1)[0]
+    return (clipped or carried[:MAX_HEADING]).rstrip(" ,;/-") + " …"
+
+
 def chunk_sections(sections: list[Section]) -> list[tuple[str, str]]:
     """Sections to (heading, text) passages, bullets kept whole.
 
@@ -97,7 +130,7 @@ def chunk_sections(sections: list[Section]) -> list[tuple[str, str]]:
             continue
 
         if carry_text:
-            heading = f"{carry_heading} / {heading}" if carry_heading else heading
+            heading = _merge_headings(carry_heading, heading)
             text = f"{carry_text}\n{text}"
             carry_heading, carry_text = "", ""
 
@@ -126,8 +159,7 @@ def chunk_sections(sections: list[Section]) -> list[tuple[str, str]]:
                 buf = part
             else:
                 buf = f"{buf}\n{part}" if buf else part
-        if buf.strip():
-            out.append((heading, buf.strip()))
+        out.append((heading, buf.strip()))
 
     if carry_text:
         if out:
@@ -198,236 +230,448 @@ def embedding_text(chunk) -> str:
 # --------------------------------------------------------------------- build
 
 
-def build(repo=None, verbose: bool = True) -> dict:
-    """Extract, chunk, embed and publish. Returns the ingestion report."""
-    started = time.perf_counter()
-    log = json.loads((CACHE / "crawl-log.json").read_text(encoding="utf-8"))
-    ledger = json.loads((CACHE / "versions.json").read_text(encoding="utf-8"))
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+def _fixture_hash(path: Path) -> str:
+    """A fixture changes when its file does, which is all the signal needed."""
+    return "fixture:" + hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
-    ollama.require(ollama.EMBED_MODEL)
 
-    documents: list[Document] = []
-    versions: list[DocumentVersion] = []
-    chunks: list[Chunk] = []
-    caveat_rows: list[Caveat] = []
-    report_rows: list[dict] = []
+def _classify(log: dict, ledger: dict, known: dict[str, str]
+              ) -> tuple[list[str], list[str], list[str], list[str], dict]:
+    """Split the crawl into new, changed, unchanged and failed.
+
+    The comparison is against the hashes of what is **currently being served**,
+    read from the store, not against a local file. A ledger can drift from the
+    index; the index cannot drift from itself.
+    """
+    new, changed, unchanged = [], [], []
+    failed = [entry["url"] for entry in log.get("errors", [])]
+    entries: dict[str, dict] = {}
+    for entry in log["fetched"]:
+        url = entry["url"]
+        entries[url] = entry
+        if not (ROOT / entry["path"]).exists():
+            entry["failure"] = "cached file missing"
+            failed.append(url)
+            continue
+        fresh = "sha256:" + hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest()
+        record = ledger.setdefault(url, {})
+        expected = record.get("content_hash", "")
+        if len(expected) == 71 and expected != fresh:
+            # The shipped legacy ledger hashed HTML after Python's universal
+            # newline decoding. Migrate only when that exact old digest matches;
+            # immutable releases always require a byte-for-byte hash match.
+            legacy = entry["kind"] == "page" and not record.get("source_path")
+            normalized = ("sha256:" + hashlib.sha256(
+                (ROOT / entry["path"]).read_text(encoding="utf-8").encode("utf-8")).hexdigest()) if legacy else ""
+            if expected != normalized:
+                entry["failure"] = "source hash mismatch; previous version retained"
+                failed.append(url)
+                continue
+        record["content_hash"] = fresh
+        prior = known.get(url)
+        if prior is None:
+            new.append(url)
+        elif prior != fresh:
+            changed.append(url)
+        else:
+            unchanged.append(url)
+    return new, changed, unchanged, failed, entries
+
+
+def _harvest_all(log: dict) -> tuple[list[str], list[str], list[str], dict]:
+    """Name lists and the contact line, over every cached page.
+
+    Deliberately not part of the delta. Harvesting parses the navigation block
+    and costs about a second for the whole corpus, where extraction, chunking
+    and embedding cost minutes — and carrying stale lists forward would leave a
+    withdrawn colour in the vocabulary that check 5 trusts.
+    """
     colours: list[str] = []
     products: list[str] = []
     merchants: list[str] = []
     contact: dict = {}
-
-    say = (lambda *a: print(*a)) if verbose else (lambda *a: None)
-    say(f"Indexing {len(log['fetched'])} documents from the cache\n")
-
     for entry in log["fetched"]:
-        url, path, kind = entry["url"], entry["path"], entry["kind"]
-        doc_type = entry["doc_type"]
-        full = ROOT / path
-
-        if not full.exists():
-            report_rows.append({"url": url, "quality": "failed",
-                                "note": "cached file missing", "chunks": 0})
+        if entry["kind"] != "page":
             continue
+        full = ROOT / entry["path"]
+        if not full.exists():
+            continue
+        harvested = harvest(_soup(str(full)))
+        colours += harvested["colours"]
+        products += harvested["products"]
+        merchants += harvested.get("merchants", [])
+        if entry["url"].rstrip("/").endswith("/contact"):
+            contact = contact_details(str(full))
+    return colours, products, merchants, contact
 
-        if kind == "page":
-            extracted, harvested = extract_html(str(full), doc_type)
-            colours += harvested["colours"]
-            products += harvested["products"]
-            merchants += harvested.get("merchants", [])
-            if url.rstrip("/").endswith("/contact"):
-                contact = contact_details(str(full))
-        else:
-            extracted = extract_pdf(str(full))
 
-        title = entry.get("title") or extracted.title or ""
-        record = ledger.get(url, {})
-        source_date = iso_date(extracted.printed_date,
-                               record.get("fetched_at", "")[:10])
+def _dedupe(names: list[str]) -> list[str]:
+    seen, out = set(), []
+    for n in names:
+        if n.lower() not in seen:
+            seen.add(n.lower())
+            out.append(n)
+    return out
 
-        doc = Document(
-            canonical_url=url,
-            title=title,
-            document_type=doc_type,
-            authority=AUTHORITY.get(doc_type, 9),
-            audience="public",          # everything crawled is published material
-            product=product_name(entry, title),
-            link_text=entry.get("link_text", ""),
-            active_version=record.get("version", 1),
-        )
-        documents.append(doc)
 
-        versions.append(DocumentVersion(
-            canonical_url=url,
-            version=record.get("version", 1),
-            content_hash=record.get("content_hash", ""),
-            source_path=path,
-            etag=record.get("etag", ""),
-            source_last_modified=record.get("last_modified", ""),
-            first_seen_at=record.get("first_seen_at", now),
-            fetched_at=record.get("fetched_at", now),
-            checked_at=record.get("checked_at", now),
-            is_active=True,
-            extraction_quality=extracted.quality,
-            notes=extracted.note,
-        ))
+def _extract_one(entry: dict, ledger: dict, now: str) -> tuple[DocumentUpdate, dict]:
+    """One crawled document into a unit of work, plus its report row."""
+    url, path, kind = entry["url"], entry["path"], entry["kind"]
+    doc_type = entry["doc_type"]
+    full = ROOT / path
+    original = full.read_bytes()
+    expected = ledger.get(url, {}).get("content_hash", "")
+    if expected and expected != "sha256:" + hashlib.sha256(original).hexdigest():
+        raise ValueError(f"Source changed during indexing: {url}")
+    # Archive before extraction: a subsequent fetch must not overwrite the
+    # original file referenced by an older database version.
+    archived = archive_source(url, original, cache=CACHE)
 
-        passages = chunk_sections(extracted.sections)
-        for i, (heading, text) in enumerate(passages):
-            chunks.append(Chunk(
-                canonical_url=url, version=doc.active_version, chunk_index=i,
-                section=heading, content=text, audience="public",
-                product=doc.product, document_type=doc_type,
-                authority=doc.authority, source_date=source_date,
-            ))
+    if kind == "page":
+        extracted, _harvested = extract_html(str(archived), doc_type)
+    else:
+        extracted = extract_pdf(str(archived))
 
-        found = find_caveats(extracted.sections)
-        for cav in found:
-            caveat_rows.append(Caveat(url, cav["type"], cav["sentence"], cav["section"]))
+    title = entry.get("title") or extracted.title or ""
+    record = ledger.get(url, {})
+    source_date = iso_date(extracted.printed_date, record.get("fetched_at", "")[:10])
 
-        report_rows.append({
-            "url": url, "name": Path(path).name, "type": doc_type,
-            "quality": extracted.quality, "detector": extracted.detector,
-            "sections": len(extracted.sections), "chunks": len(passages),
-            "chars": extracted.chars, "date": source_date,
-            "caveats": len(found), "note": extracted.note,
-        })
+    document = Document(
+        canonical_url=url, title=title, document_type=doc_type,
+        authority=AUTHORITY.get(doc_type, 9),
+        audience="public",                  # everything crawled is published
+        product=product_name(entry, title),
+        link_text=entry.get("link_text", ""),
+        active_version=record.get("version", 1),
+    )
+    version = DocumentVersion(
+        canonical_url=url, version=record.get("version", 1),
+        content_hash=record.get("content_hash", ""),
+        source_path=os.path.relpath(archived, ROOT).replace("\\", "/"),
+        etag=record.get("etag", ""),
+        source_last_modified=record.get("last_modified", ""),
+        first_seen_at=record.get("first_seen_at", now),
+        fetched_at=record.get("fetched_at", now),
+        checked_at=record.get("checked_at", now),
+        is_active=True, extraction_quality=extracted.quality, notes=extracted.note,
+    )
 
-    # Evaluation fixtures. Lime Green publishes nothing that is not public, so
-    # the audience filter would otherwise be a claim with no test behind it.
-    # These are indexed as staff-only, and a public caller cannot retrieve them
-    # because the filter is a WHERE clause rather than a prompt instruction.
-    fixture_count = 0
-    for fixture in sorted((ROOT / "eval" / "fixtures").glob("*.json")):
-        spec = json.loads(fixture.read_text(encoding="utf-8"))
+    passages = chunk_sections(extracted.sections)
+    chunks = [
+        Chunk(canonical_url=url, version=document.active_version, chunk_index=i,
+              section=heading, content=text, audience="public",
+              product=document.product, document_type=doc_type,
+              authority=document.authority, source_date=source_date)
+        for i, (heading, text) in enumerate(passages)
+    ]
+    found = find_caveats(extracted.sections)
+    caveats = [Caveat(url, c["type"], c["sentence"], c["section"]) for c in found]
+
+    row = {
+        "url": url, "name": Path(path).name, "type": doc_type,
+        "quality": extracted.quality, "detector": extracted.detector,
+        "sections": len(extracted.sections), "chunks": len(passages),
+        "chars": extracted.chars, "date": source_date, "caveats": len(found),
+        "note": extracted.note,
+    }
+    return DocumentUpdate(document, version, chunks, caveats), row
+
+
+def _fixture_updates(known: dict[str, str], now: str, directory: Path | None = None,
+                     approved: bool = False,
+                     ) -> tuple[list[DocumentUpdate], list[dict], set[str]]:
+    """Evaluation fixtures, treated as documents with the same delta rules.
+
+    Lime Green publishes nothing that is not public, so without these the
+    audience filter would be a claim with no test behind it. They are indexed as
+    staff-only and a public caller cannot retrieve them, because the filter is a
+    WHERE clause rather than an instruction.
+    """
+    updates, rows, urls = [], [], set()
+    directory = directory if directory is not None else ROOT / "eval" / "fixtures"
+    for path in sorted(directory.glob("*.json")):
+        spec = json.loads(path.read_text(encoding="utf-8"))
+        if approved and (spec.get("approved") is not True or not spec.get("approved_by")):
+            raise ValueError(f"Staff source requires explicit approval and reviewer: {path.name}")
+        if (spec.get("audience") not in ("public", "trade", "staff")
+                or not spec.get("sections")
+                or any(not section.get("text", "").strip() for section in spec["sections"])):
+            raise ValueError(f"Invalid authored source: {path.name}")
         url = spec["canonical_url"]
-        documents.append(Document(
+        if url in urls:
+            raise ValueError(f"Duplicate authored source identity: {url}")
+        urls.add(url)
+        digest = _fixture_hash(path)
+        if known.get(url) == digest:
+            continue
+        document = Document(
             canonical_url=url, title=spec["title"],
             document_type=spec["document_type"],
             authority=AUTHORITY.get(spec["document_type"], 9),
             audience=spec["audience"], product=spec.get("product", ""),
             link_text=spec.get("link_text", ""), active_version=1,
-        ))
-        versions.append(DocumentVersion(
-            canonical_url=url, version=1, content_hash="fixture",
-            source_path=str(fixture.relative_to(ROOT)).replace("\\", "/"),
+        )
+        version = DocumentVersion(
+            canonical_url=url, version=1, content_hash=digest,
+            source_path=os.path.relpath(archive_source(url, path.read_bytes(), cache=CACHE), ROOT).replace("\\", "/"),
             first_seen_at=now, fetched_at=now, checked_at=now, is_active=True,
-            extraction_quality="clean", notes="evaluation fixture, not real data",
-        ))
-        for i, sec in enumerate(spec["sections"]):
-            chunks.append(Chunk(
-                canonical_url=url, version=1, chunk_index=i,
-                section=sec["heading"], content=sec["text"],
-                audience=spec["audience"], product=spec.get("product", ""),
-                document_type=spec["document_type"],
-                authority=AUTHORITY.get(spec["document_type"], 9),
-                source_date=spec.get("source_date", ""),
-            ))
-        fixture_count += 1
-        report_rows.append({
-            "url": url, "name": fixture.name, "type": spec["document_type"],
-            "quality": "clean", "detector": "fixture",
-            "sections": len(spec["sections"]), "chunks": len(spec["sections"]),
-            "chars": sum(len(s["text"]) for s in spec["sections"]),
-            "date": spec.get("source_date", ""), "caveats": 0,
-            "note": f"evaluation fixture, audience={spec['audience']}",
+            extraction_quality="clean", notes=(f"approved by {spec['approved_by']}" if approved else "evaluation fixture, not real data"),
+        )
+        sections = [Section(sec["heading"], sec["text"]) for sec in spec["sections"]]
+        passages = chunk_sections(sections) if approved else [(s.heading, s.text) for s in sections]
+        chunks = [
+            Chunk(canonical_url=url, version=1, chunk_index=i,
+                  section=heading, content=text,
+                  audience=spec["audience"], product=spec.get("product", ""),
+                  document_type=spec["document_type"],
+                  authority=AUTHORITY.get(spec["document_type"], 9),
+                  source_date=spec.get("source_date", ""))
+            for i, (heading, text) in enumerate(passages)
+        ]
+        caveats = [Caveat(url, kind, sentence, heading)
+                   for kind, sentence, heading in find_caveats(sections)] if approved else []
+        updates.append(DocumentUpdate(document, version, chunks, caveats))
+        rows.append({
+            "url": url, "name": path.name, "type": spec["document_type"],
+            "quality": "clean", "detector": "approved-source" if approved else "fixture",
+            "sections": len(sections), "chunks": len(chunks),
+            "chars": sum(len(x["text"]) for x in spec["sections"]),
+            "date": spec.get("source_date", ""), "caveats": len(caveats),
+            "note": version.notes,
         })
+    return updates, rows, urls
 
-    excluded = [Excluded(s["url"], s.get("reason", "")) for s in log.get("skipped", [])]
 
-    # ------------------------------------------------------------- embedding
-    say(f"Extracted {len(chunks)} chunks from {len(documents)} documents.")
-    say(f"Embedding with {ollama.EMBED_MODEL} ...")
+def build(repo=None, verbose: bool = True, rebuild: bool = False,
+          staff_dir: Path | None = None) -> dict:
+    """Build a release and leave an explicit failure record if any stage raises."""
+    try:
+        return _build(repo, verbose, rebuild, staff_dir)
+    except Exception as exc:
+        atomic_write(INDEX_DIR / "ingestion-failure.json", json.dumps({
+            "status": "failed", "error": str(exc),
+            "at": datetime.now(timezone.utc).isoformat(),
+        }).encode("utf-8"))
+        raise
 
-    def tick(done: int, total: int) -> None:
-        pct = 100 * done / total if total else 100
-        print(f"\r  {done}/{total} ({pct:.0f}%)", end="", flush=True)
 
-    # What gets embedded is not what gets printed. A chunk reading "Add between
-    # 5 and 6 litres of clean water per 25kg sack" never says which product it
-    # belongs to, so a question naming Solo could not reach it and a page about
-    # aerogel outranked the Solo datasheet. Prefixing the product and section
-    # gives the passage the context a reader already has from the page it sits
-    # on. This is the retrieval view only: citations and printed text are
-    # untouched, so no published figure is altered by it.
-    to_embed = [embedding_text(c) for c in chunks]
-    embed_started = time.perf_counter()
+def _validate_vectors(vectors):
+    for vector in vectors:
+        if (len(vector) != ollama.EMBED_DIMENSIONS
+                or not all(math.isfinite(n) and abs(n) <= 3.4028234e38 for n in vector)
+                or not any(vector)):
+            raise ValueError("Embedding model or cache returned an invalid vector")
 
-    with EmbeddingCache() as cache:
-        known = cache.get_many(to_embed, ollama.EMBED_MODEL, ollama.EMBED_DIMENSIONS)
-        todo = [i for i in range(len(to_embed)) if i not in known]
-        say(f"  {len(known)} already embedded, {len(todo)} to compute")
 
-        if todo:
-            fresh = ollama.embed(
-                [to_embed[i] for i in todo],
-                progress=tick if verbose else None,
-            )
-            cache.put_many(
-                [(to_embed[i], v) for i, v in zip(todo, fresh)],
-                ollama.EMBED_MODEL, ollama.EMBED_DIMENSIONS,
-            )
-            known.update(dict(zip(todo, fresh)))
-        cache_hits, cache_misses = cache.hits, cache.misses
+def _build(repo, verbose, rebuild, staff_dir) -> dict:
+    """Index what changed, and leave the rest alone.
 
-    embed_seconds = time.perf_counter() - embed_started
-    say(f"\n  embeddings ready in {embed_seconds:.1f}s "
-        f"({cache_hits} from cache, {cache_misses} computed)")
-    for i, c in enumerate(chunks):
-        c.embedding = known[i]
+    A rebuild is a special case of a delta against an empty store, not the other
+    way round. `rebuild=True` forces that by ignoring what is already indexed,
+    which is the escape hatch for a chunking change: the content hashes are
+    unchanged, so nothing would otherwise be reprocessed even though every
+    passage boundary moved.
+    """
+    started = time.perf_counter()
+    pointer = CACHE / "crawl-current.json"
+    if pointer.exists():
+        release = CACHE / json.loads(pointer.read_text(encoding="utf-8"))["release"]
+        bundle = json.loads(release.read_text(encoding="utf-8"))
+        log, ledger = bundle["log"], bundle["ledger"]
+    else:
+        log = json.loads((CACHE / "crawl-log.json").read_text(encoding="utf-8"))
+        ledger = json.loads((CACHE / "versions.json").read_text(encoding="utf-8"))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    # -------------------------------------------------------------- publish
-    def dedupe(names: list[str]) -> list[str]:
-        seen, out = set(), []
-        for n in names:
-            if n.lower() not in seen:
-                seen.add(n.lower())
-                out.append(n)
-        return out
+    ollama.require(ollama.EMBED_MODEL)
 
-    snapshot = Snapshot(
-        snapshot_id=f"snap-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}",
-        created_at=now,
-        embedding_model=ollama.EMBED_MODEL,
-        embedding_dimensions=ollama.EMBED_DIMENSIONS,
-        chunking_version=CHUNKING_VERSION,
-        document_count=len(documents),
-        chunk_count=len(chunks),
-        notes={
-            "colours": dedupe(colours),
-            "products": dedupe(products),
-            "merchants": dedupe(merchants),
-            "contact": contact,
-            "embed_seconds": round(embed_seconds, 1),
-            "generation_model": ollama.GENERATION_MODEL,
-        },
-    )
+    say = (lambda *a: print(*a)) if verbose else (lambda *a: None)
 
     owned = repo is None
-    repo = repo or EmbeddedRepository(INDEX_DIR / "knowledge.db")
+    repo = repo or open_repository(INDEX_DIR / "knowledge.db")
     try:
-        repo.publish(documents, versions, chunks, snapshot, caveat_rows, excluded)
+        previous = repo.snapshot()
+        known = repo.active_content_hashes()
+        incompatible = previous is not None and (
+            previous.embedding_model != ollama.EMBED_MODEL
+            or previous.embedding_dimensions != ollama.EMBED_DIMENSIONS
+            or previous.chunking_version != CHUNKING_VERSION)
+        reprocess = rebuild or incompatible
+        comparison = {} if reprocess else known
+        new, changed, unchanged, failed, entries = _classify(log, ledger, comparison)
+
+        fixture_updates, fixture_rows, fixture_urls = _fixture_updates(comparison, now)
+        staff_updates, staff_rows, staff_urls = _fixture_updates(
+            comparison, now, staff_dir if staff_dir is not None else ROOT / "data" / "staff", True)
+        if staff_urls & (fixture_urls | set(entries)):
+            raise ValueError("Staff source identity collides with another source")
+
+        # Removed: served now, absent from this crawl, and not a fixture.
+        crawled = set(entries)
+        # Incomplete discovery is not proof of withdrawal (a failed product
+        # page may also hide every datasheet linked from it).
+        removed = ([] if log.get("errors") else sorted(u for u in known
+                         if u not in crawled and u not in fixture_urls and u not in staff_urls))
+
+        say(f"Crawl of {len(log['fetched'])} documents against the live index:")
+        say(f"  new {len(new)} · changed {len(changed)} · "
+            f"unchanged {len(unchanged)} · removed {len(removed)} · "
+            f"failed {len(failed)}")
+        if not (new or changed or removed or fixture_updates):
+            say("  nothing to reprocess")
+
+        # -------------------------------------------------- extract and chunk
+        updates: list[DocumentUpdate] = []
+        report_rows: list[dict] = []
+        for url in new + changed:
+            update, row = _extract_one(entries[url], ledger, now)
+            row["change"] = "new" if url in set(new) else "changed"
+            if update.version.extraction_quality == "failed" or not update.chunks:
+                failed.append(url)
+                row["change"] = "failed"
+            else:
+                updates.append(update)
+            report_rows.append(row)
+        for url in unchanged:
+            # An unchanged document is skipped, not absent. Writing zeros here
+            # was wrong in a way that only showed up on a no-change run: the
+            # report then described the *delta* instead of the *index*, so a
+            # corpus of 94 clean-and-partial documents carrying 119 caveats
+            # reported as 94 rows of "unchanged" and zero caveats — and the
+            # report is what `DECISIONS.md` cites as the evidence for extraction
+            # quality. The facts are still in the store, so read them back
+            # rather than inventing placeholders.
+            retained = repo.active_version(url)
+            report_rows.append({"url": url, "name": Path(entries[url]["path"]).name,
+                                "type": entries[url]["doc_type"],
+                                "quality": (retained.extraction_quality
+                                            if retained else "unknown"),
+                                "detector": "retained",
+                                "sections": 0, "chunks": 0, "chars": 0,
+                                "date": "", "caveats": len(repo.caveats(url)),
+                                "change": "unchanged",
+                                "note": "skipped: content hash unchanged; "
+                                        "quality and caveats read from the index"})
+        for url in failed:
+            if url in {row["url"] for row in report_rows}:
+                continue
+            report_rows.append({"url": url, "name": "", "type": "",
+                                "quality": "failed", "detector": "-",
+                                "sections": 0, "chunks": 0, "chars": 0,
+                                "date": "", "caveats": 0, "change": "failed",
+                                "note": entries.get(url, {}).get("failure", "source fetch failed; previous version retained")})
+
+        updates += fixture_updates
+        report_rows += fixture_rows
+        updates += staff_updates
+        report_rows += staff_rows
+        if incompatible and failed:
+            raise ValueError("Cannot change index configuration with failed sources")
+
+        say(f"  extracted {sum(len(u.chunks) for u in updates)} passages from "
+            f"{len(updates)} document(s)")
+
+        # ----------------------------------------------------------- harvest
+        valid_log = {**log, "fetched": [e for e in log["fetched"] if e["url"] not in failed]}
+        colours, products, merchants, contact = _harvest_all(valid_log)
+
+        # ----------------------------------------------------------- embed
+        to_embed = [embedding_text(c) for u in updates for c in u.chunks]
+        embed_started = time.perf_counter()
+        cache_hits = cache_misses = 0
+        if to_embed:
+            def tick(done: int, total: int) -> None:
+                print(f"\r  {done}/{total} ({100 * done / total:.0f}%)",
+                      end="", flush=True)
+
+            with EmbeddingCache() as cache:
+                found = cache.get_many(to_embed, ollama.EMBED_MODEL,
+                                       ollama.EMBED_DIMENSIONS)
+                todo = [i for i in range(len(to_embed)) if i not in found]
+                say(f"  {len(found)} already embedded, {len(todo)} to compute")
+                if todo:
+                    fresh = ollama.embed([to_embed[i] for i in todo],
+                                         progress=tick if verbose else None)
+                    if len(fresh) != len(todo):
+                        raise ValueError("Embedding model returned the wrong vector count")
+                    _validate_vectors(fresh)
+                    cache.put_many([(to_embed[i], v) for i, v in zip(todo, fresh)],
+                                   ollama.EMBED_MODEL, ollama.EMBED_DIMENSIONS)
+                    found.update(dict(zip(todo, fresh)))
+                    if verbose:
+                        print()
+                cache_hits, cache_misses = cache.hits, cache.misses
+            _validate_vectors(found.values())
+            position = 0
+            for update in updates:
+                for c in update.chunks:
+                    c.embedding = found[position]
+                    position += 1
+        embed_seconds = time.perf_counter() - embed_started
+
+        # --------------------------------------------------------- publish
+        excluded = [Excluded(x["url"], x.get("reason", ""))
+                    for x in log.get("skipped", [])]
+        snapshot = Snapshot(
+            snapshot_id=f"snap-{uuid.uuid4().hex}",
+            created_at=now,
+            embedding_model=ollama.EMBED_MODEL,
+            embedding_dimensions=ollama.EMBED_DIMENSIONS,
+            chunking_version=CHUNKING_VERSION,
+            document_count=0,          # counted by the store; see apply_delta
+            chunk_count=0,
+            notes={
+                "parent_snapshot": previous.snapshot_id if previous else None,
+                "colours": _dedupe(colours),
+                "products": _dedupe(products),
+                "merchants": _dedupe(merchants),
+                "contact": contact,
+                "embed_seconds": round(embed_seconds, 1),
+                "generation_model": ollama.GENERATION_MODEL,
+            },
+        )
+        run = CrawlRun(
+            started_at=now, completed_at=now,
+            documents_checked=len(log["fetched"]), documents_new=len(new),
+            documents_changed=len(changed), documents_unchanged=len(unchanged),
+            documents_removed=len(removed), documents_failed=len(failed),
+            snapshot_id=snapshot.snapshot_id,
+        )
+
+        repo.apply_delta(updates, removed, snapshot, excluded, run)
+
+        live = repo.snapshot()
         counts = repo.counts() if hasattr(repo, "counts") else {}
     finally:
         if owned:
             repo.close()
 
+    fixture_count = len(fixture_urls)
     report = {
-        "snapshot": snapshot.snapshot_id,
+        "snapshot": live.snapshot_id,
         "built_at": now,
-        "embedding_model": snapshot.embedding_model,
-        "embedding_dimensions": snapshot.embedding_dimensions,
+        "embedding_model": live.embedding_model,
+        "embedding_dimensions": live.embedding_dimensions,
         "chunking_version": CHUNKING_VERSION,
-        "documents": len(documents),
-        "public_documents": len(documents) - fixture_count,
+        "documents": live.document_count,
+        "public_documents": live.document_count - fixture_count,
         "evaluation_fixtures": fixture_count,
-        "chunks": len(chunks),
-        "caveats": len(caveat_rows),
+        "chunks": live.chunk_count,
+        "delta": {
+            "new": len(new), "changed": len(changed), "unchanged": len(unchanged),
+            "removed": len(removed), "failed": len(failed),
+            "reprocessed": len(updates),
+            "removed_urls": removed,
+        },
+        # Summed from the rows, not from `updates`: the same mistake as the
+        # unchanged rows themselves. `updates` holds only what this run
+        # processed, so a no-change run reported a corpus with no caveats in it.
+        "caveats": sum(row.get("caveats", 0) for row in report_rows),
         "excluded": len(excluded),
-        "colours": snapshot.notes["colours"],
-        "products": snapshot.notes["products"],
-        "merchants": snapshot.notes["merchants"],
-        "contact": contact,
+        "colours": live.notes.get("colours", []),
+        "products": live.notes.get("products", []),
+        "merchants": live.notes.get("merchants", []),
+        "contact": live.notes.get("contact", {}),
         "embed_seconds": round(embed_seconds, 1),
         "embeddings_cached": cache_hits,
         "embeddings_computed": cache_misses,
@@ -458,7 +702,7 @@ def summarise(report: dict) -> str:
         f" + {report['evaluation_fixtures']} evaluation fixture"
         f"{'s' if report['evaluation_fixtures'] != 1 else ''} (staff-only)",
         f"  chunks           {report['chunks']}",
-        f"  caveats tagged   {report['caveats']}",
+        f"  caveats held     {report['caveats']}",
         f"  excluded on file {report['excluded']}",
         f"  colours          {len(report['colours'])}",
         f"  products         {len(report['products'])}",
@@ -480,10 +724,21 @@ def summarise(report: dict) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     use_utf8()
+    parser = argparse.ArgumentParser(
+        prog="assistant.index",
+        description="Index what changed since the last run.")
+    parser.add_argument(
+        "--rebuild", action="store_true",
+        help="reprocess every document, ignoring what is already indexed. "
+             "Needed after a chunking change, because that moves every passage "
+             "boundary without moving a single content hash.")
+    parser.add_argument("--staff-dir", type=Path, help="Directory of explicitly approved staff JSON sources")
+    args = parser.parse_args(argv)
     try:
-        report = build()
+        options = {"staff_dir": args.staff_dir} if args.staff_dir else {}
+        report = build(rebuild=args.rebuild, **options)
     except ollama.OllamaUnavailable as exc:
         print(f"\nCannot build the index.\n\n{exc}\n", file=sys.stderr)
         return 1

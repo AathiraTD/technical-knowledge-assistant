@@ -19,6 +19,8 @@ import os
 import sys
 
 from . import ollama, use_utf8
+from .store.factory import open_repository
+from .index import CHUNKING_VERSION
 
 
 def check(db: str = "", dsn: str = "") -> dict:
@@ -27,12 +29,10 @@ def check(db: str = "", dsn: str = "") -> dict:
     dsn = dsn or os.environ.get("ASSISTANT_POSTGRES_DSN", "")
     try:
         if dsn:
-            from .store.postgres import PostgresKnowledgeRepository
-            repo = PostgresKnowledgeRepository(dsn, apply_schema=False)
+            repo = open_repository(dsn=dsn, apply_schema=False)
             report["store"] = "postgresql+pgvector"
         else:
-            from .store import SQLiteKnowledgeRepository
-            repo = SQLiteKnowledgeRepository(db or "data/index/knowledge.db")
+            repo = open_repository(db or "data/index/knowledge.db", dsn="")
             report["store"] = "sqlite"
         report["checks"]["store_reachable"] = True
     except Exception as exc:
@@ -53,6 +53,8 @@ def check(db: str = "", dsn: str = "") -> dict:
         report["embedding_model"] = snapshot.embedding_model
 
         report["checks"]["chunks_present"] = snapshot.chunk_count > 0
+        report["checks"]["chunking_matches_index"] = snapshot.chunking_version == CHUNKING_VERSION
+        report["checks"]["dimensions_match_index"] = snapshot.embedding_dimensions == ollama.EMBED_DIMENSIONS
 
         try:
             have = ollama.available()

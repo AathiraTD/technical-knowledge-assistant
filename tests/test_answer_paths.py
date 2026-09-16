@@ -327,6 +327,33 @@ def test_a_failed_check_becomes_a_refusal_rather_than_a_repair(monkeypatch):
     assert "0800 538 5746" in a.text
 
 
+def test_a_stopped_model_server_is_reported_and_not_disguised(monkeypatch, caplog):
+    """A missing model must fail loudly, not silently become a refusal.
+
+    The distinction matters operationally. A refusal says the corpus does not
+    answer the question and is a designed outcome; a stopped Ollama says the
+    deployment is broken. Collapsing the second into the first would hide an
+    outage behind an answer that looks deliberate, and the refusal rate would
+    stay flat while the system served nothing.
+    """
+    import pytest
+
+    def unavailable(*_a, **_k):
+        raise ollama.OllamaUnavailable("connection refused on 127.0.0.1:11434")
+
+    monkeypatch.setattr(ollama, "generate", unavailable)
+
+    with caplog.at_level("INFO", logger="assistant"):
+        with pytest.raises(ollama.OllamaUnavailable):
+            engine().compose(
+                decision(Path_.COMPOSE, [MIXING], step="8",
+                         slots={"property_asked": "water"}), "How much water?")
+
+    logged = [r for r in caplog.records if getattr(r, "event", "") == "ollama_error"]
+    assert logged, "an outage passed through without an event"
+    assert logged[0].fields["stage"] == "generate"
+
+
 # ------------------------------------------------- the remaining edge branches
 
 
@@ -354,3 +381,43 @@ def test_a_qualifier_cited_to_no_retrieved_passage_is_caught():
     failures = run_checks("Apply at a minimum thickness of 8 mm [9].",
                           [MIXING], NOTES, [])
     assert any(f.startswith("check 1") for f in failures)
+
+
+def test_the_calculation_edge_prints_the_coverage_passage_not_the_top_one():
+    """Extract printed whichever passage ranked first, and then said otherwise.
+
+    "How many bags of Duro for 20 square metres" ranks Duro's *mixing water*
+    above its coverage, because retrieval scores the whole question. Extract
+    printed that, then appended a code-written sentence claiming it had shown
+    "the published coverage and pack size". Unsupported prose reaching the page
+    is exactly what the six checks exist to stop — and this arrived by a door
+    they do not watch, because code wrote it rather than the model.
+    """
+    mixing = hit(SOLO_URL, "Mixing",
+                 "Add approximately 4.5 to 5 litres of water per bag. "
+                 "Mix for between 3 and 10 minutes.", "Duro")
+    coverage = hit(SOLO_URL, "Storage",
+                   "Store in a dry place. At 10mm thick 1 bag will cover 1 m 2.",
+                   "Duro")
+
+    answer = engine().extract(
+        decision(Path_.EXTRACT, [mixing, coverage], step="6", sum_refused=True))
+
+    assert "1 bag will cover" in answer.text, answer.text
+    assert "I have printed the published coverage" in answer.text
+
+
+def test_the_calculation_edge_says_so_when_no_coverage_was_published():
+    """Solo Filler has no datasheet at all; some products publish no coverage.
+
+    The sentence must describe what was printed. Claiming a coverage figure
+    that is not in the evidence is the same defect in the other direction.
+    """
+    mixing = hit(SOLO_URL, "Mixing",
+                 "Add approximately 4.5 to 5 litres of water per bag.", "Duro")
+
+    answer = engine().extract(
+        decision(Path_.EXTRACT, [mixing], step="6", sum_refused=True))
+
+    assert "does not state a coverage figure" in answer.text, answer.text
+    assert "I have printed the published coverage" not in answer.text

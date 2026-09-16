@@ -23,6 +23,7 @@ so the publication path is exercised for real.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -581,24 +582,48 @@ def test_the_build_opens_its_own_repository_when_it_is_not_given_one(staged):
 def test_the_build_works_against_any_repository_not_only_the_sqlite_one(staged):
     """`counts()` is not part of the KnowledgeRepository contract, so a conforming adapter need not have it."""
     class RecordingRepository:
-        """The publication half of the boundary, and nothing else."""
+        """The indexing half of the boundary, and nothing else.
+
+        Deliberately not a SQLite repository: the build must work against
+        anything implementing the Protocol, which is what makes the PostgreSQL
+        adapter a drop-in rather than a rewrite. It has no `counts()` either, so
+        the report has to cope with a store that cannot introspect itself.
+        """
 
         def __init__(self):
-            self.published = None
+            self.applied = None
+            self._snapshot = None
 
-        def publish(self, documents, versions, chunks, snapshot,
-                    caveats=None, excluded=None):
-            self.published = (documents, versions, chunks, snapshot)
+        def active_content_hashes(self):
+            return {}                      # an empty store: everything is new
+
+        def apply_delta(self, updates, removed, snapshot,
+                        excluded=None, crawl_run=None):
+            self.applied = (updates, removed, snapshot, crawl_run)
+            self._snapshot = replace(
+                snapshot,
+                document_count=len(updates),
+                chunk_count=sum(len(u.chunks) for u in updates))
             return snapshot.snapshot_id
+
+        def snapshot(self):
+            return self._snapshot
 
     repo = RecordingRepository()
     report = index.build(repo=repo, verbose=False)
 
     assert report["table_counts"] == {}
-    documents, _versions, chunks, snapshot = repo.published
-    assert len(documents) == report["documents"]
+    updates, removed, snapshot, crawl_run = repo.applied
+    assert removed == []
+    assert len(updates) == report["documents"]
     assert snapshot.embedding_dimensions == index.ollama.EMBED_DIMENSIONS
+    chunks = [c for u in updates for c in u.chunks]
     assert all(len(c.embedding) == index.ollama.EMBED_DIMENSIONS for c in chunks)
+    # The crawl run counts crawled documents; `updates` additionally carries the
+    # evaluation fixtures, which are indexed but never crawled.
+    assert crawl_run is not None
+    assert crawl_run.documents_checked == crawl_run.documents_new + crawl_run.documents_failed
+    assert crawl_run.documents_new <= len(updates)
 
 
 # ---------------------------------------------------------------------- main
@@ -606,16 +631,32 @@ def test_the_build_works_against_any_repository_not_only_the_sqlite_one(staged):
 
 def test_the_command_reports_a_missing_model_instead_of_a_traceback(monkeypatch, capsys):
     """The most likely reader of this error is an assessor running the project for the first time."""
-    def refuse():
+    def refuse(**_kwargs):
         raise OllamaUnavailable("Ollama is not answering. Run `ollama serve`.")
 
     monkeypatch.setattr(index, "build", refuse)
-    assert index.main() == 1
+    assert index.main([]) == 1
     assert "ollama serve" in capsys.readouterr().err
 
 
 def test_the_command_prints_the_summary_on_success(monkeypatch, capsys):
     """The summary is what the transcript quotes; a silent success leaves the build unevidenced."""
-    monkeypatch.setattr(index, "build", lambda: base_report())
-    assert index.main() == 0
+    monkeypatch.setattr(index, "build", lambda **_kwargs: base_report())
+    assert index.main([]) == 0
     assert "snap-20260915T120000Z" in capsys.readouterr().out
+
+def test_the_rebuild_flag_reaches_the_build(monkeypatch, capsys):
+    """A chunking change moves no content hash, so --rebuild is the only way to reindex."""
+    seen = {}
+
+    def record(**kwargs):
+        seen.update(kwargs)
+        return base_report()
+
+    monkeypatch.setattr(index, "build", record)
+    assert index.main(["--rebuild"]) == 0
+    assert seen["rebuild"] is True
+
+    seen.clear()
+    assert index.main([]) == 0
+    assert seen["rebuild"] is False

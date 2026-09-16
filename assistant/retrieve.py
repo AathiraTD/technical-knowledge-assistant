@@ -1,7 +1,8 @@
 """Retrieval: a question to passages the caller is allowed to see.
 
 Thin by design. The repository does the filtering and the ranking, because that
-is where the audience filter belongs — in the query, against rows, not in a
+is where the audience filter belongs — against rows inside the repository,
+not in a
 prompt. What is left here is the part that is genuinely about the question:
 expanding it with the handful of synonyms that close the vocabulary gap, and
 refusing to run at all when the index was built by a different model.
@@ -17,9 +18,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import observability as obs
 from . import ollama
 from .model import Retrieved
 from .repository import IndexMismatch
+from .index import CHUNKING_VERSION
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
 
@@ -79,6 +82,8 @@ class Retriever:
                 f"Index vectors are {snapshot.embedding_dimensions}d, the engine "
                 f"expects {ollama.EMBED_DIMENSIONS}d."
             )
+        if snapshot.chunking_version != CHUNKING_VERSION:
+            raise IndexMismatch("Index chunking configuration changed; rebuild with python -m assistant.index")
         self.snapshot = snapshot
 
     def expand(self, question: str) -> str:
@@ -104,10 +109,25 @@ class Retriever:
         top_k: int = 5,
         per_document_cap: int = 3,
     ) -> list[Retrieved]:
-        vector = ollama.embed_one(as_query(self.expand(question)),
-                                  model=self.embed_model)
-        return self.repo.retrieve(vector, audiences=audiences, top_k=top_k,
-                                  per_document_cap=per_document_cap)
+        expanded = self.expand(question)
+        with obs.timed("retrieval", audiences=list(audiences), top_k=top_k,
+                       expanded=expanded != question) as record:
+            try:
+                vector = ollama.embed_one(as_query(expanded),
+                                          model=self.embed_model)
+            except ollama.OllamaUnavailable as error:
+                # The embedding call is the first thing a question touches, so
+                # this is where a stopped model server is usually discovered.
+                obs.event("ollama_error", stage="embed", model=self.embed_model,
+                          error=type(error).__name__, detail=str(error))
+                raise
+            hits = self.repo.retrieve(vector, audiences=audiences, top_k=top_k,
+                                      per_document_cap=per_document_cap)
+            record["hits"] = len(hits)
+            record["top_score"] = self.best_score(hits)
+            record["above_threshold"] = self.above_threshold(hits)
+            record["documents"] = len({h.chunk.canonical_url for h in hits})
+        return hits
 
     def best_score(self, hits: list[Retrieved]) -> float:
         return hits[0].score if hits else 0.0

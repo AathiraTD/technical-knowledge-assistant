@@ -68,12 +68,14 @@ CREATE TABLE IF NOT EXISTS chunks (
     audience            TEXT        NOT NULL DEFAULT 'public',
     product             TEXT        NOT NULL DEFAULT '',
     source_date         TEXT        NOT NULL DEFAULT '',
-    embedding           vector(1024),
+    embedding           vector,
     UNIQUE (document_version_id, chunk_index)
 );
 
-CREATE INDEX IF NOT EXISTS chunks_embedding_idx
-    ON chunks USING hnsw (embedding vector_cosine_ops);
+-- Exact search supports multiple historical embedding configurations. An ANN
+-- index is an optional measured optimisation, not a correctness dependency.
+DROP INDEX IF EXISTS chunks_embedding_idx;
+ALTER TABLE chunks ALTER COLUMN embedding TYPE vector;
 CREATE INDEX IF NOT EXISTS chunks_audience_idx ON chunks (audience);
 
 -- -------------------------------------------------------- document caveats
@@ -125,12 +127,19 @@ CREATE TABLE IF NOT EXISTS index_snapshots (
     notes                   JSONB       NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE crawl_runs ADD COLUMN IF NOT EXISTS documents_removed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE crawl_runs ADD COLUMN IF NOT EXISTS snapshot_id TEXT NOT NULL DEFAULT '';
+
 CREATE UNIQUE INDEX IF NOT EXISTS index_snapshots_one_active
     ON index_snapshots ((TRUE)) WHERE is_active;
 
 -- ------------------------------------------------------------- answer_log
--- Production auditability. Not built in the prototype, defined here because
--- the reproducibility claim depends on it existing.
+-- What one answer used: the snapshot it read, the passages it cited and the
+-- route it took. The question is kept and the generated answer is not, because
+-- the route and the evidence are what make a reply explicable and retaining
+-- the prose of every conversation indefinitely is a separate decision nobody
+-- has taken. The twin of this table in db/schema.sqlite.sql holds the two
+-- array columns as JSON in TEXT.
 CREATE TABLE IF NOT EXISTS answer_log (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     asked_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -138,10 +147,25 @@ CREATE TABLE IF NOT EXISTS answer_log (
     audiences           TEXT[]      NOT NULL,
     path_taken          TEXT        NOT NULL,   -- route | extract | compose | defer | refuse
     snapshot_id         TEXT        REFERENCES index_snapshots (id),
-    chunk_ids           BIGINT[]    NOT NULL DEFAULT '{}',
+    chunk_ids           TEXT[]      NOT NULL DEFAULT '{}',
     generation_model    TEXT        NOT NULL DEFAULT '',
     check_failed        TEXT        NOT NULL DEFAULT ''
 );
+
+-- A chunk id in this system is the string 'url#vN-i' — the citation, not a row
+-- number — so the column that records which passages produced an answer has to
+-- hold text. It was declared BIGINT[] while nothing wrote to it. Corrected in
+-- place as well as in the definition above, so a database created before this
+-- migrates rather than being left with a type no chunk id fits.
+DO $$
+BEGIN
+    IF (SELECT atttypid FROM pg_attribute
+          WHERE attrelid = to_regclass('answer_log') AND attname = 'chunk_ids')
+       = 'bigint[]'::regtype THEN
+        ALTER TABLE answer_log
+            ALTER COLUMN chunk_ids TYPE TEXT[] USING chunk_ids::text::text[];
+    END IF;
+END $$;
 
 -- Retrieval, for reference: audience and active-version filtering happen in
 -- the query, authority is the outer sort, similarity the inner one.

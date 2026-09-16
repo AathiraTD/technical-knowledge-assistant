@@ -2,18 +2,49 @@
 # Ollama. Three services because three are needed; nothing here is present to
 # look like infrastructure.
 #
+#   cp deploy/.env.example deploy/.env      # then set POSTGRES_PASSWORD
 #   docker compose -f deploy/compose.yaml up -d
-#   docker compose -f deploy/compose.yaml exec app python -m assistant.index
 #   docker compose -f deploy/compose.yaml exec app python -m eval.run
+#
+# The first command is not optional: POSTGRES_PASSWORD has no default, so
+# `up` fails on a missing variable rather than starting a database with a
+# password someone committed. The index builds itself as part of `up`.
 #
 # Inside the network, services are reached by their names — db:5432 and
 # ollama:11434 — never localhost, which inside a container is the container.
 #
-# STATUS: written, not yet booted. Docker's daemon is not running on the build
-# machine, so this has not been verified end to end and is not claimed as
-# working. See README.
+# Index initialization completes before the UI starts. See the knowledge
+# pipeline runbook for scheduled refreshes and verification boundaries.
 
 name: lime-green-assistant
+
+x-application: &application
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  environment:
+    ASSISTANT_POSTGRES_DSN: postgresql://${POSTGRES_USER:-assistant}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-assistant}
+    OLLAMA_HOST: http://ollama:11434
+    EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+    EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-1024}
+    GENERATION_MODEL: ${GENERATION_MODEL:-qwen3.5:4b}
+  volumes:
+    # The corpus is bind-mounted, not a named volume. A named volume starts
+    # empty, so the indexer had nothing to index and the stack came up serving
+    # an empty knowledge store — the failure looked like a model problem and was
+    # a mount problem. Mounting the repository's own data directory also means
+    # the shipped embedding cache is the one used, so a first build takes
+    # seconds rather than re-embedding 552 passages inside a CPU container.
+    #
+    # It is read-write because the crawler archives each fetched original by
+    # content hash under data/cache/versions, and a refresh cannot do that on a
+    # read-only mount.
+    #
+    # A real deployment would keep named volumes and seed them from a release
+    # artefact; this is the assessment shape, where the corpus ships with the
+    # code and being able to inspect what the container built is worth more.
+    - ../data:/app/data
+    - ../data/staff:/app/data/staff:ro
 
 services:
   db:
@@ -69,26 +100,23 @@ services:
         echo "models ready"
     restart: "no"
 
-  app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+  index-init:
+    <<: *application
+    command: ["python", "-m", "assistant.index"]
     depends_on:
       db:
         condition: service_healthy
       model-init:
         condition: service_completed_successfully
-    environment:
-      ASSISTANT_POSTGRES_DSN: postgresql://${POSTGRES_USER:-assistant}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-assistant}
-      OLLAMA_HOST: http://ollama:11434
-      ASSISTANT_PORT: "8765"
+    restart: "no"
+
+  app:
+    <<: *application
+    depends_on:
+      index-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${ASSISTANT_PORT:-8765}:8765"
-    volumes:
-      # The corpus is evidence, and evidence lives on a filesystem. Postgres
-      # holds identity, versions, chunks and vectors — not 29 MB of PDFs.
-      - ../data/cache:/app/data/cache:ro
-      - index-data:/app/data/index
     healthcheck:
       test: ["CMD-SHELL", "python -m assistant.health || exit 1"]
       interval: 15s
@@ -100,4 +128,3 @@ services:
 volumes:
   db-data:
   ollama-models:
-  index-data:

@@ -351,3 +351,34 @@ def test_a_single_word_phrase_gets_no_hyphen_variants():
     """Hyphenation only matters for multi-word phrases; 'shrinkage-' is not a spelling."""
     _asked, terms = Router()._asked_terms("How much shrinkage does Solo have?", {})
     assert terms == ["shrinkage"]
+
+
+# ------------------------------------- the substrate rule, narrowed to a wall
+
+
+def test_a_catalogue_question_is_answered_rather_than_asked_back():
+    """The brief's own worked example used to meet a clarifying question."""
+    d = route("What products are suitable for lime-based external finishes?",
+              [SOLO, OTHER])
+    assert d.path is not Path_.ASK_BACK, d.reason
+
+
+def test_a_question_about_the_asker_s_own_wall_still_asks_back():
+    """A recommendation for a specific job without a substrate is a guess."""
+    assert route("Which plaster should I use?", [OTHER]).path is Path_.ASK_BACK
+    assert route("What do I need for my wall?", [OTHER]).path is Path_.ASK_BACK
+
+
+def test_a_described_symptom_counts_as_a_question_about_a_wall():
+    """Nobody describes crazing about a product range in the abstract."""
+    d = route("Which render is suitable where the surface is spalling?", [OTHER])
+    assert d.path in (Path_.ASK_BACK, Path_.DIAGNOSIS), d.path
+
+
+def test_a_photograph_counts_as_a_question_about_a_wall():
+    d = route("I attached a photo, which plaster is suitable?", [OTHER])
+    assert d.path is Path_.ASK_BACK
+
+
+def test_a_factual_lookup_never_asks_for_a_substrate():
+    assert route("How much water does Solo need?", [SOLO]).path is not Path_.ASK_BACK
