@@ -233,6 +233,25 @@ class SlotDetector:
     def terms_for(self, slot: str, value: str) -> list[str]:
         return self.spec.get(slot, {}).get("values", {}).get(value, [])
 
+    def is_answer_to_askback(self, question: str) -> bool:
+        """True if the input looks like an answer to an ask-back (substrate/location/exposure).
+
+        A very short input with load-bearing slot terms is likely answering
+        "What is the substrate? Is it brick?" with "brick, outside" rather than
+        asking a new question.
+
+        Used to detect when a user is answering a missing-fact ask-back so we can
+        re-ask the pending question with the new slots.
+        """
+        words = question.split()
+        # Very short: 1-10 words is typical for an ask-back answer
+        if len(words) > 10:
+            return False
+
+        # Does it contain any load-bearing slot terms?
+        detected = self.detect(question)
+        return bool(detected)
+
 
 # --------------------------------------------------------------------- router
 
