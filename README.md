@@ -96,14 +96,23 @@ index would have removed the evidence and kept the claim.
 
 The footing has to be stated plainly, because it is not a licence. This is
 third-party material — Lime Green's published documents, and the brief itself —
-included so the exercise can be assessed offline, not redistributed under any
-grant. Copyright stays with its owners, this repository is private, and nothing
-in it confers a right to republish. There is deliberately no `LICENSE` file:
-adding one would imply a grant over content that is not ours to grant. Everything
-derived from the corpus inherits the same footing — the index, the embedding
-cache, and the harvested product, colour and merchant name lists. If this work is
-ever made public, the corpus comes out first and the crawl becomes a build step
-rather than a shipped artefact.
+included so the exercise can be assessed offline. Copyright stays with its
+owners and nothing here confers a right to republish. There is deliberately no
+`LICENSE` file: adding one would imply a grant over content that is not ours to
+grant. Everything derived from the corpus inherits the same footing — the index,
+the embedding cache, and the harvested product, colour and merchant name lists.
+
+**This repository is public**, which was a deliberate choice by its author and
+is worth naming rather than leaving to be discovered. Every document here is
+already published by Lime Green on their own website and freely downloadable
+from it; what this repository adds is a mirror, and a mirror is a distribution
+decision even when the source is open. Lime Green have not been asked. If they
+would rather it were not here, the corpus comes out and the crawl becomes a
+build step — the pipeline already supports that, since `python -m assistant.index`
+rebuilds from the site and the delta ingestion exists precisely so a rebuild is
+cheap. The honest summary is that the offline clean-clone run was judged worth
+more than the tidiness of not mirroring, with the trade stated rather than
+hidden.
 
 ## Layout
 
