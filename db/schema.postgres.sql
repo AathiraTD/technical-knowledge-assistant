@@ -235,3 +235,33 @@ CREATE INDEX IF NOT EXISTS turn_traces_session
 
 -- The prune's own access path; retention is enforced inside the span write.
 CREATE INDEX IF NOT EXISTS turn_traces_started_at ON turn_traces (started_at);
+
+-- ------------------------------------------------------------------ sessions
+-- Multi-turn conversation state, persistent across server restarts.
+-- One row per active session: facts about the building, the pending question,
+-- and the turn history. Idle sessions are swept on read/write.
+--
+-- `slots` holds the carried facts: substrate, location, exposure. Only these
+-- three carry between turns; they are the three decision 10 names as load-bearing
+-- and the three the router prints back as stated assumptions.
+--
+-- `pending` is the question waiting on a missing fact, or empty. When the user
+-- provides the missing fact, the pending question is re-asked with the new slots
+-- and then cleared.
+--
+-- `turns` is the conversation so far, capped at MAX_TURNS (8): list of
+-- [question, answer[:400]]. Oldest first; stored as JSONB.
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id          TEXT        PRIMARY KEY,
+    audience            TEXT        NOT NULL DEFAULT 'public',
+    touched             DOUBLE PRECISION NOT NULL,
+    slots               JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    pending             TEXT        NOT NULL DEFAULT '',
+    turns               JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT sessions_audience_ck CHECK (audience IN ('public', 'trade', 'staff'))
+);
+
+-- Touch-based LRU eviction: find and sweep expired sessions on read/write.
+CREATE INDEX IF NOT EXISTS sessions_touched ON sessions (touched);

@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import sys
 import threading
 import webbrowser
@@ -55,7 +56,7 @@ from .engine import Assistant
 from .repository import IndexMismatch
 from .router import Path_
 from .session import SessionStore
-from .store.factory import open_repository
+from .store.factory import open_repository, open_persisted_session_store
 
 # Named for what it is and scoped to this server. HttpOnly because no script on
 # the page has any use for it, SameSite=Lax because a session that follows a
@@ -1154,8 +1155,12 @@ def main(argv: list[str] | None = None) -> int:
     snapshot = repo.snapshot()
     Handler.assistant = assistant
     # One store per server, rather than the class default, so a restarted
-    # process never inherits a conversation from the last one.
-    Handler.sessions = SessionStore()
+    # process never inherits a conversation from the last one. Use a persisted
+    # store so sessions survive server restarts and are shared across instances.
+    Handler.sessions = open_persisted_session_store(
+        db=args.db,
+        dsn=os.environ.get("ASSISTANT_POSTGRES_DSN"),
+    )
     Handler.uploads = UploadBudget()
     Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (

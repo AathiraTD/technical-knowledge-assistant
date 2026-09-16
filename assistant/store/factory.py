@@ -1,5 +1,6 @@
 """Select storage once at application entry points."""
 import os
+import sqlite3
 
 
 def open_repository(db="data/index/knowledge.db", dsn=None, *,
@@ -24,3 +25,33 @@ def open_repository(db="data/index/knowledge.db", dsn=None, *,
         from .locking import LockedRepository
         return LockedRepository(repository)
     return repository
+
+
+def open_persisted_session_store(db="data/index/knowledge.db", dsn=None):
+    """Create a session store backed by the same database as the knowledge store.
+
+    Opens a separate connection to SQLite or PostgreSQL for session persistence,
+    independent of the knowledge repository. Sessions survive server restarts
+    and can be shared across instances.
+
+    Returns a PersistedSessionStore if a connection can be established,
+    otherwise a regular (in-memory) SessionStore.
+    """
+    from ..session import SessionStore
+    from ..session_storage import PersistedSessionStore
+
+    connection_string = os.environ.get("ASSISTANT_POSTGRES_DSN", "") if dsn is None else dsn
+
+    try:
+        if connection_string:
+            # PostgreSQL connection
+            import psycopg
+            connection = psycopg.connect(connection_string)
+            return PersistedSessionStore(SessionStore(), connection, is_postgres=True)
+        else:
+            # SQLite connection
+            connection = sqlite3.connect(db, check_same_thread=False)
+            return PersistedSessionStore(SessionStore(), connection, is_postgres=False)
+    except Exception:
+        # If connection fails, fall back to in-memory store
+        return SessionStore()
