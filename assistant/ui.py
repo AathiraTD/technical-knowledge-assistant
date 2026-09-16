@@ -423,7 +423,7 @@ function sendMessage() {{
       formData.append('image', file);
     }}
 
-    fetch('/', {{
+    fetch('/ask', {{
       method: 'POST',
       body: formData
     }})
