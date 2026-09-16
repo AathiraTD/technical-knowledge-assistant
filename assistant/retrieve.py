@@ -21,7 +21,7 @@ from pathlib import Path
 from . import observability as obs
 from . import ollama
 from .model import Retrieved
-from .repository import IndexMismatch
+from .repository import IndexMismatch, RetrievalRequest
 from .index import CHUNKING_VERSION
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
@@ -108,9 +108,20 @@ class Retriever:
         audiences: tuple[str, ...] = ("public",),
         top_k: int = 5,
         per_document_cap: int = 3,
+        product: str = "",
     ) -> list[Retrieved]:
+        """Passages for a question, and for the product it named if it named one.
+
+        `product` is the name the caller detected in the question, not a guess
+        made here — detection is the router's vocabulary work. Given one, the
+        repository boosts that product's passages by a bounded margin so a
+        semantically adjacent product cannot displace it. It is a boost and not
+        a filter, because a question naming Ultra may still be answered partly
+        from a shared system guide, and refusing those would be a silent loss.
+        """
         expanded = self.expand(question)
         with obs.timed("retrieval", audiences=list(audiences), top_k=top_k,
+                       product=product,
                        expanded=expanded != question) as record:
             try:
                 vector = ollama.embed_one(as_query(expanded),
@@ -121,8 +132,9 @@ class Retriever:
                 obs.event("ollama_error", stage="embed", model=self.embed_model,
                           error=type(error).__name__, detail=str(error))
                 raise
-            hits = self.repo.retrieve(vector, audiences=audiences, top_k=top_k,
-                                      per_document_cap=per_document_cap)
+            hits = self.repo.retrieve_for(RetrievalRequest(
+                embedding=vector, audiences=audiences, top_k=top_k,
+                per_document_cap=per_document_cap, product=product))
             record["hits"] = len(hits)
             record["top_score"] = self.best_score(hits)
             record["above_threshold"] = self.above_threshold(hits)
@@ -134,3 +146,31 @@ class Retriever:
 
     def above_threshold(self, hits: list[Retrieved]) -> bool:
         return bool(hits) and hits[0].score >= self.threshold
+
+    def find_property(
+        self,
+        product: str,
+        terms: tuple[str, ...],
+        audiences: tuple[str, ...] = ("public",),
+        limit: int = 3,
+    ) -> list[Retrieved]:
+        """A second, targeted retrieval for a property the first pass may miss.
+
+        "How many bags for twenty square metres" embeds as a question about
+        quantity, and the coverage figure it needs sits in a short section that
+        need not rank in the top five. A path that only re-sorts what it was
+        given cannot recover from that; this can, because it asks by metadata
+        rather than by similarity: the named product, and the words the property
+        is printed under.
+
+        No model call, no embedding, nothing to be unavailable — which also
+        means the scores are 0.0 and must not be compared with the threshold.
+        The guarantee these passages carry is lexical presence of the term,
+        which is the thing the relevance gate wants to establish anyway.
+        """
+        with obs.timed("targeted_retrieval", product=product,
+                       terms=list(terms), audiences=list(audiences)) as record:
+            hits = self.repo.find_passages(product, terms, audiences=audiences,
+                                           limit=limit)
+            record["hits"] = len(hits)
+        return hits

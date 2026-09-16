@@ -30,7 +30,7 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Six checks | built and verified | 30 unit tests across the six, each aimed at a failure they exist to catch — `tests/test_checks.py` |
 | Answer engine | built and verified | Five paths plus the two composites the diagram names, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
 | CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
-| Evaluation harness | built and verified | **9/9 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. The two multi-source situations cover the brief's second test type. Transcript in `eval/results/transcript.txt` |
+| Evaluation harness | built and verified | **8/9 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. S8 fails deliberately and is left failing: its expectation now requires the answer's own citations to reference two documents, and the question turns out to be answerable from one passage, so the situation is not the multi-source test it claims to be. Transcript in `eval/results/transcript.txt` |
 | Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
 | PostgreSQL adapter | built and verified | Repository contract, ingestion lifecycle, publication lock, concurrent reader and configuration migration, all against a real PostgreSQL 16 + pgvector in CI and in a container — [evidence](docs/knowledge-pipeline-verification.md). Verified against the contract, not deployed: the transcript is produced on SQLite, and the 43 PostgreSQL tests skip on a machine with no `ASSISTANT_POSTGRES_DSN` |
 | Container deployment | partial | Image builds and runs ingestion as non-root against PostgreSQL with model doubles; Compose validates and initializes the index before the UI. Full live-model deployment is not claimed |
@@ -96,14 +96,23 @@ index would have removed the evidence and kept the claim.
 
 The footing has to be stated plainly, because it is not a licence. This is
 third-party material — Lime Green's published documents, and the brief itself —
-included so the exercise can be assessed offline, not redistributed under any
-grant. Copyright stays with its owners, this repository is private, and nothing
-in it confers a right to republish. There is deliberately no `LICENSE` file:
-adding one would imply a grant over content that is not ours to grant. Everything
-derived from the corpus inherits the same footing — the index, the embedding
-cache, and the harvested product, colour and merchant name lists. If this work is
-ever made public, the corpus comes out first and the crawl becomes a build step
-rather than a shipped artefact.
+included so the exercise can be assessed offline. Copyright stays with its
+owners and nothing here confers a right to republish. There is deliberately no
+`LICENSE` file: adding one would imply a grant over content that is not ours to
+grant. Everything derived from the corpus inherits the same footing — the index,
+the embedding cache, and the harvested product, colour and merchant name lists.
+
+**This repository is public**, which was a deliberate choice by its author and
+is worth naming rather than leaving to be discovered. Every document here is
+already published by Lime Green on their own website and freely downloadable
+from it; what this repository adds is a mirror, and a mirror is a distribution
+decision even when the source is open. Lime Green have not been asked. If they
+would rather it were not here, the corpus comes out and the crawl becomes a
+build step — the pipeline already supports that, since `python -m assistant.index`
+rebuilds from the site and the delta ingestion exists precisely so a rebuild is
+cheap. The honest summary is that the offline clean-clone run was judged worth
+more than the tidiness of not mirroring, with the trade stated rather than
+hidden.
 
 ## Layout
 

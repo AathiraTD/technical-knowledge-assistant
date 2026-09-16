@@ -20,6 +20,16 @@ the log rather than reproduced. A 404 is the exception: it is served by
 `send_error` and never reaches the sender that attaches the header, which is
 tolerable because a request for a path that does not exist has no answer to
 trace.
+
+This is also the only surface with more than one turn. The CLI is stateless by
+design and the harness must stay reproducible, so conversation state lives here
+and in `assistant/session.py`: a cookie names the session, the session holds the
+facts earlier turns established about the caller's building, and those are
+handed to `ask(carried=...)`. The engine merges them under whatever the current
+question says, so a correction always wins. The session holds slots and never an
+audience — the audience set is resolved per request from what this server was
+started to allow, and a session that could widen it would be an access-control
+bug with a cookie on it.
 """
 
 from __future__ import annotations
@@ -30,6 +40,7 @@ import json
 import sys
 import threading
 import webbrowser
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -37,7 +48,14 @@ from . import observability as obs, ollama, use_utf8
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
 from .repository import IndexMismatch
+from .router import Path_
+from .session import SessionStore
 from .store.factory import open_repository
+
+# Named for what it is and scoped to this server. HttpOnly because no script on
+# the page has any use for it, SameSite=Lax because a session that follows a
+# cross-site form post is a session somebody else is steering.
+SESSION_COOKIE = "tka_session"
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
@@ -63,6 +81,11 @@ PAGE = """<!doctype html>
   button {{ padding:12px 20px; border:0; border-radius:8px; background:var(--accent);
             color:#fff; font-size:15px; cursor:pointer; }}
   button:hover {{ background:#3d6749; }}
+  .working {{ background:var(--warnbg); border:1px solid var(--warn);
+              border-radius:10px; padding:14px 18px; margin-bottom:18px;
+              color:var(--warn); }}
+  .working p {{ margin:6px 0 0; font-size:13px; }}
+  button[disabled] {{ opacity:.6; cursor:progress; }}
   .opts {{ color:var(--muted); font-size:13px; margin-bottom:26px; }}
   .opts label {{ margin-right:14px; }}
   .card {{ background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -85,6 +108,14 @@ PAGE = """<!doctype html>
            color:var(--muted); background:#f4f6f4; border-radius:6px;
            padding:10px 12px; margin-top:14px; white-space:pre-wrap; }}
   .empty {{ color:var(--muted); font-size:14px; }}
+  details.passage {{ border:1px solid var(--line); border-radius:8px;
+                     padding:10px 14px; margin-top:14px; background:#fbfcfb; }}
+  details.passage summary {{ cursor:pointer; font-size:13px; color:var(--muted); }}
+  details.passage .quote {{ white-space:pre-wrap; font-size:14px; margin-top:10px;
+                            color:var(--ink); }}
+  ol.hist {{ margin:0; padding-left:20px; font-size:14px; color:var(--muted); }}
+  ol.hist li {{ margin-bottom:9px; }}
+  ol.hist b {{ color:var(--ink); font-weight:600; }}
 </style>
 <div class="wrap">
 <header>
@@ -94,10 +125,16 @@ PAGE = """<!doctype html>
   <div class="meta">{meta}</div>
 </header>
 
-<form method="get" action="/">
+<form method="get" action="/" onsubmit="working()">
   <input type="text" name="q" value="{q}" placeholder="Ask about a product…" autofocus>
-  <button type="submit">Ask</button>
+  <button type="submit" id="ask">Ask</button>
 </form>
+<div class="working" id="working" hidden>
+  <strong>Thinking…</strong> <span id="elapsed">0s</span>
+  <p>A question the model has not seen before takes tens of seconds on a
+     processor with no graphics card — prompt reading is the cost, not typing
+     the answer. Asking the same question again returns immediately.</p>
+</div>
 <div class="opts">
   <label><input type="checkbox" name="v" form="" onchange="toggle('v',this)"
     {vchecked}> show how it was answered</label>
@@ -115,12 +152,43 @@ PAGE = """<!doctype html>
 function param(k,v){{const u=new URL(location);v?u.searchParams.set(k,v):u.searchParams.delete(k);location=u;}}
 function toggle(k,el){{param(k, el.checked?'1':'');}}
 function setAudience(v){{param('a',v);}}
+// The form is a plain GET, so the browser shows nothing at all until the
+// server answers — and on this hardware that is tens of seconds. Silence for
+// that long is indistinguishable from a broken button, which is exactly how it
+// was first reported. The counter is the point: it says the wait is real work
+// rather than a hang, and it degrades to an ordinary form if scripting is off.
+function working(){{
+  var box = document.getElementById('working');
+  var out = document.getElementById('elapsed');
+  var btn = document.getElementById('ask');
+  if (!box) return;
+  box.hidden = false;
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Asking…'; }}
+  var t0 = Date.now();
+  setInterval(function(){{
+    out.textContent = Math.round((Date.now() - t0) / 1000) + 's';
+  }}, 1000);
+}}
 </script>
 """
 
 
 def _esc(text: str) -> str:
     return html.escape(text, quote=True)
+
+
+def render_history(turns: list[tuple[str, str]]) -> str:
+    """The conversation so far, so a follow-up reads as one.
+
+    Without it the page answers "brick" with a wall of text and no sign of the
+    question it belongs to, which is the single-turn experience decision 10
+    complains about wearing a session cookie.
+    """
+    if not turns:
+        return ""
+    rows = "".join(f"<li><b>{_esc(q)}</b><br>{_esc(a)}</li>" for q, a in turns)
+    return (f"<div class='card'><div class='part'>Earlier in this conversation"
+            f"</div><ol class='hist'>{rows}</ol></div>")
 
 
 def render_html(reply, verbose: bool) -> str:
@@ -130,9 +198,24 @@ def render_html(reply, verbose: bool) -> str:
         head = (f'<div class="part">Part {i} — {_esc(part)}</div>' if multi else "")
         tag = ('<span class="tag refused">refused</span>' if answer.refused
                else f'<span class="tag">{_esc(answer.path)}</span>')
+        # `body`, not `text`: on a refusal the raw passage is the tail of the
+        # text, and leading a public visitor with 600 characters of datasheet is
+        # the complaint this disclosure answers. It is shown in full below,
+        # folded, so nothing the refusal carries is lost — only demoted.
         out = [f'<div class="card">{head}',
-               f'<div class="answer">{_esc(answer.text)}</div>{tag}']
+               f'<div class="answer">{_esc(answer.body)}</div>{tag}']
 
+        if answer.disclosure:
+            # Open on the diagnostics view, where the reader is auditing rather
+            # than asking, and closed for the visitor who only wanted a sentence.
+            out.append(f"<details class='passage'{' open' if verbose else ''}>"
+                       f"<summary>Show source passage</summary>"
+                       f"<div class='quote'>{_esc(answer.disclosure)}</div></details>")
+
+        # Assumed means assumed. A value the caller supplied is reported inside
+        # the answer text by `AnswerEngine._finish` as something they said, and
+        # deliberately not repeated here under a heading that would call it a
+        # guess — that mislabelling is the defect this block used to carry.
         if answer.assumptions:
             out.append("<h3>Assumed</h3><div class='empty'>"
                        + _esc("; ".join(answer.assumptions)) + "</div>")
@@ -176,7 +259,27 @@ class Handler(BaseHTTPRequestHandler):
     # What this server was started to allow. A request may narrow this and can
     # never widen it, so `?a=staff` against a public instance stays public.
     audiences: tuple[str, ...] = PUBLIC_ONLY
+    # Conversation state, shared by every request thread. Slots only; see
+    # assistant/session.py for what is carried and what is deliberately not.
+    sessions: SessionStore = SessionStore()
     correlation_id: str
+    session_id: str
+
+    def _session(self) -> str:
+        """The session this request belongs to, minting one if it has none.
+
+        The Cookie header is attacker-controlled, and `SimpleCookie` raises on a
+        malformed key rather than ignoring it, so a hand-written header of
+        "=====" would otherwise answer every request with a 500. An unreadable
+        cookie is treated as no cookie, which is the safe reading: it starts a
+        new conversation instead of guessing which one was meant.
+        """
+        try:
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+        except CookieError:
+            jar = SimpleCookie()
+        morsel = jar.get(SESSION_COOKIE)
+        return self.sessions.open(morsel.value if morsel else "")
 
     def log_message(self, *args) -> None:      # keep the console for answers
         pass
@@ -197,10 +300,27 @@ class Handler(BaseHTTPRequestHandler):
         audience = params.get("a", [""])[0]
         audiences = resolve(audience, self.audiences)
 
+        self.session_id = self._session()
+        carried = self.sessions.carried(self.session_id)
+        earlier = self.sessions.turns(self.session_id)
+        pending = self.sessions.pending(self.session_id)
+        asked = question
+        if pending and question:
+            # The previous turn ended in an ask-back, so this one may be the
+            # answer to it rather than a new question. Detection is the router's
+            # own vocabulary — not a second copy of it here — and only the slot
+            # step 5 actually asked for counts: "brick" resumes the pending
+            # question, "and what colour is it" does not.
+            stated = self.assistant.router.slots.detect(question)
+            if "substrate" in stated:
+                carried = {**carried, **stated}
+                asked = pending
+
         if url.path == "/ask":
             try:
-                reply = (self.assistant.ask(question, audiences=audiences,
-                                            correlation_id=self.correlation_id)
+                reply = (self.assistant.ask(asked, audiences=audiences,
+                                            correlation_id=self.correlation_id,
+                                            carried=carried)
                          if question else None)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 # The HTML branch has always handled this; the JSON branch did
@@ -211,13 +331,23 @@ class Handler(BaseHTTPRequestHandler):
                                       ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8", status=503)
                 return
+            self._remember(question, reply)
             payload = {
                 "question": question,
+                "answered": asked,
+                "session_slots": self.sessions.carried(self.session_id),
                 "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
                      "text": a.text, "sources": a.sources, "caveats": a.caveats,
-                     "diagnostics": a.diagnostics, "failed_checks": a.failed_checks}
+                     "diagnostics": a.diagnostics, "failed_checks": a.failed_checks,
+                     # Structured rather than prose, so a channel adapter can
+                     # render provenance its own way instead of parsing ours.
+                     "facts": [{"slot": f.slot, "value": f.value,
+                                "provenance": f.provenance.value}
+                               for f in a.facts],
+                     "assumptions": a.assumptions,
+                     "disclosure": a.disclosure}
                     for q, a in (reply.parts if reply else [])
                 ],
             }
@@ -227,8 +357,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if question:
             try:
-                reply = self.assistant.ask(question, audiences=audiences,
-                                           correlation_id=self.correlation_id)
+                reply = self.assistant.ask(asked, audiences=audiences,
+                                           correlation_id=self.correlation_id,
+                                           carried=carried)
+                self._remember(question, reply)
                 body_html = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 body_html = (f"<div class='card'><div class='answer'>"
@@ -242,16 +374,43 @@ class Handler(BaseHTTPRequestHandler):
         options = "".join(
             f"<option value='{a}'{' selected' if a == audience else ''}>{a}</option>"
             for a in ("public", "trade", "staff"))
-        page = PAGE.format(meta=self.meta, q=_esc(question), body=body_html,
+        page = PAGE.format(meta=self.meta, q=_esc(question),
+                           body=render_history(earlier) + body_html,
                            vchecked="checked" if verbose else "",
                            audience_options=options)
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _remember(self, question: str, reply) -> None:
+        """Fold what this turn established back into the session.
+
+        The slots taken are the ones the router actually detected, read off the
+        answer rather than re-derived, so the page and the answer cannot
+        disagree about what was assumed. `pending` is set only by an ask-back
+        and cleared by anything else, so a question that was answered never
+        resumes later.
+        """
+        if reply is None:
+            return
+        slots: dict = {}
+        pending = ""
+        for _part, answer in reply.parts:
+            slots.update(answer.diagnostics.get("slots", {}))
+            if answer.path == Path_.ASK_BACK.value:
+                pending = reply.question
+        summary = "\n\n".join(answer.text for _part, answer in reply.parts)
+        self.sessions.remember(self.session_id, question, summary, slots, pending)
 
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Correlation-Id", self.correlation_id)
+        # Path and HttpOnly on every response, including the first: the session
+        # is established before the answer, so a caller who asks one question
+        # and reads the reply already has somewhere to put the next turn.
+        self.send_header("Set-Cookie",
+                         f"{SESSION_COOKIE}={self.session_id}; Path=/; "
+                         f"HttpOnly; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
 
@@ -289,6 +448,9 @@ def main(argv: list[str] | None = None) -> int:
 
     snapshot = repo.snapshot()
     Handler.assistant = assistant
+    # One store per server, rather than the class default, so a restarted
+    # process never inherits a conversation from the last one.
+    Handler.sessions = SessionStore()
     Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (
         f"{snapshot.document_count} documents · {snapshot.chunk_count} passages · "

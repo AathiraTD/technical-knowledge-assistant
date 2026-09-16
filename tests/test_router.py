@@ -15,6 +15,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.model import Chunk, Document, Retrieved       # noqa: E402
@@ -69,10 +71,21 @@ def test_two_questions_in_one_message_are_two_questions():
     assert "coverage" in parts[1]
 
 
-def test_the_question_word_stays_with_its_question():
-    """Splitting on 'and what' swallowed the 'what' and left a fragment that retrieved badly."""
+def test_two_properties_of_one_product_stay_in_one_question():
+    """This used to split, and splitting was the wrong answer.
+
+    "What is the coverage and how long does it take to dry" is one enquiry
+    about one product. Cutting it produced two retrievals against half a
+    question each, and the guarantee this test used to assert — that the
+    question word "how long" survived the cut — was a repair to damage the cut
+    caused. Not cutting is the stronger fix, and both properties are now
+    detected on the whole question instead of one being thrown away.
+    """
     parts = split_by_topic("What is the coverage and how long does it take to dry?")
-    assert any(p.lower().startswith("how long") for p in parts), parts
+    assert len(parts) == 1, parts
+
+    properties = SlotDetector().detect_properties(parts[0])
+    assert set(properties) >= {"coverage", "drying"}, properties
 
 
 def test_a_single_question_is_left_alone():
@@ -382,3 +395,124 @@ def test_a_photograph_counts_as_a_question_about_a_wall():
 
 def test_a_factual_lookup_never_asks_for_a_substrate():
     assert route("How much water does Solo need?", [SOLO]).path is not Path_.ASK_BACK
+
+
+# --------------------------------------- the five questions an external review asked
+
+# Five real enquiries, run against the built system by a reviewer who then read
+# the code to explain what happened. Four of the five failed before retrieval
+# ever ran, for reasons that had nothing to do with the model: the message was
+# cut into fragments that had lost the facts making them answerable, and the
+# vocabulary could not name what was being asked. These pin the repairs.
+
+
+FIVE = {
+    "compatibility": "Can I use Lime Green Solo directly over old gypsum "
+                     "plaster, or do I need Solo Primer first?",
+    "insulation": "I have an old solid brick wall and want to improve "
+                  "insulation without dry-lining it. Would Lime Green Ultra be "
+                  "suitable internally, and what thickness can it be applied at?",
+    "quantity": "How much Lime Green Ultra would I need for 30 m\u00b2 at 25 mm "
+                "thickness?",
+    "patchy": "My external lime render is showing patchy colour after drying. "
+              "What could be causing it?",
+    "exposed": "I'm rendering an old masonry wall in a very exposed location. "
+               "How thick should the lime render be, and what preparation does "
+               "the background need?",
+}
+
+
+@pytest.mark.parametrize("name", sorted(FIVE))
+def test_a_real_enquiry_is_not_cut_into_fragments(name):
+    """Each of these is one job, however many sentences it takes to say.
+
+    The splitter cut after every full stop, so "What could be causing it?"
+    arrived at retrieval with no render, no colour and no exposure — a question
+    that cannot be answered and cannot even be honestly refused, because
+    nothing downstream could tell what had been asked.
+    """
+    assert len(split_by_topic(FIVE[name])) == 1, split_by_topic(FIVE[name])
+
+
+def test_dry_lining_is_not_a_question_about_drying():
+    """"dry" matched inside "dry-lining", because a hyphen is a word boundary.
+
+    Someone explaining they do *not* want to dry-line a wall was read as asking
+    how long something takes to dry, which then steered retrieval.
+    """
+    slots = SlotDetector().detect(FIVE["insulation"])
+    assert slots.get("property_asked") != "drying", slots
+    assert slots["substrate"] == "brick"
+    assert slots["location"] == "internal"
+
+
+def test_the_symbol_people_actually_type_is_a_quantity_question():
+    """The vocabulary had "m2" and "sq m" but not "m²", which is what a keyboard
+    with a UK layout produces and what the reviewer typed. Without it the
+    calculation slot never fired and router step 6 was unreachable, so a
+    quantity question became an ordinary thickness lookup."""
+    assert SlotDetector().detect(FIVE["quantity"])["calculation"] == "quantity"
+    assert SlotDetector().detect(
+        "How many bags of Duro for 20 square metres")["calculation"] == "quantity"
+
+
+def test_the_ordinary_way_of_asking_for_a_cause_is_recognised():
+    """Step 3 sends a cause question to diagnosis, and depends on this slot.
+
+    The vocabulary knew "what caused" and "what is causing" but not "what could
+    be causing", which is how people actually write it.
+    """
+    slots = SlotDetector().detect(FIVE["patchy"])
+    assert slots["cause_asked"] == "cause"
+    assert slots["location"] == "external"
+
+
+def test_masonry_is_not_resolved_to_stone():
+    """A masonry wall may be brick, block, stone or mixed.
+
+    Resolving it to stone made the system more certain than the caller had
+    been, and a recommendation on an assumed wall is the costly error decision
+    10 exists to prevent.
+    """
+    slots = SlotDetector().detect(FIVE["exposed"])
+    assert slots["substrate"] == "masonry", slots
+    assert slots["exposure"] == "severe"
+
+
+def test_both_halves_of_a_two_property_question_survive():
+    """Thickness *and* preparation. Keeping only the winner dropped half the job.
+
+    The corpus publishes a whole knowledge-base article on background
+    preparation for lime rendering, so the half being discarded was the half
+    with the best evidence behind it.
+    """
+    properties = SlotDetector().detect_properties(FIVE["exposed"])
+    assert set(properties) >= {"preparation", "thickness"}, properties
+
+
+def test_asking_whether_one_product_goes_over_another_is_a_property():
+    """There was no way to name compatibility, so the question had no shape.
+
+    It still may be refused — the corpus may genuinely not say whether Solo
+    goes over old gypsum — but it should be refused after looking for the right
+    thing, not because the enquiry was never understood.
+    """
+    slots = SlotDetector().detect(FIVE["compatibility"])
+    assert slots.get("property_asked") == "compatibility", slots
+
+
+def test_two_different_policy_topics_are_two_referrals():
+    """A price and a delivery question get different fixed replies.
+
+    Merging them would print one referral and silently drop the other, so this
+    is the second case where splitting is still right — both halves are gated,
+    but to different topics.
+    """
+    parts = split_by_topic("How much does Solo cost? When will it be delivered?")
+    assert len(parts) == 2, parts
+
+
+def test_two_questions_on_the_same_policy_topic_stay_together():
+    """One referral answers both, so cutting gains nothing and costs context."""
+    parts = split_by_topic("How much does Solo cost? And how much is Duro?")
+    assert len(parts) == 1, parts

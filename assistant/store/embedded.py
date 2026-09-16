@@ -41,7 +41,12 @@ from ..model import (
     Retrieved,
     Snapshot,
 )
-from ..repository import IndexMismatch
+from ..repository import (
+    PRODUCT_BAND,
+    IndexMismatch,
+    RetrievalRequest,
+    product_matches,
+)
 
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sqlite.sql"
 
@@ -481,20 +486,33 @@ class SQLiteKnowledgeRepository:
     ) -> list[Retrieved]:
         """Nearest active chunks the caller may see, authority breaking near-ties.
 
+        Kept as the plain four-argument form because most callers have nothing
+        else to say; `retrieve_for` is the same search with a structured ask.
+        """
+        return self.retrieve_for(RetrievalRequest(
+            embedding=query_embedding, audiences=audiences, top_k=top_k,
+            per_document_cap=per_document_cap))
+
+    def retrieve_for(self, request: RetrievalRequest) -> list[Retrieved]:
+        """The search itself, told what the question named.
+
         The audience filter is applied to the rows, not to a prompt: a prompt
-        instruction is a request, and an access control has to be a fact.
+        instruction is a request, and an access control has to be a fact. It is
+        applied *before* scoring, so a forbidden row is never ranked, never
+        capped against and never returned — and the product boost cannot reach
+        it either, because it is not in the candidate list to be boosted.
         """
         self._load()
         if self._matrix is None or self._matrix.size == 0:
             return []
 
-        q = np.asarray(query_embedding, dtype=np.float32)
+        q = np.asarray(request.embedding, dtype=np.float32)
         n = np.linalg.norm(q)
         if n:
             q = q / n
         scores = self._matrix @ q
 
-        allowed = set(audiences)
+        allowed = set(request.audiences)
         candidates = [
             (float(scores[i]), r) for i, r in enumerate(self._rows)
             if r["audience"] in allowed
@@ -504,31 +522,80 @@ class SQLiteKnowledgeRepository:
         # first; the ranking sort is stable and preserves that order wherever
         # the effective scores are equal.
         candidates.sort(key=lambda t: t[1]["source_date"] or "", reverse=True)
-        candidates.sort(key=lambda t: -self._effective(t[0], t[1]["authority"]))
+        candidates.sort(key=lambda t: -self._effective(
+            t[0], t[1]["authority"],
+            product_matches(request.product, t[1]["product"] or "")))
 
         out, per_doc = [], {}
         for score, r in candidates:
             url = r["canonical_url"]
-            if per_doc.get(url, 0) >= per_document_cap:
+            if per_doc.get(url, 0) >= request.per_document_cap:
                 continue
             per_doc[url] = per_doc.get(url, 0) + 1
             out.append(Retrieved(chunk=self._chunk(r), score=score,
                                  document=self._document(r)))
-            if len(out) >= top_k:
+            if len(out) >= request.top_k:
                 break
         return out
 
+    def find_passages(
+        self,
+        product: str,
+        terms: tuple[str, ...],
+        audiences: tuple[str, ...] = ("public",),
+        limit: int = 3,
+    ) -> list[Retrieved]:
+        """The passage that actually carries a property, found by metadata.
+
+        No vector is involved, so `score` is 0.0 and means "not a similarity".
+        """
+        if not product or not terms:
+            return []
+        marks = ",".join("?" * len(audiences))
+        like = " OR ".join(
+            ["(LOWER(c.content) LIKE ? OR LOWER(c.section) LIKE ?)"] * len(terms))
+        params: list = list(audiences)
+        for term in terms:
+            pattern = f"%{term.strip().lower()}%"
+            params += [pattern, pattern]
+        rows = self.db.execute(
+            f"""SELECT c.id, c.chunk_index, c.section, c.content, c.audience,
+                       c.product, c.source_date, v.version_number,
+                       d.canonical_url, d.title, d.link_text, d.document_type,
+                       d.authority, d.audience AS doc_audience
+                FROM chunks c
+                JOIN document_versions v ON v.id = c.document_version_id
+                JOIN documents d         ON d.id = v.document_id
+                WHERE v.is_active = 1
+                  AND c.audience IN ({marks})
+                  AND ({like})
+                ORDER BY d.authority ASC, c.source_date DESC,
+                         d.canonical_url, c.chunk_index""",
+            params,
+        ).fetchall()
+        # The product match is the one rule that must be identical in both
+        # adapters, so it runs through the shared helper rather than through two
+        # dialects of LIKE.
+        matched = [r for r in rows if product_matches(product, r["product"] or "")]
+        return [Retrieved(chunk=self._chunk(r), score=0.0,
+                          document=self._document(r))
+                for r in matched[:limit]]
+
     @staticmethod
-    def _effective(similarity: float, authority: int) -> float:
-        """Similarity, nudged by authority within a bounded margin.
+    def _effective(similarity: float, authority: int,
+                   named_product: bool = False) -> float:
+        """Similarity, nudged by authority and by the product the caller named.
 
         A datasheet is preferred over a product page that matched marginally
-        better; it is not preferred over one that matched clearly better. The
-        score returned here orders results and is never shown — the similarity
+        better; it is not preferred over one that matched clearly better. A
+        passage about the product the question named is preferred over a
+        semantic neighbour by a larger but still bounded margin. The score
+        returned here orders results and is never shown — the similarity
         reported alongside an answer is the real cosine.
         """
         rank = max(1, min(authority, _AUTHORITY_SPREAD))
-        return similarity + (_AUTHORITY_SPREAD - rank) * AUTHORITY_BONUS
+        boost = PRODUCT_BAND if named_product else 0.0
+        return similarity + (_AUTHORITY_SPREAD - rank) * AUTHORITY_BONUS + boost
 
     @staticmethod
     def _chunk(r: sqlite3.Row) -> Chunk:
