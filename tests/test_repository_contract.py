@@ -29,7 +29,9 @@ from assistant.model import (                                    # noqa: E402
     AnswerLogEntry, Caveat, Chunk, CrawlRun, Document, DocumentUpdate,
     DocumentVersion, Excluded, Snapshot,
 )
-from assistant.repository import KnowledgeRepository             # noqa: E402
+from assistant.repository import (                               # noqa: E402
+    KnowledgeRepository, RetrievalRequest,
+)
 from assistant.store import SQLiteKnowledgeRepository            # noqa: E402
 
 DIMS = 1024
@@ -327,6 +329,282 @@ def test_a_failed_publish_leaves_the_serving_index_intact(repo):
     assert any("GOOD" in h.chunk.content for h in hits), (
         "a failed publish destroyed the serving index")
     assert repo.snapshot().snapshot_id == "snap-good"
+
+
+# ------------------------------------------- the product the question named
+#
+# Retrieval used to know about similarity, audience, version and authority and
+# nothing about the product a question named outright. These hold both adapters
+# to the same answer on that.
+
+
+ULTRA = "https://example/ultra-datasheet"
+WARMSHELL = "https://example/warmshell-guide"
+
+# The reviewer's case, as vectors. The WarmShell passage is the *better*
+# semantic match - both documents are about old walls and internal insulation,
+# and the corpus is dense there - and the Ultra passage is a few hundredths
+# behind it. Nothing in the old retriever could prefer Ultra.
+WS_VECTOR = vec(1, 0, 0)
+ULTRA_VECTOR = vec(0.985, 0.174, 0)      # cosine ~0.985 against the question
+
+
+def publish_two_products(repo, ultra_authority: int = 1,
+                         ultra_type: str = "datasheet") -> None:
+    repo.publish(
+        [doc(ULTRA, ultra_type, ultra_authority, product="Ultra"),
+         doc(WARMSHELL, "system_guide", 2, product="WarmShell")],
+        [ver(ULTRA), ver(WARMSHELL)],
+        [chunk(ULTRA, 0, "ULTRA on an old internal wall.", ULTRA_VECTOR,
+               product="Ultra", authority=ultra_authority, dtype=ultra_type),
+         chunk(WARMSHELL, 0, "WARMSHELL insulates an old internal wall.",
+               WS_VECTOR, product="WarmShell", authority=2,
+               dtype="system_guide")],
+        snap(chunks=2, docs=2),
+    )
+
+
+def test_without_a_named_product_the_neighbour_still_wins(repo):
+    """The baseline, so the next test measures the boost and not the fixture."""
+    publish_two_products(repo)
+    hits = repo.retrieve(WS_VECTOR, top_k=2)
+    assert hits[0].chunk.product == "WarmShell"
+    assert hits[1].chunk.product == "Ultra"
+    assert hits[0].score > hits[1].score
+
+
+def test_a_named_product_is_not_answered_from_its_semantic_neighbour(repo):
+    """Say Ultra, get Ultra - even when WarmShell is the closer vector.
+
+    This is the whole reason the request exists. Both documents concern an old
+    internal wall, so semantic adjacency alone puts WarmShell first; the corpus
+    already carried `product` on every chunk and retrieval had no way to be told
+    which one the customer said out loud.
+    """
+    publish_two_products(repo)
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=2, product="Lime Green Ultra"))
+    assert hits[0].chunk.product == "Ultra", (
+        "a question naming Ultra was answered from WarmShell because WarmShell "
+        "was the closer vector")
+    # And the reported score is still the real cosine, not the boosted one.
+    assert hits[0].score < hits[1].score
+
+
+def test_the_boost_does_not_filter_the_other_product_out(repo):
+    """A boost, not a filter: multi-source questions must still see both.
+
+    A hard product filter is the obvious implementation and it would break the
+    brief's own multi-source questions, which legitimately span two documents
+    and sometimes two products. The neighbour must be demoted, not deleted.
+    """
+    publish_two_products(repo)
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=5, product="Ultra"))
+    assert {h.chunk.product for h in hits} == {"Ultra", "WarmShell"}
+
+
+def test_the_boost_is_bounded_and_cannot_drag_in_the_unrelated(repo):
+    """The other half of "bounded": a name is not a licence to return anything."""
+    publish_two_products(repo)
+    far = "https://example/ultra-unrelated"
+    repo.apply_delta(
+        [DocumentUpdate(
+            document=doc(far, "datasheet", 1, product="Ultra"),
+            version=DocumentVersion(canonical_url=far, version=1,
+                                    content_hash="hf", source_path="f",
+                                    is_active=True, fetched_at="2026-01-01"),
+            chunks=[chunk(far, 0, "ULTRA, on something else entirely.", B,
+                          product="Ultra")])],
+        [], snap("snap-far", 3, 3))
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=2, product="Ultra"))
+    assert not any("entirely" in h.chunk.content for h in hits), (
+        "a passage 0.0 similar was boosted into the top two by its product tag")
+
+
+def test_the_product_boost_does_not_reorder_within_the_product(repo):
+    """Authority still orders the named product's own passages.
+
+    Every chunk of the named product gets the same bonus, so the group moves and
+    the ordering inside it is untouched - which is what keeps "authority beats a
+    marginal similarity difference" true rather than approximately true.
+    """
+    sheet, faq = "https://example/ultra-tds", "https://example/ultra-faq"
+    repo.publish(
+        [doc(sheet, "datasheet", 1, product="Ultra"),
+         doc(faq, "faq", 5, product="Ultra")],
+        [ver(sheet), ver(faq)],
+        [chunk(sheet, 0, "DATASHEET on Ultra.", NEAR_A, authority=1,
+               dtype="datasheet", product="Ultra"),
+         chunk(faq, 0, "FAQ on Ultra.", A, authority=5,
+               dtype="faq", product="Ultra")],
+        snap(chunks=2, docs=2),
+    )
+    hits = repo.retrieve_for(RetrievalRequest(embedding=A, top_k=2,
+                                              product="Ultra"))
+    assert hits[0].chunk.document_type == "datasheet"
+
+
+def test_the_product_boost_cannot_reach_a_forbidden_audience(repo):
+    """The audience filter runs before anything is boosted or ranked."""
+    pub, staff = "https://example/public", "fixture://staff/ultra"
+    repo.publish(
+        [doc(pub, product="WarmShell"),
+         doc(staff, "knowledge_base", 4, audience="staff", product="Ultra")],
+        [ver(pub), ver(staff)],
+        [chunk(pub, 0, "Public passage.", WS_VECTOR, product="WarmShell"),
+         chunk(staff, 0, "The internal Ultra margin is 42 percent.",
+               ULTRA_VECTOR, audience="staff", authority=4, product="Ultra")],
+        snap(chunks=2, docs=2),
+    )
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, audiences=("public",), top_k=5, product="Ultra"))
+    assert not any("42 percent" in h.chunk.content for h in hits)
+
+
+def test_an_unknown_product_name_changes_nothing(repo):
+    publish_two_products(repo)
+    plain = repo.retrieve(WS_VECTOR, top_k=2)
+    named = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=2, product="Nonesuch"))
+    assert [h.chunk.content for h in named] == [h.chunk.content for h in plain]
+
+
+def test_an_untagged_chunk_is_never_boosted(repo):
+    """An empty product tag must not match every name by containment."""
+    publish_two_products(repo)
+    untagged = "https://example/untagged"
+    repo.apply_delta(
+        [DocumentUpdate(
+            document=doc(untagged, "datasheet", 1, product=""),
+            version=DocumentVersion(canonical_url=untagged, version=1,
+                                    content_hash="hu", source_path="u",
+                                    is_active=True, fetched_at="2026-01-01"),
+            chunks=[chunk(untagged, 0, "UNTAGGED passage.", ULTRA_VECTOR,
+                          product="")])],
+        [], snap("snap-untagged", 3, 3))
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=1, product="Ultra"))
+    assert hits[0].chunk.product == "Ultra"
+
+
+def test_the_named_product_still_respects_the_per_document_cap(repo):
+    """The cap is the multi-source guarantee; a boost must not be able to lift it."""
+    repo.publish(
+        [doc(ULTRA, "datasheet", 1, product="Ultra"),
+         doc(WARMSHELL, "system_guide", 2, product="WarmShell")],
+        [ver(ULTRA), ver(WARMSHELL)],
+        [chunk(ULTRA, i, "Ultra passage %d." % i, ULTRA_VECTOR, product="Ultra")
+         for i in range(5)]
+        + [chunk(WARMSHELL, 0, "WarmShell passage.", WS_VECTOR,
+                 product="WarmShell", authority=2, dtype="system_guide")],
+        snap(chunks=6, docs=2),
+    )
+    hits = repo.retrieve_for(RetrievalRequest(
+        embedding=WS_VECTOR, top_k=5, per_document_cap=2, product="Ultra"))
+    from collections import Counter
+    counts = Counter(h.chunk.canonical_url for h in hits)
+    assert counts[ULTRA] == 2
+    assert counts[WARMSHELL] == 1
+
+
+# ------------------------------------------ the targeted second retrieval
+
+
+def publish_a_coverage_sheet(repo) -> None:
+    repo.publish(
+        [doc(ULTRA, "datasheet", 1, product="Ultra"),
+         doc(WARMSHELL, "system_guide", 2, product="WarmShell")],
+        [ver(ULTRA), ver(WARMSHELL)],
+        [chunk(ULTRA, 0, "Mixing: add 5 to 6 litres per sack.", A,
+               product="Ultra"),
+         chunk(ULTRA, 1, "Coverage: 16 to 20 square metres per 25kg sack.", B,
+               product="Ultra"),
+         chunk(WARMSHELL, 0, "Coverage: 8 square metres per board pack.", A,
+               product="WarmShell", authority=2, dtype="system_guide")],
+        snap(chunks=3, docs=2),
+    )
+
+
+def test_a_targeted_lookup_finds_the_property_the_top_five_missed(repo):
+    """The calculation path's recovery: coverage by metadata, not by similarity."""
+    publish_a_coverage_sheet(repo)
+    hits = repo.find_passages("Ultra", ("coverage",))
+    assert len(hits) == 1
+    assert "16 to 20" in hits[0].chunk.content
+    assert hits[0].chunk.product == "Ultra"
+    assert hits[0].score == 0.0, "a lexical hit must not look like a similarity"
+
+
+def test_a_targeted_lookup_is_confined_to_the_named_product(repo):
+    """Unlike the boost, this one *is* a filter - the caller named the product."""
+    publish_a_coverage_sheet(repo)
+    hits = repo.find_passages("WarmShell", ("coverage",))
+    assert [h.chunk.product for h in hits] == ["WarmShell"]
+
+
+def test_a_targeted_lookup_matches_a_section_heading(repo):
+    publish_a_coverage_sheet(repo)
+    assert repo.find_passages("Ultra", ("section 1",))
+
+
+def test_a_targeted_lookup_honours_audience_and_active_version(repo):
+    staff = "fixture://staff/ultra"
+    repo.publish(
+        [doc(ULTRA, "datasheet", 1, product="Ultra"),
+         doc(staff, "knowledge_base", 4, audience="staff", product="Ultra")],
+        [ver(ULTRA, 1, active=False), ver(ULTRA, 2, active=True), ver(staff)],
+        [chunk(ULTRA, 0, "OLD coverage: 30 square metres.", A, version=1,
+               product="Ultra"),
+         chunk(ULTRA, 0, "NEW coverage: 16 to 20 square metres.", A, version=2,
+               product="Ultra"),
+         chunk(staff, 0, "Staff coverage note.", A, audience="staff",
+               authority=4, product="Ultra")],
+        snap(chunks=3, docs=2),
+    )
+    texts = " ".join(h.chunk.content
+                     for h in repo.find_passages("Ultra", ("coverage",), limit=5))
+    assert "NEW" in texts
+    assert "OLD" not in texts, "a superseded passage was reachable by metadata"
+    assert "Staff" not in texts, "a staff passage was reachable by metadata"
+
+
+def test_a_targeted_lookup_prefers_the_datasheet_then_the_newer_sheet(repo):
+    """Same ordering rule as retrieval: authority first, recency inside it."""
+    page, old_sheet, new_sheet = ("https://example/u-page",
+                                  "https://example/u-2015",
+                                  "https://example/u-2025")
+    repo.publish(
+        [doc(page, "product_page", 3, product="Ultra"),
+         doc(old_sheet, "datasheet", 1, product="Ultra"),
+         doc(new_sheet, "datasheet", 1, product="Ultra")],
+        [ver(page), ver(old_sheet), ver(new_sheet)],
+        [chunk(page, 0, "PAGE coverage, roughly.", A, authority=3,
+               dtype="product_page", product="Ultra", date="2026-01-01"),
+         chunk(old_sheet, 0, "2015 coverage: 18 square metres.", A,
+               product="Ultra", date="2015-08-01"),
+         chunk(new_sheet, 0, "2025 coverage: 16 square metres.", A,
+               product="Ultra", date="2025-10-01")],
+        snap(chunks=3, docs=3),
+    )
+    hits = repo.find_passages("Ultra", ("coverage",), limit=3)
+    assert hits[0].chunk.source_date == "2025-10-01"
+    assert hits[1].chunk.source_date == "2015-08-01"
+    assert hits[2].chunk.document_type == "product_page"
+
+
+def test_a_targeted_lookup_caps_what_it_returns(repo):
+    publish_a_coverage_sheet(repo)
+    assert len(repo.find_passages("Ultra", ("coverage", "mixing"), limit=2)) == 2
+    assert len(repo.find_passages("Ultra", ("coverage", "mixing"), limit=1)) == 1
+
+
+def test_a_targeted_lookup_with_nothing_to_go_on_returns_nothing(repo):
+    publish_a_coverage_sheet(repo)
+    assert repo.find_passages("", ("coverage",)) == []
+    assert repo.find_passages("Ultra", ()) == []
+    assert repo.find_passages("Ultra", ("pot life",)) == []
 
 
 def test_retrieve_on_an_empty_index(repo):

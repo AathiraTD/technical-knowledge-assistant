@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 
 from . import observability as obs
 from . import ollama
@@ -74,6 +75,73 @@ Question: {question}
 Answer:"""
 
 
+# ------------------------------------------------------------- what is known
+
+# The three facts about the caller's building that an answer may be shaped by,
+# and the same three `assistant/session.py` carries between turns. The order is
+# the order they are printed in.
+STATABLE_SLOTS = ("substrate", "location", "exposure")
+
+
+class Provenance(Enum):
+    """Where a slot value came from. The whole point is that these differ.
+
+    Printing "Assumed: location external" at somebody who wrote "my external
+    lime render" makes a system that listened look like a system that guessed,
+    and it invites them to correct something that was never wrong. Three states,
+    and each one is currently produced by something:
+
+    ``STATED``   the caller's own words, in the question being answered.
+    ``CARRIED``  the caller's own words, in an earlier turn of the same
+                 conversation — `assistant/session.py` holds exactly these three
+                 slots forward. Still stated, just not in this sentence, so it
+                 is printed as something they told us rather than as a guess.
+    ``ASSUMED``  nothing was said and the system chose. Today the only producer
+                 is the per-option answer of decision 10: inside/outside was
+                 uncued, so both are answered.
+
+    Decision 16.1 wants ``explicit / visually_observed / inferred / unknown``
+    when a photograph can fill a slot. That is one more member here and one more
+    row in `_PHRASE` — `assistant/vision.py` resolves observations to a
+    `carried` dict and nothing yet hands one to `Assistant.ask`, so an
+    ``OBSERVED`` member would be a state nothing in this repository can produce
+    and a claim the renderer could never make honestly. It is deliberately not
+    built; the shape is what makes it a one-line addition when it is.
+    """
+
+    STATED = "stated"
+    CARRIED = "carried"
+    ASSUMED = "assumed"
+
+
+# One sentence per provenance, which is the whole differentiation. A new
+# provenance adds a row here and changes nothing else.
+_PHRASE = {
+    Provenance.STATED: "{value} ({slot}), as you said",
+    Provenance.CARRIED: "{value} ({slot}), as you told me earlier in this conversation",
+    Provenance.ASSUMED: "{slot}: {value} — assumed, since you did not say",
+}
+
+
+@dataclass(frozen=True)
+class SlotFact:
+    """One slot value and how the system came to hold it."""
+
+    slot: str
+    value: str
+    provenance: Provenance
+
+    @property
+    def sentence(self) -> str:
+        return _PHRASE[self.provenance].format(
+            slot=self.slot, value=self.value.replace("_", " "))
+
+    @property
+    def stated(self) -> bool:
+        """Did the caller say this, whether in this turn or an earlier one?"""
+        return self.provenance is not Provenance.ASSUMED
+
+
 # ---------------------------------------------------------------- the result
 
 
@@ -85,10 +153,27 @@ class Answer:
     path: str
     sources: list[dict] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    # Genuinely assumed values only, so the "Assumed:" heading the CLI renderer
+    # prints is true of everything under it. What the caller actually said is in
+    # `facts`, and is printed inside `text` as a sentence rather than as a list.
     assumptions: list[str] = field(default_factory=list)
     failed_checks: list[str] = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
     refused: bool = False
+    # Every slot value behind this answer, with its provenance.
+    facts: list[SlotFact] = field(default_factory=list)
+    # The raw evidence block appended to `text` on a refusal. It stays inside
+    # `text` so the CLI — canonical for the transcript — loses nothing, and it
+    # is repeated here so the page can put it behind a disclosure instead of
+    # opening with 600 characters of datasheet.
+    disclosure: str = ""
+
+    @property
+    def body(self) -> str:
+        """`text` minus the disclosure, for a surface that shows it separately."""
+        # `removesuffix` of an empty string is the identity, so an ordinary
+        # answer needs no branch and cannot be trimmed by accident.
+        return self.text.removesuffix(self.disclosure).rstrip()
 
 
 # -------------------------------------------------------------- the checks
@@ -540,7 +625,7 @@ class AnswerEngine:
 
     # -- the paths ---------------------------------------------------------
 
-    def extract(self, decision: Decision) -> Answer:
+    def extract(self, decision: Decision, question: str = "") -> Answer:
         """Print the top passage whole, by code. No model, no paraphrase."""
         hits = decision.hits
         if decision.sum_refused:
@@ -572,7 +657,7 @@ class AnswerEngine:
                               "not state a coverage figure for it, so there is nothing "
                               "published to do the arithmetic against. "
                               + _contact_line(self.names)]
-        return self._finish(decision, "\n".join(body), hits[:1])
+        return self._finish(decision, "\n".join(body), hits[:1], question)
 
     def compose(self, decision: Decision, question: str) -> Answer:
         """The one path the model runs on."""
@@ -582,11 +667,11 @@ class AnswerEngine:
             f"{' — ' + h.chunk.section if h.chunk.section else ''}\n{h.chunk.content}"
             for i, h in enumerate(hits, 1)
         )
-        assumptions = self._assumptions(decision)
+        context = self._prompt_context(decision)
         prompt = PROMPT.format(
             passages=passages, question=question,
-            assumptions=("\nStated assumptions: " + "; ".join(assumptions)
-                         if assumptions else ""),
+            assumptions=("\nStated assumptions: " + "; ".join(context)
+                         if context else ""),
         )
         try:
             text, seconds = ollama.generate(prompt, model=self.model,
@@ -610,25 +695,26 @@ class AnswerEngine:
             obs.event("check_failed", checks=failures, model=self.model,
                       passages=len(hits))
             answer = self.refuse(decision,
-                                 "the generated answer did not pass its checks")
+                                 "the generated answer did not pass its checks",
+                                 question)
             answer.failed_checks = failures
             answer.diagnostics["generation_seconds"] = round(seconds, 2)
             return answer
 
-        answer = self._finish(decision, text, hits, assumptions, question)
+        answer = self._finish(decision, text, hits, question)
         answer.diagnostics["generation_seconds"] = round(seconds, 2)
         return answer
 
-    def defer(self, decision: Decision) -> Answer:
+    def defer(self, decision: Decision, question: str = "") -> Answer:
         top = decision.hits[0]
         text = (
             "Lime Green's own published material refers this question to their "
             f"technical team rather than answering it [1]:\n\n"
             f"“{top.chunk.content.strip()}”\n\n{_contact_line(self.names)}"
         )
-        return self._finish(decision, text, decision.hits[:1])
+        return self._finish(decision, text, decision.hits[:1], question)
 
-    def diagnosis(self, decision: Decision) -> Answer:
+    def diagnosis(self, decision: Decision, question: str = "") -> Answer:
         published = "\n\n".join(
             f"[{i}] {h.document.citation_name}"
             f"{' — ' + h.chunk.section if h.chunk.section else ''}\n{h.chunk.content}"
@@ -641,9 +727,9 @@ class AnswerEngine:
             "and it is worth reading before you call.\n\n"
             f"{published}\n\n{_contact_line(self.names)}"
         )
-        return self._finish(decision, text, decision.hits[:3])
+        return self._finish(decision, text, decision.hits[:3], question)
 
-    def ask_back(self, decision: Decision) -> Answer:
+    def ask_back(self, decision: Decision, question: str = "") -> Answer:
         text = (
             "I need one more detail before pointing you at a product. What is the "
             "wall built of underneath — brick, stone, cob, laths, plasterboard, "
@@ -652,7 +738,7 @@ class AnswerEngine:
             "material gives different products for each.\n\n"
             f"{_contact_line(self.names)}"
         )
-        answer = self._finish(decision, text, decision.hits[:3])
+        answer = self._finish(decision, text, decision.hits[:3], question)
         answer.refused = False
         return answer
 
@@ -703,37 +789,80 @@ class AnswerEngine:
         return Answer("\n".join(lines), Path_.ROUTE.value,
                       diagnostics={"step": "manifest", "topic": "document_request"})
 
-    def refuse(self, decision: Decision, why: str) -> Answer:
+    def refuse(self, decision: Decision, why: str, question: str = "") -> Answer:
+        """A refusal that hands over everything it has, without reading like a dump.
+
+        The shape changed after review; what it carries did not. It used to open
+        with "I could not find this", then announce the closest passage, then
+        print up to 600 characters of raw datasheet — so a public visitor asking
+        one short question met a wall of text whose first useful line was the
+        phone number at the bottom. The objection is a presentation one and it
+        is right: the summary should say what was looked for and what the
+        nearest guidance actually is, in a sentence.
+
+        Nothing is dropped, because every element a refusal is required to carry
+        is still here. What was looked for: the missing term, named. What *is*
+        published, with its source: the nearest document and section named in
+        the summary, its passage quoted in `disclosure`, and its row in
+        `sources`. The document's own caveats: appended by `_finish`, as before.
+        The contact line: from the manifest, never typed. The passage stays
+        inside `text` so the CLI transcript — canonical evidence — loses
+        nothing; `disclosure` repeats it so the page can fold it behind "Show
+        source passage" rather than open with it.
+        """
         obs.event("refusal", why=why, step=decision.step,
                   missing_term=decision.missing_term,
                   top_score=decision.hits[0].score if decision.hits else 0.0)
-        parts = []
-        if decision.missing_term:
-            parts.append(
-                f"The indexed material does not state {decision.missing_term} for "
-                "this product. I would rather say that than give you a figure from "
-                "a neighbouring document."
+
+        top = decision.hits[0] if decision.hits else None
+        # "Solo Onecoat Lime Plaster datasheet, Mixing" — enough for the reader
+        # to know which document was nearest without reading it first.
+        where = ""
+        if top is not None:
+            where = top.document.citation_name
+            if top.chunk.section:
+                where += f", {top.chunk.section}"
+
+        if top is not None and decision.missing_term:
+            summary = (
+                "I could not find published Lime Green guidance that states "
+                f"{decision.missing_term} for this product. The closest guidance is "
+                f"{where}, which does not state {decision.missing_term}. I would "
+                "rather say that than "
+                "give you a figure from a neighbouring document."
+            )
+        elif top is not None:
+            summary = (
+                "I could not find published Lime Green guidance that specifically "
+                f"answers this. The closest guidance is {where}, which is related "
+                "but does not answer the question, so I am not going to answer it "
+                "from anything else."
             )
         else:
-            parts.append(
-                "I could not find this in Lime Green's published material, so I am "
-                "not going to answer it from anything else."
+            summary = (
+                "I could not find this in Lime Green's published material, and "
+                "nothing retrieved is close enough to be worth showing you, so I "
+                "am not going to answer it from anything else."
             )
 
-        if decision.hits:
-            top = decision.hits[0]
-            parts += [
-                "",
-                "The closest published passage is this, which does not answer the "
-                "question but may still be useful:",
-                "",
-                f"From {top.document.citation_name}"
-                f"{', ' + top.chunk.section if top.chunk.section else ''}:",
-                f"“{top.chunk.content.strip()[:600]}”",
-            ]
-        parts += ["", _contact_line(self.names)]
+        parts = [summary, "", "Please check with Lime Green's technical team.",
+                 "", _contact_line(self.names)]
 
-        answer = self._finish(decision, "\n".join(parts), decision.hits[:1])
+        disclosure = ""
+        if top is not None:
+            # Still capped at 600 characters, exactly as before: the whole of a
+            # 3,600-character section is a scroll, not a disclosure.
+            disclosure = (f"Source passage — {where}:\n"
+                          f"“{top.chunk.content.strip()[:600]}”")
+
+        answer = self._finish(decision, "\n".join(parts),
+                              decision.hits[:1], question)
+        # Appended last, and only here, so it is always the suffix of `text`:
+        # that is what lets `Answer.body` hand a surface the prose without the
+        # evidence, with no second copy of the parsing.
+        if disclosure:
+            answer.text = f"{answer.text}\n\n{disclosure}"
+        answer.disclosure = disclosure
         # The path recorded is the path actually taken. A compose that failed
         # its checks ends in a refusal, and reporting that as "compose" in the
         # transcript would describe the attempt rather than the outcome.
@@ -744,27 +873,83 @@ class AnswerEngine:
 
     # -- shared ------------------------------------------------------------
 
-    def _assumptions(self, decision: Decision) -> list[str]:
+    def _prompt_context(self, decision: Decision) -> list[str]:
+        """What the model is told about the caller's building, for the prompt only.
+
+        Deliberately unchanged in wording from the list this used to produce,
+        because it is part of a prompt whose output is meant to be reproducible.
+        Provenance belongs to the reader, not to the model: the model needs to
+        know the wall is brick, not who said so.
+        """
         out = []
         if decision.per_option:
             out.append("answered for both internal and external use, "
                        "since you did not say which")
         for slot, value in decision.slots.items():
-            if slot in ("substrate", "location", "exposure"):
+            if slot in STATABLE_SLOTS:
                 out.append(f"{slot}: {value.replace('_', ' ')}")
         return out
 
+    def _detected(self, question: str) -> tuple[set[str], bool]:
+        """Which slots this question states in its own words, if that is knowable.
+
+        The router owns the vocabulary and is handed in whole rather than
+        copied, so this asks the same detector that produced the slots in the
+        first place. The boolean says whether the answer means anything: with no
+        question text there is nothing to detect from, and every slot is then
+        reported as stated — which is true, because nothing in this engine ever
+        invents a slot value. Every value in `decision.slots` was either read
+        off this question or handed in by a caller the person told. What is lost
+        without the question is only the distinction between the two, and "as
+        you said" is the weaker, still-honest reading of both.
+
+        `assistant/engine.py` passes the question on the compose path today. The
+        other paths would each report a carried slot as carried the moment it
+        passes the question there too; that file belongs to the integration
+        owner, so the parameter is optional and the fallback is the safe one.
+        """
+        if not question or not hasattr(self.retriever, "slots"):
+            return set(), False
+        return set(self.retriever.slots.detect(question)), True
+
+    def _facts(self, decision: Decision, question: str) -> list[SlotFact]:
+        """Every slot value behind this answer, each with where it came from."""
+        said, knowable = self._detected(question)
+        facts = []
+        for slot in STATABLE_SLOTS:
+            value = decision.slots.get(slot)
+            if value:
+                stated = not knowable or slot in said
+                facts.append(SlotFact(
+                    slot, value,
+                    Provenance.STATED if stated else Provenance.CARRIED))
+        if decision.per_option:
+            # The one genuine assumption the system currently makes: decision 10
+            # answers both options because neither was cued.
+            facts.append(SlotFact("location", "internal and external",
+                                  Provenance.ASSUMED))
+        return facts
+
     def _finish(self, decision: Decision, text: str, hits: list[Retrieved],
-                assumptions: list[str] | None = None, question: str = "") -> Answer:
+                question: str = "") -> Answer:
         caveats = _caveat_lines(decision, self.repo, question)
+        facts = self._facts(decision, question)
         if decision.photograph:
             text = f"{text}\n\n{PHOTO_LINE}"
+        # What the caller told us is repeated back as a sentence inside the
+        # answer, where it reads as the system having listened. What the system
+        # genuinely assumed stays in `assumptions`, which every surface prints
+        # under a heading saying "Assumed" — now truthfully.
+        told = [f.sentence for f in facts if f.stated]
+        if told:
+            text = f"{text}\n\nAnswered for " + "; ".join(told) + "."
         return Answer(
             text=text,
             path=decision.path.value,
             sources=_source_rows(hits),
             caveats=caveats,
-            assumptions=assumptions or self._assumptions(decision),
+            assumptions=[f.sentence for f in facts if not f.stated],
+            facts=facts,
             diagnostics={
                 "step": decision.step,
                 "reason": decision.reason,

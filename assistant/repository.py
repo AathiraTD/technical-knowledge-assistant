@@ -14,6 +14,7 @@ other.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ContextManager, Protocol, runtime_checkable
 
 from .model import (
@@ -28,6 +29,74 @@ from .model import (
     Retrieved,
     Snapshot,
 )
+
+
+# ---------------------------------------------------------------- the request
+#
+# Retrieval used to take a vector and four numbers, which meant it knew about
+# similarity, audience, active version, authority and the per-document cap — and
+# nothing about the product the caller had *named*. A question saying "Lime Green
+# Ultra" could be answered from WarmShell passages, because both are about old
+# walls and internal insulation and the corpus is semantically dense there. The
+# metadata to prevent that was already on every chunk; retrieval simply had no
+# way to be told.
+#
+# `RetrievalRequest` is that way. It is a structured ask rather than a longer
+# argument list, so an adapter can grow a new constraint without every call site
+# changing, and so the engine can express "this question names a product"
+# without expressing any SQL.
+
+# How much similarity an explicitly named product is worth.
+#
+# **Boost, not filter.** A hard product filter is the obvious move and it is
+# wrong here: the brief's own multi-source questions legitimately span a product
+# page and a datasheet, and sometimes a second product entirely ("can I use
+# Ultra over Solo?"). Filtering to the named product would refuse those, and
+# would do it silently, which is the worst shape of failure this design has.
+#
+# So the named product is a bounded bonus of the same shape as the authority
+# bonus above it — large enough that a marginal similarity difference cannot
+# overturn it, small enough that a passage which is genuinely about something
+# else does not get dragged into the top five by the mention of a name.
+#
+# It is deliberately an order of magnitude above `TIE_BAND` (0.02): authority
+# nudges between passages that already matched about equally, whereas a named
+# product is an explicit instruction from the user and has to beat a real
+# semantic gap — the reviewer's case is an Ultra passage that scores a few
+# hundredths *below* a WarmShell one. Because every chunk of the named product
+# receives the same bonus, authority and recency still order them among
+# themselves: the boost moves a group, it does not flatten it.
+PRODUCT_BAND = 0.15
+
+
+def product_matches(named: str, candidate: str) -> bool:
+    """Whether a chunk's product is the one the caller named.
+
+    Deliberately loose and deliberately simple, because it drives a boost and
+    not a filter: a false positive costs a small reordering, and the rule has to
+    be expressible identically in NumPy and in SQL or the two adapters are not
+    one system. Case-insensitive containment either way, so "Ultra" matches a
+    chunk tagged "Lime Green Ultra" and a question naming "Lime Green Ultra"
+    matches a chunk tagged "Ultra". An untagged chunk matches nothing.
+    """
+    n, c = named.strip().lower(), candidate.strip().lower()
+    if not n or not c:
+        return False
+    return n in c or c in n
+
+
+@dataclass(frozen=True)
+class RetrievalRequest:
+    """What a caller wants retrieved, as a structure rather than a signature."""
+
+    embedding: list[float]
+    audiences: tuple[str, ...] = ("public",)
+    top_k: int = 5
+    per_document_cap: int = 3
+
+    # The product the question named outright, if it named one. Empty means the
+    # question named none, and retrieval behaves exactly as it did before.
+    product: str = ""
 
 
 @runtime_checkable
@@ -124,6 +193,46 @@ class KnowledgeRepository(Protocol):
         instruction is not an access control. The per-document cap exists so a
         multi-source question sees several documents rather than five chunks of
         one page.
+        """
+        ...
+
+    def retrieve_for(self, request: RetrievalRequest) -> list[Retrieved]:
+        """The same retrieval, told what the question actually asked for.
+
+        Every guarantee `retrieve` makes holds here unchanged — active version
+        only, audience filtered before ranking, per-document cap, authority
+        beating a marginal similarity difference. What is added is that a
+        product named in the question boosts its own passages by `PRODUCT_BAND`,
+        so a semantically adjacent product cannot displace the one the user
+        asked about. It is a boost and not a filter, for the reason recorded
+        beside the constant.
+        """
+        ...
+
+    def find_passages(
+        self,
+        product: str,
+        terms: tuple[str, ...],
+        audiences: tuple[str, ...] = ("public",),
+        limit: int = 3,
+    ) -> list[Retrieved]:
+        """Targeted lookup: the passage that carries a property, by metadata.
+
+        Semantic top-five is the wrong instrument for "how many bags do I need".
+        The coverage figure lives in one short section that a natural-language
+        question about square metres need not rank first, and the calculation
+        path cannot recover from that because it only re-sorts what it was
+        given. This is the recovery: given the product and the words the
+        property is printed under, return the active, audience-filtered passages
+        of that product whose section or text carries one of them, ordered by
+        authority and then by recency within it.
+
+        Lexical and deterministic on purpose. The returned `score` is 0.0 and is
+        **not** a similarity — nothing here was embedded, and a caller must not
+        compare it against the abstention threshold. What these hits carry
+        instead is a stronger guarantee than a score: the asked-for term is
+        provably present in the passage, which is what the relevance gate exists
+        to establish.
         """
         ...
 

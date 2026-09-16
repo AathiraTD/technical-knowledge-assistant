@@ -57,16 +57,31 @@ class AnswerCache:
 
     @staticmethod
     def key(question: str, audiences: tuple[str, ...], snapshot_id: str,
-            generation_model: str, chunking_version: str) -> tuple:
+            generation_model: str, chunking_version: str,
+            carried: dict | None = None) -> tuple:
         """Everything that can change the right answer to the same words.
 
         The audience set is sorted rather than taken as given, so ("public",
         "trade") and ("trade", "public") are one key. Two callers with the same
         rights should share a cache entry; the order they listed their rights in
         is not a fact about the answer.
+
+        `carried` is in the key for the same reason the audience set is, and the
+        failure it prevents is worse. Slots held from an earlier turn change the
+        answer to identical words — "what plaster should I use" answered for a
+        brick wall is a different answer from the same question answered for
+        cob. Leaving them out served one conversation's answer to another
+        caller who had never said brick, which is exactly the silent assumption
+        about somebody's wall that decision 10 exists to prevent.
+
+        It also broke multi-turn outright. Resuming a pending question re-asks
+        the same words, so without the slots in the key the cache returned the
+        stored *ask-back* instead of the answer the new information had finally
+        made possible — the feature defeating itself through its own cache.
         """
         return (normalise(question), tuple(sorted(audiences)), snapshot_id,
-                generation_model, chunking_version)
+                generation_model, chunking_version,
+                tuple(sorted((carried or {}).items())))
 
     def get(self, key: tuple) -> Any | None:
         with self._lock:

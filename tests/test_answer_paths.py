@@ -24,6 +24,7 @@ from assistant import ollama                                   # noqa: E402
 from assistant.answer import (                                 # noqa: E402
     PHOTO_LINE,
     AnswerEngine,
+    Provenance,
     _caveat_lines,
     _contact_line,
     _source_rows,
@@ -272,10 +273,6 @@ def test_an_uncued_location_is_stated_as_an_assumption():
     assert any("internal and external" in x for x in a.assumptions)
 
 
-def test_cued_slots_are_stated_back():
-    a = engine().extract(decision(Path_.EXTRACT, [MIXING],
-                                  slots={"substrate": "lath", "location": "internal"}))
-    assert any("lath" in x for x in a.assumptions)
 
 
 def test_citation_names_drop_the_search_engine_tail():
@@ -421,3 +418,220 @@ def test_the_calculation_edge_says_so_when_no_coverage_was_published():
 
     assert "does not state a coverage figure" in answer.text, answer.text
     assert "I have printed the published coverage" not in answer.text
+
+
+# ----------------------------------------------------------------- provenance
+
+
+def test_a_value_the_question_states_is_reported_as_stated_not_assumed():
+    """"Assumed" is a lie when the caller said it.
+
+    Someone who writes "my external brick wall" has not had anything assumed
+    about them. Printing "Assumed: location external" back at them makes a
+    system that listened look like one that guessed, and invites a correction
+    of something that was never wrong.
+    """
+    question = "what plaster for my external brick wall in a sheltered spot"
+    a = engine().extract(
+        decision(Path_.EXTRACT, [MIXING],
+                 slots={"substrate": "brick", "location": "external",
+                        "exposure": "sheltered"}),
+        question)
+
+    assert [f.provenance for f in a.facts] == [Provenance.STATED] * 3
+    assert {f.slot for f in a.facts} == {"substrate", "location", "exposure"}
+    # Nothing was assumed, so nothing prints under a heading saying it was.
+    assert a.assumptions == []
+    assert "as you said" in a.text
+    for value in ("brick", "external", "sheltered"):
+        assert value in a.text
+
+
+def test_a_value_the_question_never_stated_is_reported_as_carried_not_stated():
+    """A slot held from an earlier turn was stated - just not in this sentence.
+
+    `assistant/session.py` carries exactly these three forward, so the honest
+    sentence is "as you told me earlier", not "as you said" (which would claim
+    words this question does not contain) and not "assumed" (which would deny
+    they ever said it). Each of the three is checked on its own, because a rule
+    that works for the substrate and silently fails for the exposure is how
+    this defect got in.
+    """
+    made = engine()
+    for slot, value in (("substrate", "brick"), ("location", "external"),
+                        ("exposure", "sheltered")):
+        a = made.extract(decision(Path_.EXTRACT, [MIXING], slots={slot: value}),
+                         "how much water does Solo need")
+        assert [f.provenance for f in a.facts] == [Provenance.CARRIED], slot
+        assert a.assumptions == [], slot
+        assert "as you told me earlier in this conversation" in a.text, slot
+
+
+def test_each_slot_is_judged_on_its_own_words_not_on_the_others():
+    """A question stating one of the three must not launder the other two."""
+    a = engine().extract(
+        decision(Path_.EXTRACT, [MIXING],
+                 slots={"substrate": "brick", "location": "external"}),
+        "what do I use on brick")
+
+    where = {f.slot: f.provenance for f in a.facts}
+    assert where == {"substrate": Provenance.STATED,
+                     "location": Provenance.CARRIED}
+
+
+def test_an_uncued_location_is_the_one_thing_actually_assumed():
+    """Decision 10's per-option answer is a genuine assumption, and says so."""
+    a = engine().extract(
+        decision(Path_.EXTRACT, [MIXING], per_option=True), "how much water")
+
+    assumed = [f for f in a.facts if f.provenance is Provenance.ASSUMED]
+    assert [f.slot for f in assumed] == ["location"]
+    assert a.assumptions == ["location: internal and external — assumed, "
+                             "since you did not say"]
+
+
+def test_without_the_question_a_slot_is_reported_as_stated_never_as_assumed():
+    """The conservative fallback, and why it is the safe one.
+
+    `assistant/engine.py` passes the question on the compose path only, and it
+    belongs to the integration owner. With no question there is no way to tell a
+    value stated now from one stated last turn - but both were stated, because
+    nothing in this engine invents a slot value. "As you said" is the weaker
+    reading of the two and is true of either; "assumed" would be false of both.
+    """
+    a = engine().extract(
+        decision(Path_.EXTRACT, [MIXING], slots={"substrate": "brick"}))
+
+    assert [f.provenance for f in a.facts] == [Provenance.STATED]
+    assert a.assumptions == []
+
+
+def test_provenance_survives_an_engine_with_no_slot_vocabulary_to_ask():
+    """The detector is injected, and an engine wired without one still answers."""
+    made = AnswerEngine(store(), Router())
+    made.retriever = object()                       # no `.slots` to consult
+    a = made.extract(decision(Path_.EXTRACT, [MIXING], slots={"substrate": "brick"}),
+                     "what about brick")
+
+    assert [f.provenance for f in a.facts] == [Provenance.STATED]
+
+
+def test_a_slot_that_is_not_a_building_fact_is_never_printed_back():
+    """Only the three statable slots. `property_asked` is the question, not the wall."""
+    a = engine().extract(
+        decision(Path_.EXTRACT, [MIXING], slots={"property_asked": "water",
+                                                 "calculation": "how many"}),
+        "how much water")
+
+    assert a.facts == []
+    assert "Answered for" not in a.text
+
+
+def test_the_model_is_told_the_values_and_not_who_supplied_them(monkeypatch):
+    """Provenance is for the reader. The model needs the wall, not the witness."""
+    seen = {}
+
+    def fake(prompt, **_kw):
+        seen["prompt"] = prompt
+        return "Add between 5 and 6 litres of clean water per 25kg sack [1].", 1.0
+
+    monkeypatch.setattr(ollama, "generate", fake)
+    engine().compose(
+        decision(Path_.COMPOSE, [MIXING], step="8", per_option=True,
+                 slots={"property_asked": "water", "substrate": "brick"}),
+        "How much water?")
+
+    assert "Stated assumptions: " in seen["prompt"]
+    assert "substrate: brick" in seen["prompt"]
+    assert "as you said" not in seen["prompt"]
+
+
+# ------------------------------------------ what the new refusal still carries
+
+
+def test_the_refusal_summary_names_the_nearest_guidance_in_a_sentence():
+    """The reviewed shape: a sentence first, the datasheet second.
+
+    It used to open with "I could not find this", announce the closest passage,
+    and then print 600 characters of raw chunk - which for a public visitor is a
+    wall of text where a sentence would do.
+    """
+    a = engine().refuse(decision(Path_.REFUSE, [MIXING], missing_term="pot life"),
+                        "near miss")
+
+    first = a.text.split("\n")[0]
+    assert first.startswith("I could not find published Lime Green guidance")
+    assert "pot life" in first
+    assert "Solo Onecoat Lime Plaster datasheet, Mixing" in first
+    # The prose comes before the evidence, which is the whole change.
+    assert a.text.index("Please check with") < a.text.index("Source passage")
+
+
+def test_the_refusal_still_carries_the_passage_the_sources_the_caveats_and_contact():
+    """The risk of a presentation change is quietly dropping one of these."""
+    a = engine().refuse(decision(Path_.REFUSE, [MIXING]), "nothing close enough")
+
+    # What is published, word for word, still inside the text the CLI prints.
+    assert "5 and 6 litres of clean water per 25kg sack" in a.text
+    # Its source, as a citable row.
+    assert [s["name"] for s in a.sources] == ["Solo Onecoat Lime Plaster datasheet"]
+    # The document's own caveats, appended by code.
+    assert a.caveats
+    # The contact line, from the manifest and never typed.
+    assert "0800 538 5746" in a.text
+    assert "Mon - Fri 9:00am - 5:00pm" in a.text
+    assert a.refused is True
+
+
+def test_the_disclosure_is_the_tail_of_the_text_so_a_page_can_fold_it_away():
+    """`body` is the prose; `text` is the prose plus the evidence. Neither invents."""
+    a = engine().refuse(decision(Path_.REFUSE, [MIXING]), "nothing close enough")
+
+    assert a.text.endswith(a.disclosure)
+    assert "5 and 6 litres" in a.disclosure
+    assert "5 and 6 litres" not in a.body
+    assert "0800 538 5746" in a.body
+
+
+def test_an_answer_that_is_not_a_refusal_has_no_disclosure_to_fold():
+    a = engine().extract(decision(Path_.EXTRACT, [MIXING]))
+
+    assert a.disclosure == ""
+    assert a.body == a.text
+
+
+def test_the_disclosure_is_still_capped_at_six_hundred_characters():
+    """A 3,600-character section is a scroll, not a disclosure - as before."""
+    long = hit(SOLO_URL, "Application", "x" * 2000, "Solo Onecoat Lime Plaster")
+    a = engine().refuse(decision(Path_.REFUSE, [long]), "long")
+
+    assert a.disclosure.count("x") == 600
+
+
+def test_a_refusal_with_nothing_retrieved_offers_no_passage_and_still_hands_over():
+    a = engine().refuse(decision(Path_.REFUSE, [], missing_term="pot life"),
+                        "nothing at all")
+
+    assert a.disclosure == ""
+    assert "Source passage" not in a.text
+    assert "0800 538 5746" in a.text
+
+
+def test_a_refusal_names_the_document_without_a_section_when_it_has_none():
+    unsectioned = hit(SOLO_URL, "", "Solo is a one-coat lime plaster.",
+                      "Solo Onecoat Lime Plaster")
+    a = engine().refuse(decision(Path_.REFUSE, [unsectioned]), "no section")
+
+    assert a.disclosure.startswith("Source passage — Solo Onecoat Lime Plaster "
+                                   "datasheet:")
+    assert "Solo Onecoat Lime Plaster datasheet, which is related" in a.text
+
+
+def test_every_hand_off_path_accepts_the_question_it_was_asked():
+    """Provenance needs the question, so each path takes it and each still answers."""
+    made = engine()
+    question = "what do I use on brick"
+    for answer in (made.defer(decision(Path_.DEFER, [MIXING]), question),
+                   made.diagnosis(decision(Path_.DIAGNOSIS, [MIXING]), question),
+                   made.ask_back(decision(Path_.ASK_BACK, [MIXING]), question)):
+        assert "0800 538 5746" in answer.text

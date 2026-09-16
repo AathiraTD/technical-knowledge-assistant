@@ -33,7 +33,12 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from ..repository import IndexMismatch, PublicationBusy
+from ..repository import (
+    PRODUCT_BAND,
+    IndexMismatch,
+    PublicationBusy,
+    RetrievalRequest,
+)
 from pathlib import Path
 
 from ..model import (
@@ -476,11 +481,23 @@ class PostgresKnowledgeRepository:
         top_k: int = 5,
         per_document_cap: int = 3,
     ) -> list[Retrieved]:
-        """Nearest active chunks the caller may see, in one query.
+        """Nearest active chunks the caller may see, in one query."""
+        return self.retrieve_for(RetrievalRequest(
+            embedding=query_embedding, audiences=audiences, top_k=top_k,
+            per_document_cap=per_document_cap))
 
-        The audience filter is a `WHERE` clause and the per-document cap is a
-        window function, so neither depends on application code remembering to
-        apply them — and neither can be talked out of by a prompt.
+    def retrieve_for(self, request: RetrievalRequest) -> list[Retrieved]:
+        """The same search, told what the question named — still one statement.
+
+        The audience filter is a `WHERE` clause, the per-document cap is a
+        window function, and the product boost sits beside the distance operator
+        in the same expression as the authority bonus. None of them depends on
+        application code remembering to apply them, and none of them can be
+        talked out of by a prompt.
+
+        The product test is case-insensitive containment either way, which is
+        exactly what `repository.product_matches` does in the embedded adapter —
+        the contract suite holds both to the same result.
         """
         sql = """
         WITH scored AS (
@@ -491,7 +508,14 @@ class PostgresKnowledgeRepository:
                    1 - (c.embedding <=> %(q)s::vector) AS similarity,
                    (1 - (c.embedding <=> %(q)s::vector))
                      + (%(spread)s - LEAST(GREATEST(d.authority, 1), %(spread)s))
-                       * %(bonus)s AS effective
+                       * %(bonus)s
+                     + CASE WHEN %(product)s <> ''
+                              AND COALESCE(c.product, '') <> ''
+                              AND (POSITION(LOWER(COALESCE(c.product, ''))
+                                            IN LOWER(%(product)s)) > 0
+                                OR POSITION(LOWER(%(product)s)
+                                            IN LOWER(COALESCE(c.product, ''))) > 0)
+                            THEN %(product_band)s ELSE 0 END AS effective
             FROM chunks c
             JOIN document_versions v ON v.id = c.document_version_id
             JOIN documents d         ON d.id = v.document_id
@@ -512,17 +536,64 @@ class PostgresKnowledgeRepository:
         """
         with self.conn.cursor() as cur:
             cur.execute(sql, {
-                "q": _vector_literal(query_embedding),
-                "audiences": list(audiences),
-                "cap": per_document_cap,
-                "k": top_k,
+                "q": _vector_literal(request.embedding),
+                "audiences": list(request.audiences),
+                "cap": request.per_document_cap,
+                "k": request.top_k,
                 "spread": _AUTHORITY_SPREAD,
                 "bonus": AUTHORITY_BONUS,
+                "product": request.product.strip(),
+                "product_band": PRODUCT_BAND,
             })
             columns = [c.name for c in cur.description]
             rows = [dict(zip(columns, r)) for r in cur.fetchall()]
 
         return [Retrieved(chunk=self._chunk(r), score=float(r["similarity"]),
+                          document=self._document(r)) for r in rows]
+
+    def find_passages(
+        self,
+        product: str,
+        terms: tuple[str, ...],
+        audiences: tuple[str, ...] = ("public",),
+        limit: int = 3,
+    ) -> list[Retrieved]:
+        """The passage that carries a property, found by metadata, in one query.
+
+        No vector is involved, so `score` is 0.0 and is not a similarity.
+        """
+        if not product or not terms:
+            return []
+        conditions = " OR ".join(
+            f"(POSITION(%(t{i})s IN LOWER(c.content)) > 0"
+            f" OR POSITION(%(t{i})s IN LOWER(COALESCE(c.section, ''))) > 0)"
+            for i in range(len(terms)))
+        params = {f"t{i}": t.strip().lower() for i, t in enumerate(terms)}
+        params.update({"audiences": list(audiences),
+                       "product": product.strip(), "limit": limit})
+        sql = f"""
+        SELECT c.chunk_index, c.section, c.content, c.audience, c.product,
+               c.source_date, v.version_number,
+               d.canonical_url, d.title, d.link_text, d.document_type,
+               d.authority, d.audience AS doc_audience
+        FROM chunks c
+        JOIN document_versions v ON v.id = c.document_version_id
+        JOIN documents d         ON d.id = v.document_id
+        WHERE v.is_active
+          AND c.audience = ANY(%(audiences)s)
+          AND COALESCE(c.product, '') <> ''
+          AND (POSITION(LOWER(COALESCE(c.product, '')) IN LOWER(%(product)s)) > 0
+            OR POSITION(LOWER(%(product)s) IN LOWER(COALESCE(c.product, ''))) > 0)
+          AND ({conditions})
+        ORDER BY d.authority ASC, c.source_date DESC NULLS LAST,
+                 d.canonical_url, c.chunk_index
+        LIMIT %(limit)s
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(sql, params)
+            columns = [c.name for c in cur.description]
+            rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+        return [Retrieved(chunk=self._chunk(r), score=0.0,
                           document=self._document(r)) for r in rows]
 
     @staticmethod
