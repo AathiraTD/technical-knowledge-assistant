@@ -239,8 +239,16 @@ class Router:
         hits: list[Retrieved],
         above_threshold: bool,
         audiences: tuple[str, ...] = ("public",),
+        carried: dict | None = None,
     ) -> Decision:
-        slots = self.slots.detect(question)
+        # `carried` holds slots this question did not state — from an earlier
+        # turn, or read off a photograph. They are merged *under* what this
+        # question says, never over it: a caller who corrects themselves
+        # ("actually it's stone") must not be answered from the old value, and
+        # a slot detected here is evidence from the person rather than from
+        # memory or from a model. That precedence is the whole safety property
+        # of carrying anything at all.
+        slots = {**(carried or {}), **self.slots.detect(question)}
         photo = "photograph" in slots
 
         # Step 1 — nothing close enough was found.

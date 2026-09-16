@@ -36,6 +36,7 @@ page has to stop it answering rather than quietly return the wrong neighbours.
 from __future__ import annotations
 
 import contextlib
+import html
 import json
 import sys
 import threading
@@ -60,7 +61,8 @@ from assistant.model import (                                      # noqa: E402
 )
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 from assistant.store.factory import open_repository                # noqa: E402
-from assistant.ui import Handler                                   # noqa: E402
+from assistant.session import SessionStore                         # noqa: E402
+from assistant.ui import SESSION_COOKIE, Handler                   # noqa: E402
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"
@@ -167,7 +169,7 @@ def restore_the_handler_class():
     directory — and leaves that store's connection open, which on Windows keeps
     the file locked. Put the class back, and close whatever was left behind.
     """
-    names = ("assistant", "meta", "audiences")
+    names = ("assistant", "meta", "audiences", "sessions")
     saved = {name: Handler.__dict__.get(name, _UNSET) for name in names}
     yield
     left = Handler.__dict__.get("assistant", _UNSET)
@@ -345,6 +347,11 @@ def serving(argv: list[str], bound: list):
     finally:
         bound[0].shutdown()
         thread.join(timeout=30)
+
+
+def escaped_in(body: str, text: str) -> bool:
+    """Is this text on the page, escaped the way the renderer escapes it?"""
+    return html.escape(text, quote=True) in body
 
 
 def get(base: str, path: str, **params) -> tuple[int, str]:
@@ -734,3 +741,310 @@ def test_allow_audience_reaches_retrieval_rather_than_being_parsed_and_lost(
     cited = [source["url"] for part in payload["parts"]
              for source in part["sources"]]
     assert any(url.startswith("fixture://") for url in cited), cited
+
+
+# ----------------------------------------------------- conversation state
+
+
+class Browser:
+    """A caller that keeps its cookie, which is the whole of the session layer.
+
+    `urllib` does not keep one, so every other test in this file starts a fresh
+    conversation on each request — which is the single-turn behaviour these
+    tests exist to move past, and why they need something that behaves like a
+    browser rather than like `get()`.
+    """
+
+    def __init__(self, base: str) -> None:
+        self.base = base
+        self.cookie = ""
+
+    def _open(self, path: str, params: dict):
+        url = self.base + path + ("?" + urllib.parse.urlencode(params)
+                                  if params else "")
+        request = urllib.request.Request(url)
+        if self.cookie:
+            request.add_header("Cookie", self.cookie)
+        response = urllib.request.urlopen(request, timeout=30)
+        self.cookie = response.headers.get("Set-Cookie", "").split(";")[0]
+        return response
+
+    def ask(self, question: str = "", **params) -> tuple[int, str]:
+        with self._open("/", {"q": question, **params} if question or params
+                        else {}) as response:
+            return response.status, response.read().decode("utf-8")
+
+    def json(self, question: str, **params) -> dict:
+        with self._open("/ask", {"q": question, **params}) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    @property
+    def session_id(self) -> str:
+        return self.cookie.split("=", 1)[1]
+
+
+def _serve(tmp_path, monkeypatch, *, cache: bool, audiences=("public",)):
+    """A real threaded server over two public documents, with its own session store.
+
+    Two documents so the router reaches Compose, which is where a recommendation
+    is actually composed and where a carried substrate shows up as a stated
+    assumption. `cache` is a parameter rather than a default because the answer
+    cache is keyed on the question text and not on the carried slots — see
+    `test_the_answer_cache_does_not_serve_one_conversation_from_another` for
+    what that costs and where the fix belongs.
+    """
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: between(0, 1))
+    monkeypatch.setattr(ollama, "generate", quoting)
+
+    build_repo(tmp_path, second_product=True).close()
+    repo = open_repository(str(tmp_path / "index" / "knowledge.db"), dsn="",
+                           thread_safe=True)
+    Handler.assistant = Assistant(repo, cache=cache)
+    Handler.meta = "test"
+    Handler.audiences = audiences
+    Handler.sessions = SessionStore()
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+        repo.close()
+
+
+@pytest.fixture
+def chat(tmp_path, monkeypatch):
+    """A conversational server. The answer cache is off; see `_serve`."""
+    yield from _serve(tmp_path, monkeypatch, cache=False)
+
+
+@pytest.fixture
+def cached_chat(tmp_path, monkeypatch):
+    """The same server in the configuration `main()` actually ships."""
+    yield from _serve(tmp_path, monkeypatch, cache=True)
+
+
+@pytest.fixture
+def staff_chat(tmp_path, monkeypatch):
+    """A server started for staff, so that a request has something to narrow."""
+    yield from _serve(tmp_path, monkeypatch, cache=False,
+                      audiences=("public", "staff"))
+
+
+ASK = "What plaster should I use on my wall"
+
+
+def test_a_session_cookie_is_issued_and_is_not_readable_by_script(chat):
+    """The cookie names the session, so nothing on the page may touch it."""
+    with urllib.request.urlopen(chat + "/", timeout=30) as response:
+        issued = response.headers.get("Set-Cookie", "")
+
+    assert issued.startswith(f"{SESSION_COOKIE}="), issued
+    assert "HttpOnly" in issued
+    assert "SameSite=Lax" in issued
+    assert "Path=/" in issued
+
+
+def test_the_same_session_comes_back_rather_than_a_new_one_each_request(chat):
+    browser = Browser(chat)
+    browser.ask(ASK)
+    first = browser.cookie
+
+    browser.ask("How much water does Solo need")
+
+    assert browser.cookie == first, "every turn started a new conversation"
+
+
+def test_a_malformed_cookie_header_starts_a_conversation_rather_than_a_500(chat):
+    """The Cookie header is attacker-controlled, and `SimpleCookie` raises on it."""
+    request = urllib.request.Request(chat + "/")
+    request.add_header("Cookie", "=====")
+
+    with urllib.request.urlopen(request, timeout=30) as response:
+        assert response.status == 200
+        assert response.headers.get("Set-Cookie", "").startswith(SESSION_COOKIE)
+
+
+def test_an_ask_back_answered_in_the_next_turn_is_answered_for_that_substrate(chat):
+    """Decision 10's recorded cost, closed end to end over a real server.
+
+    The ask-back is the one place this system asks a question instead of
+    answering one, and single-turn it was a dead end: the reply "brick" arrived
+    as a new question about brick. Here the substrate is uncued, step 5 asks
+    what the wall is built of, the person answers in one word, and the question
+    they originally asked is the one that gets answered — with brick used and
+    stated, rather than assumed in silence.
+    """
+    browser = Browser(chat)
+
+    first = browser.json(ASK)
+    assert first["parts"][0]["path"] == "ask back", first
+    assert "wall built of" in first["parts"][0]["text"]
+
+    second = browser.json("brick")
+
+    assert second["answered"] == ASK, "the pending question was not resumed"
+    part = second["parts"][0]
+    assert part["path"] != "ask back", "it asked the same question twice"
+    assert part["diagnostics"]["slots"]["substrate"] == "brick"
+    assert second["session_slots"] == {"substrate": "brick"}
+
+
+def test_a_correction_in_a_later_turn_beats_what_the_session_remembered(chat):
+    """"Actually it's stone." A session that argues back is worse than no session."""
+    browser = Browser(chat)
+    browser.json(ASK)
+    browser.json("brick")
+
+    browser.json("actually it is stone")
+    again = browser.json(ASK)
+
+    assert again["session_slots"]["substrate"] == "stone"
+    assert again["parts"][0]["diagnostics"]["slots"]["substrate"] == "stone"
+    assert again["parts"][0]["path"] != "ask back"
+
+
+def test_a_reply_that_names_no_substrate_is_a_new_question_not_an_answer(chat):
+    """Only the fact step 5 asked for resumes the pending question.
+
+    And a turn that changes the subject retires it: the person moved on, and a
+    question resurrected three turns later by a stray "brick" would be a worse
+    surprise than asking again. Nothing is lost by retiring it — the substrate
+    is remembered either way, so re-asking now gets an answer rather than a
+    second ask-back.
+    """
+    browser = Browser(chat)
+    browser.json(ASK)
+
+    aside = browser.json("How much water does Solo need")
+
+    assert aside["answered"] == "How much water does Solo need", \
+        "an unrelated question was answered as if it were the missing detail"
+    assert Handler.sessions.pending(browser.session_id) == ""
+
+
+def test_a_page_with_no_question_still_belongs_to_the_conversation(chat):
+    """Reloading the bare page must not quietly end a pending ask-back."""
+    browser = Browser(chat)
+    browser.ask(ASK)
+    before = browser.cookie
+
+    status, body = browser.ask()
+
+    assert status == 200
+    assert browser.cookie == before
+    assert "Earlier in this conversation" in body, body
+    assert Handler.sessions.pending(browser.session_id) == ASK
+
+
+def test_the_page_shows_the_conversation_so_far(chat):
+    """A follow-up has to read as a follow-up rather than as an isolated answer."""
+    browser = Browser(chat)
+    browser.ask(ASK)
+
+    _status, body = browser.ask("brick")
+
+    assert "Earlier in this conversation" in body, body
+    assert escaped_in(body, ASK), "the earlier question was not shown back"
+
+
+def test_the_first_page_of_a_conversation_shows_no_transcript(chat):
+    """An empty history must print nothing rather than an empty heading."""
+    _status, body = Browser(chat).ask()
+
+    assert "Earlier in this conversation" not in body, body
+
+
+def test_the_conversation_shown_back_is_escaped_like_everything_else(chat):
+    """The transcript is a second place a typed question reaches the page."""
+    browser = Browser(chat)
+    browser.ask("<script>alert(1)</script> what plaster")
+
+    _status, body = browser.ask("brick")
+
+    assert "<script>alert" not in body
+    assert "&lt;script&gt;" in body
+
+
+def test_a_second_browser_does_not_inherit_the_first_browsers_wall(chat):
+    """A fresh caller starts uncued, whatever anybody else has established."""
+    first = Browser(chat)
+    first.json(ASK)
+    first.json("brick")
+
+    fresh = Browser(chat).json(ASK)
+
+    assert fresh["parts"][0]["path"] == "ask back", \
+        "a new visitor was answered from somebody else's wall"
+    assert fresh["session_slots"] == {}
+
+
+def test_concurrent_conversations_never_see_each_others_slots(chat):
+    """The real access pattern: one ThreadingHTTPServer, several browsers at once."""
+    substrates = ["brick", "stone", "cob", "lath"] * 2
+
+    def converse(substrate: str) -> dict:
+        browser = Browser(chat)
+        browser.json(ASK)
+        browser.json(substrate)
+        return browser.json(ASK)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        replies = list(pool.map(converse, substrates))
+
+    for substrate, reply in zip(substrates, replies):
+        assert reply["session_slots"] == {"substrate": substrate}, reply
+        assert reply["parts"][0]["diagnostics"]["slots"]["substrate"] == substrate
+
+
+def test_a_session_cannot_widen_the_audience_a_later_turn_is_served(staff_chat):
+    """The session holds slots. Rights are resolved per request, on every request.
+
+    A conversation that saw staff material once and then narrows itself must
+    narrow for real — otherwise the session rather than the request decides what
+    a caller may read, which is decision 14's cache leak wearing a cookie.
+    """
+    browser = Browser(staff_chat)
+    staff = browser.json("What is the internal margin on Solo", a="staff")
+    assert any(source["url"].startswith("fixture://")
+               for part in staff["parts"] for source in part["sources"]), staff
+
+    public = browser.json("What is the internal margin on Solo", a="public")
+
+    text = " ".join(part["text"] for part in public["parts"])
+    cited = [source["url"] for part in public["parts"]
+             for source in part["sources"]]
+    assert "42 per cent" not in text, "the session carried staff evidence forward"
+    assert not any(url.startswith("fixture://") for url in cited), cited
+    assert "audience" not in public["session_slots"]
+
+
+def test_the_answer_cache_does_not_serve_one_conversation_from_another(cached_chat):
+    """Found as a defect by the work that needed it, fixed, and kept as a guard.
+
+    Two conversations, the same words, different walls. The cache key was the
+    question text, the audience set, the snapshot, the generation model and the
+    chunking version — and not what the caller had been taken to have said
+    earlier. So the second browser was answered from the first browser's brick,
+    which is exactly the silent assumption about somebody's wall that decision
+    10 exists to prevent.
+
+    It also defeated multi-turn through its own cache: resuming a pending
+    question re-asks the same words, so the stored *ask-back* came back instead
+    of the answer the new substrate had finally made possible. The carried
+    slots are now in the key.
+    """
+    first = Browser(cached_chat)
+    first.json(ASK)
+    first.json("brick")
+
+    second = Browser(cached_chat)
+    second.json(ASK)
+    second.json("stone")
+
+    reply = second.json(ASK)
+    assert reply["parts"][0]["diagnostics"]["slots"]["substrate"] == "stone", reply

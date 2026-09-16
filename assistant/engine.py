@@ -74,7 +74,16 @@ class Assistant:
         self.engine.retriever = self.router
 
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
-            correlation_id: str = "") -> Reply:
+            correlation_id: str = "", carried: dict | None = None) -> Reply:
+        """One message in, one composite reply out.
+
+        `carried` is what the caller already knows that this question does not
+        say — slots held from an earlier turn in the same conversation, or read
+        off an uploaded photograph. The engine does not decide what is worth
+        carrying and does not store it; a session or a vision step owns that,
+        and hands it in. Keeping the memory outside the engine is what lets the
+        CLI stay single-turn and stateless while the web page is neither.
+        """
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
@@ -87,14 +96,14 @@ class Assistant:
             with obs.timed("answer", audiences=list(audiences),
                            question_words=len(question.split()),
                            question=obs.fingerprint(question)) as summary:
-                self._ask(question, audiences, reply, cid)
+                self._ask(question, audiences, reply, cid, carried)
                 summary["parts"] = len(reply.parts)
                 summary["paths"] = reply.paths
                 summary["refused"] = reply.refused
         return reply
 
     def _ask(self, question: str, audiences: tuple[str, ...], reply: Reply,
-             cid: str) -> None:
+             cid: str, carried: dict | None = None) -> None:
         with self.repo.read_snapshot() as snapshot:
             self.retriever._verify()
             # Names/contact are release metadata too; refresh them together
@@ -102,7 +111,7 @@ class Assistant:
             self.engine.names = {key: snapshot.notes.get(key, default) for key, default in
                                  (("products", []), ("colours", []), ("merchants", []), ("contact", {}))}
             for part in split_by_topic(question):
-                key = self._cache_key(part, audiences, snapshot)
+                key = self._cache_key(part, audiences, snapshot, carried)
                 # `is not None`, not truthiness. AnswerCache defines __len__,
                 # so an empty cache is falsy and `if self.cache` was False on
                 # every call — the cache could never fill, because it was empty.
@@ -111,7 +120,7 @@ class Assistant:
                           question=obs.fingerprint(part),
                           snapshot_id=snapshot.snapshot_id)
                 if answer is None:
-                    answer = self._answer_part(part, audiences)
+                    answer = self._answer_part(part, audiences, carried)
                     answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
                     answer.diagnostics["embedding_model"] = snapshot.embedding_model
                     answer.diagnostics["chunking_version"] = snapshot.chunking_version
@@ -138,9 +147,11 @@ class Assistant:
         if self.log:
             self._log(reply)
 
-    def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot):
+    def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot,
+                   carried: dict | None = None):
         return AnswerCache.key(part, audiences, snapshot.snapshot_id,
-                               ollama.GENERATION_MODEL, snapshot.chunking_version)
+                               ollama.GENERATION_MODEL, snapshot.chunking_version,
+                               carried)
 
     def _log(self, reply: Reply) -> None:
         """Record each part, and never let recording break the answer.
@@ -170,7 +181,8 @@ class Assistant:
                 obs.event("store_error", operation="log_answer",
                           error=type(error).__name__, detail=str(error))
 
-    def _answer_part(self, part: str, audiences: tuple[str, ...]) -> Answer:
+    def _answer_part(self, part: str, audiences: tuple[str, ...],
+                     carried: dict | None = None) -> Answer:
         matched = self.router.gate.match(part)
         if matched:
             topic, spec = matched
@@ -184,7 +196,7 @@ class Assistant:
 
         hits = self.retriever.search(part, audiences=audiences)
         decision = self.router.route(
-            part, hits, self.retriever.above_threshold(hits), audiences)
+            part, hits, self.retriever.above_threshold(hits), audiences, carried)
         obs.event("route", path=decision.path.value, step=decision.step,
                   reason=decision.reason,
                   top_score=hits[0].score if hits else 0.0,

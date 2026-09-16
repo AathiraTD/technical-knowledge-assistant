@@ -20,6 +20,16 @@ the log rather than reproduced. A 404 is the exception: it is served by
 `send_error` and never reaches the sender that attaches the header, which is
 tolerable because a request for a path that does not exist has no answer to
 trace.
+
+This is also the only surface with more than one turn. The CLI is stateless by
+design and the harness must stay reproducible, so conversation state lives here
+and in `assistant/session.py`: a cookie names the session, the session holds the
+facts earlier turns established about the caller's building, and those are
+handed to `ask(carried=...)`. The engine merges them under whatever the current
+question says, so a correction always wins. The session holds slots and never an
+audience — the audience set is resolved per request from what this server was
+started to allow, and a session that could widen it would be an access-control
+bug with a cookie on it.
 """
 
 from __future__ import annotations
@@ -30,6 +40,7 @@ import json
 import sys
 import threading
 import webbrowser
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -37,7 +48,14 @@ from . import observability as obs, ollama, use_utf8
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
 from .repository import IndexMismatch
+from .router import Path_
+from .session import SessionStore
 from .store.factory import open_repository
+
+# Named for what it is and scoped to this server. HttpOnly because no script on
+# the page has any use for it, SameSite=Lax because a session that follows a
+# cross-site form post is a session somebody else is steering.
+SESSION_COOKIE = "tka_session"
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
@@ -85,6 +103,9 @@ PAGE = """<!doctype html>
            color:var(--muted); background:#f4f6f4; border-radius:6px;
            padding:10px 12px; margin-top:14px; white-space:pre-wrap; }}
   .empty {{ color:var(--muted); font-size:14px; }}
+  ol.hist {{ margin:0; padding-left:20px; font-size:14px; color:var(--muted); }}
+  ol.hist li {{ margin-bottom:9px; }}
+  ol.hist b {{ color:var(--ink); font-weight:600; }}
 </style>
 <div class="wrap">
 <header>
@@ -121,6 +142,20 @@ function setAudience(v){{param('a',v);}}
 
 def _esc(text: str) -> str:
     return html.escape(text, quote=True)
+
+
+def render_history(turns: list[tuple[str, str]]) -> str:
+    """The conversation so far, so a follow-up reads as one.
+
+    Without it the page answers "brick" with a wall of text and no sign of the
+    question it belongs to, which is the single-turn experience decision 10
+    complains about wearing a session cookie.
+    """
+    if not turns:
+        return ""
+    rows = "".join(f"<li><b>{_esc(q)}</b><br>{_esc(a)}</li>" for q, a in turns)
+    return (f"<div class='card'><div class='part'>Earlier in this conversation"
+            f"</div><ol class='hist'>{rows}</ol></div>")
 
 
 def render_html(reply, verbose: bool) -> str:
@@ -176,7 +211,27 @@ class Handler(BaseHTTPRequestHandler):
     # What this server was started to allow. A request may narrow this and can
     # never widen it, so `?a=staff` against a public instance stays public.
     audiences: tuple[str, ...] = PUBLIC_ONLY
+    # Conversation state, shared by every request thread. Slots only; see
+    # assistant/session.py for what is carried and what is deliberately not.
+    sessions: SessionStore = SessionStore()
     correlation_id: str
+    session_id: str
+
+    def _session(self) -> str:
+        """The session this request belongs to, minting one if it has none.
+
+        The Cookie header is attacker-controlled, and `SimpleCookie` raises on a
+        malformed key rather than ignoring it, so a hand-written header of
+        "=====" would otherwise answer every request with a 500. An unreadable
+        cookie is treated as no cookie, which is the safe reading: it starts a
+        new conversation instead of guessing which one was meant.
+        """
+        try:
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+        except CookieError:
+            jar = SimpleCookie()
+        morsel = jar.get(SESSION_COOKIE)
+        return self.sessions.open(morsel.value if morsel else "")
 
     def log_message(self, *args) -> None:      # keep the console for answers
         pass
@@ -197,10 +252,27 @@ class Handler(BaseHTTPRequestHandler):
         audience = params.get("a", [""])[0]
         audiences = resolve(audience, self.audiences)
 
+        self.session_id = self._session()
+        carried = self.sessions.carried(self.session_id)
+        earlier = self.sessions.turns(self.session_id)
+        pending = self.sessions.pending(self.session_id)
+        asked = question
+        if pending and question:
+            # The previous turn ended in an ask-back, so this one may be the
+            # answer to it rather than a new question. Detection is the router's
+            # own vocabulary — not a second copy of it here — and only the slot
+            # step 5 actually asked for counts: "brick" resumes the pending
+            # question, "and what colour is it" does not.
+            stated = self.assistant.router.slots.detect(question)
+            if "substrate" in stated:
+                carried = {**carried, **stated}
+                asked = pending
+
         if url.path == "/ask":
             try:
-                reply = (self.assistant.ask(question, audiences=audiences,
-                                            correlation_id=self.correlation_id)
+                reply = (self.assistant.ask(asked, audiences=audiences,
+                                            correlation_id=self.correlation_id,
+                                            carried=carried)
                          if question else None)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 # The HTML branch has always handled this; the JSON branch did
@@ -211,8 +283,11 @@ class Handler(BaseHTTPRequestHandler):
                                       ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8", status=503)
                 return
+            self._remember(question, reply)
             payload = {
                 "question": question,
+                "answered": asked,
+                "session_slots": self.sessions.carried(self.session_id),
                 "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
@@ -227,8 +302,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if question:
             try:
-                reply = self.assistant.ask(question, audiences=audiences,
-                                           correlation_id=self.correlation_id)
+                reply = self.assistant.ask(asked, audiences=audiences,
+                                           correlation_id=self.correlation_id,
+                                           carried=carried)
+                self._remember(question, reply)
                 body_html = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 body_html = (f"<div class='card'><div class='answer'>"
@@ -242,16 +319,43 @@ class Handler(BaseHTTPRequestHandler):
         options = "".join(
             f"<option value='{a}'{' selected' if a == audience else ''}>{a}</option>"
             for a in ("public", "trade", "staff"))
-        page = PAGE.format(meta=self.meta, q=_esc(question), body=body_html,
+        page = PAGE.format(meta=self.meta, q=_esc(question),
+                           body=render_history(earlier) + body_html,
                            vchecked="checked" if verbose else "",
                            audience_options=options)
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _remember(self, question: str, reply) -> None:
+        """Fold what this turn established back into the session.
+
+        The slots taken are the ones the router actually detected, read off the
+        answer rather than re-derived, so the page and the answer cannot
+        disagree about what was assumed. `pending` is set only by an ask-back
+        and cleared by anything else, so a question that was answered never
+        resumes later.
+        """
+        if reply is None:
+            return
+        slots: dict = {}
+        pending = ""
+        for _part, answer in reply.parts:
+            slots.update(answer.diagnostics.get("slots", {}))
+            if answer.path == Path_.ASK_BACK.value:
+                pending = reply.question
+        summary = "\n\n".join(answer.text for _part, answer in reply.parts)
+        self.sessions.remember(self.session_id, question, summary, slots, pending)
 
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Correlation-Id", self.correlation_id)
+        # Path and HttpOnly on every response, including the first: the session
+        # is established before the answer, so a caller who asks one question
+        # and reads the reply already has somewhere to put the next turn.
+        self.send_header("Set-Cookie",
+                         f"{SESSION_COOKIE}={self.session_id}; Path=/; "
+                         f"HttpOnly; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
 
@@ -289,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
 
     snapshot = repo.snapshot()
     Handler.assistant = assistant
+    # One store per server, rather than the class default, so a restarted
+    # process never inherits a conversation from the last one.
+    Handler.sessions = SessionStore()
     Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (
         f"{snapshot.document_count} documents · {snapshot.chunk_count} passages · "
