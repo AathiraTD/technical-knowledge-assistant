@@ -1018,6 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
                 asked = pending
 
         if path == "/ask":
+            reply = None
             try:
                 # Build multi-turn context from prior turns for grounded reasoning
                 context = self._build_context(self.session_id)
@@ -1038,7 +1039,18 @@ class Handler(BaseHTTPRequestHandler):
                                       ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8", status=503)
                 return
-            self._remember(question, reply, auto_answered=bool(auto_answered))
+            except Exception as exc:
+                # Catch any other exception and return JSON error
+                self._send(json.dumps({"error": f"Internal error: {str(exc)}",
+                                       "question": question,
+                                       "correlation_id": self.correlation_id},
+                                      ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8", status=500)
+                return
+
+            if reply is not None:
+                self._remember(question, reply, auto_answered=bool(auto_answered))
+
             payload = {
                 "question": question,
                 "answered": asked,
