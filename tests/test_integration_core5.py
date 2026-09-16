@@ -97,29 +97,32 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "xyzabc qwerty asdfgh zxcvbn"  # Gibberish, no match
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         self.assertEqual(answer.path, "refuse", f"Expected refuse, got {answer.path}")
-        self.assertIn("not found", answer.refusal_reason.lower())
+        self.assertIn("not found", answer.text.lower())
 
     def test_router_routes_to_compose(self):
         """Router step 8: answerable question routes to compose (model)."""
         question = "How much water does Solo need per bag?"
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         # Should answer (compose or extract path)
         self.assertIn(answer.path, ["compose", "extract"], f"Unexpected path: {answer.path}")
-        self.assertTrue(len(answer.answer) > 0, "Answer is empty")
+        self.assertTrue(len(answer.text) > 0, "Answer is empty")
 
     def test_router_detects_calculation_words(self):
         """Router step 6: calculation question routes to extract."""
         question = "How many bags of Solo for 10 square metres?"
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         # Should extract (no sum given, so refuse the sum)
         self.assertIn(answer.path, ["extract", "refuse"])
 
@@ -128,8 +131,9 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "What plaster should I use inside?"  # No substrate
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         # Should ask back for substrate or refuse
         self.assertIn(answer.path, ["ask_back", "refuse"])
 
@@ -140,12 +144,13 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How much water does Solo need?"
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
-        if answer.path == "compose" and answer.answer:
+        answer = reply.parts[0][1]
+        if answer.path == "compose" and answer.text:
             # Parse answer for [n] markers
             import re
-            sentences = [s.strip() for s in answer.answer.split(".") if s.strip()]
+            sentences = [s.strip() for s in answer.text.split(".") if s.strip()]
             for sentence in sentences:
                 # Should have [n] marker or be a preamble
                 self.assertTrue(
@@ -158,15 +163,16 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How much water does Solo need per bag?"
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         # If answer contains numbers, they should be from passages
         # (Check runs post-generation, so if answer is printed, check passed)
         if answer.path == "compose":
             import re
-            numbers = re.findall(r'\d+(?:\.\d+)?', answer.answer)
+            numbers = re.findall(r'\d+(?:\.\d+)?', answer.text)
             # Simple heuristic: numbers should exist in retrieved passages
-            self.assertTrue(len(numbers) == 0 or len(answer.answer) > 0)
+            self.assertTrue(len(numbers) == 0 or len(answer.text) > 0)
 
     def test_checks_fail_on_fabrication(self):
         """Checks should refuse an answer if it fabricates."""
@@ -174,8 +180,9 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "What is the atomic weight of Solo plaster?"
 
         with observability.correlation(self.correlation_id):
-            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
+        answer = reply.parts[0][1]
         # Should refuse or admit it's not stated
         self.assertIn(answer.path, ["refuse", "extract"])
 
@@ -187,7 +194,7 @@ class IntegrationTestCore5(unittest.TestCase):
         q1 = "I have a solid brick wall. Should I use plaster?"
 
         with observability.correlation(observability.new_id()):
-            a1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
+            reply1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
 
         # Check session has substrate
         carried = self.session_store.carried(self.session_id)
@@ -198,21 +205,23 @@ class IntegrationTestCore5(unittest.TestCase):
         q2 = "What about Forte?"
 
         with observability.correlation(observability.new_id()):
-            a2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
+            reply2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
 
         # Should answer without asking for substrate again
-        self.assertNotIn("substrate", a2.refusal_reason.lower() if a2.refusal_reason else "")
+        a2 = reply2.parts[0][1]
+        self.assertNotIn("substrate", a2.text.lower())
 
     def test_session_persists_to_database(self):
-        """Session: session state persists to PostgreSQL."""
+        """Session: session state persists to database."""
         q = "I have solid brick. What plaster for outside?"
 
         with observability.correlation(observability.new_id()):
-            self.assistant.ask(q, audiences=("public",), session_id=self.session_id)
+            reply = self.assistant.ask(q, audiences=("public",), session_id=self.session_id, carried={})
 
         # Verify session was persisted
         carried = self.session_store.carried(self.session_id)
-        self.assertTrue(len(carried) > 0, "Session not persisted")
+        # Expect substrate to be carried from the question
+        self.assertIn("substrate", carried, "Substrate not carried from question")
 
     def test_session_expires_after_idle(self):
         """Session: idle sessions are expired."""
@@ -240,6 +249,10 @@ class IntegrationTestCore5(unittest.TestCase):
         q = "I have solid brick."
         with observability.correlation(observability.new_id()):
             self.assistant.ask(q, audiences=("public",), session_id=sess_a)
+
+        # Verify session A has substrate
+        carried_a = self.session_store.carried(sess_a)
+        self.assertIn("substrate", carried_a, "Substrate not detected in session A")
 
         # Session B should NOT see session A's substrate
         carried_b = self.session_store.carried(sess_b)
@@ -315,14 +328,14 @@ class IntegrationTestCore5(unittest.TestCase):
         # T1: Full retrieval
         start_t1 = time.time()
         with observability.correlation(observability.new_id()):
-            a1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
+            reply1 = self.assistant.ask(q1, audiences=("public",), session_id=self.session_id)
         latency_t1 = time.time() - start_t1
 
         # T2: Reuse substrate (carried)
         q2 = "What about Forte instead?"
         start_t2 = time.time()
         with observability.correlation(observability.new_id()):
-            a2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
+            reply2 = self.assistant.ask(q2, audiences=("public",), session_id=self.session_id)
         latency_t2 = time.time() - start_t2
 
         # T2 should be faster (carried slots, possibly cached)
