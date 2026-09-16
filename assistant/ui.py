@@ -786,6 +786,10 @@ class Handler(BaseHTTPRequestHandler):
         # greps for it, and every event the answer produced comes back together.
         self.correlation_id = obs.new_id()
         url = urlparse(self.path)
+        # Health check endpoint for load balancers and container orchestration.
+        if url.path == "/health":
+            self._send_plain(b"OK\n", "text/plain")
+            return
         # One line, delegating immediately. The renderer lives in
         # assistant/metrics.py rather than here because a later slice rewrites
         # this page wholesale and a Prometheus exposition format entangled with

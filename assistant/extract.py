@@ -103,10 +103,23 @@ CAVEAT_PATTERNS = (
         r"|\bprofessional (?:application|applicator|plasterer)\b"
         r"|\brequires? (?:skill|experience)\b", re.I)),
     ("incompatibility", re.compile(
-        r"\bnot suitable for\b|\bdo not use\b|\bmust not be\b|\bnever\b"
+        r"\bnot suitable for\b|\bdo not use\b|\bmust not be\b"
+        # "never" has to be an instruction, not an adjective. On its own it
+        # matched "Mineral ingredients are guaranteed never to rot" — a selling
+        # point — and printed it under "Also published about these products" as
+        # though it qualified the answer.
+        r"|\bnever\s+(?:use|apply|mix|add|exceed|allow|combine|coat|paint|"
+        r"seal|cover|dilute|thin|re-?temper|place|leave)\b"
         r"|\bincompatible\b|\bavoid\b.{0,30}\b(?:cement|gypsum|plasterboard)\b"
         r"|\bunsuitable\b", re.I)),
 )
+
+# A sentence that opens a list of selling points is not a qualification,
+# whatever prohibition-shaped words appear later inside it. Tested before the
+# patterns rather than after, because one such sentence can carry several.
+_MARKETING = re.compile(
+    r"^\s*(?:key\s+)?(?:benefits?|features?|advantages?|highlights?)\b"
+    r"|^\s*why\s+(?:choose|use)\b", re.I)
 
 # ------------------------------------------------------------- hazard blocks
 
@@ -777,6 +790,8 @@ def caveats(sections: list[Section]) -> list[dict]:
             s = re.sub(r"^[\s•·*\-–—]+", "", sentence).strip()
             s = re.sub(r"\s+", " ", s)
             if not 15 < len(s) < 320 or DEFERRAL.search(s):
+                continue
+            if _MARKETING.search(s):
                 continue
             for kind, pattern in CAVEAT_PATTERNS:
                 if pattern.search(s):

@@ -451,12 +451,19 @@ def test_an_unknown_path_is_a_clean_404(server):
     assert status == 404
 
 
+def test_the_health_endpoint_returns_ok(server):
+    """Health check endpoint for load balancers and orchestration."""
+    status, body = get(server, "/health")
+    assert status == 200
+    assert body.strip() == "OK"
+
+
 def test_the_page_without_a_question_invites_one_rather_than_answering(server):
     """The first thing an assessor sees. It must not look like a broken page."""
     status, body = get(server, "/")
 
     assert status == 200
-    assert "Ask a question above" in body, body
+    assert "How can I help?" in body, body
     assert "<h3>Sources</h3>" not in body, "an empty page cited a document"
 
 
