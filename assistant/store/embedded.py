@@ -549,7 +549,7 @@ class SQLiteKnowledgeRepository:
 
         No vector is involved, so `score` is 0.0 and means "not a similarity".
         """
-        if not product or not terms:
+        if not terms:
             return []
         marks = ",".join("?" * len(audiences))
         like = " OR ".join(
@@ -575,8 +575,12 @@ class SQLiteKnowledgeRepository:
         ).fetchall()
         # The product match is the one rule that must be identical in both
         # adapters, so it runs through the shared helper rather than through two
-        # dialects of LIKE.
-        matched = [r for r in rows if product_matches(product, r["product"] or "")]
+        # dialects of LIKE. An empty product means the caller named none and the
+        # lookup is on the terms alone — which is the case for a question like
+        # "why is my render patchy", where the evidence is an article rather
+        # than a product document.
+        matched = ([r for r in rows if product_matches(product, r["product"] or "")]
+                   if product else rows)
         return [Retrieved(chunk=self._chunk(r), score=0.0,
                           document=self._document(r))
                 for r in matched[:limit]]
