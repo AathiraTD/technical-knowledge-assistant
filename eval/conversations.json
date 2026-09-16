@@ -1,0 +1,122 @@
+{
+ "_comment": "Multi-turn scenarios, run against the real index by `python -m eval.run`. Every expectation is about route, numbered router step, slots, slot provenance, session state or a published figure — never about wording, because decision 7's G4 note records that the same question asked twice produces different prose and identical evidence. Photograph scenarios are deliberately absent here and live in tests/test_conversation_eval.py instead: perception needs a vision model, and this harness must stay runnable without one.",
+
+ "conversations": [
+  {
+   "id": "C1",
+   "name": "Progressive refinement, then a correction",
+   "why": "The conversation decision 10 exists for: the person describes their wall once, asks four questions against it, and then corrects the one fact that decides the product. Each turn must inherit the building facts and nothing else, and the correction must overwrite the substrate rather than accumulate beside it.",
+   "turns": [
+    {
+     "question": "I have an internal brick wall.",
+     "expect": {
+      "slots_include": {"substrate": "brick", "location": "internal"},
+      "facts": {"substrate": "stated", "location": "stated"},
+      "session_slots_after": {"substrate": "brick", "location": "internal"},
+      "pending_after": false
+     }
+    },
+    {
+     "question": "Would Ultra work?",
+     "expect": {
+      "slots_include": {"substrate": "brick", "location": "internal"},
+      "facts": {"substrate": "carried", "location": "carried"},
+      "session_slots_after": {"substrate": "brick", "location": "internal"}
+     }
+    },
+    {
+     "question": "What thickness should it be?",
+     "expect": {
+      "slots_include": {"substrate": "brick", "property_asked": "thickness"},
+      "facts": {"substrate": "carried"},
+      "session_slots_exclude": ["property_asked"]
+     }
+    },
+    {
+     "question": "How many bags do I need for 30 square metres?",
+     "expect": {
+      "slots_include": {"calculation": "quantity", "substrate": "brick"},
+      "facts": {"substrate": "carried"},
+      "session_slots_exclude": ["calculation"]
+     }
+    },
+    {
+     "question": "Sorry, it is actually stone.",
+     "expect": {
+      "slots_include": {"substrate": "stone"},
+      "facts": {"substrate": "stated"},
+      "session_slots_after": {"substrate": "stone", "location": "internal"},
+      "session_slots_exclude": ["calculation", "property_asked"]
+     }
+    }
+   ]
+  },
+  {
+   "id": "C2",
+   "name": "Topic switch between two products",
+   "why": "A conversation that moves from one product to another must answer the second question from the second product's evidence. The signal is the top passage, not retrieval breadth: five passages over this corpus may well contain the first product whatever was asked, but the passage the answer is anchored on is chosen by this question.",
+   "turns": [
+    {
+     "question": "How much water does Solo Onecoat need per bag?",
+     "expect": {"must_cite": true, "chunks_retrieved": 1}
+    },
+    {
+     "question": "What thickness should Ultra be applied at?",
+     "expect": {
+      "cached": false,
+      "top_source_must_not_match": "solo",
+      "session_slots_exclude": ["property_asked"]
+     }
+    }
+   ]
+  },
+  {
+   "id": "C3",
+   "name": "Slot shapes do not survive the turn that asked them",
+   "why": "session.py drops calculation, photograph, symptom, cause_asked and property_asked on purpose, and its docstring gives the failure for each: a held calculation sends a plain lookup down router step 6 where the sum is refused; a held photograph appends 'I cannot see photographs' to an answer nobody attached anything to; a held cause_asked pins the session to the diagnosis path. This scenario asks all three shapes and then asks a plain lookup, which must route as though none of them had happened.",
+   "turns": [
+    {
+     "question": "How many bags of Solo Onecoat do I need for 20 square metres?",
+     "expect": {"slots_include": {"calculation": "quantity"},
+                "session_slots_exclude": ["calculation"]}
+    },
+    {
+     "question": "I have attached a photo of the wall.",
+     "expect": {"slots_include": {"photograph": "photo"},
+                "session_slots_exclude": ["photograph"]}
+    },
+    {
+     "question": "Why is my render cracking?",
+     "expect": {"slots_include": {"cause_asked": "cause"},
+                "session_slots_exclude": ["symptom", "cause_asked"]}
+    },
+    {
+     "question": "What is the coverage of Solo Onecoat?",
+     "expect": {
+      "slots_exclude": ["calculation", "photograph", "symptom", "cause_asked"],
+      "step_not_in": ["3", "6"],
+      "path_not_in": ["diagnosis"]
+     }
+    }
+   ]
+  },
+  {
+   "id": "C4",
+   "name": "The ask-back cycle closes",
+   "why": "Decision 10's cost, paid back. A product question with an uncued substrate asks back; the turn supplying the substrate must re-ask the original question rather than answer the single word the person typed, which on its own retrieves a catalogue.",
+   "turns": [
+    {
+     "question": "What plaster should I use?",
+     "expect": {"path_in": ["ask back"], "step_in": ["5"], "pending_after": true,
+                "model_ran": false}
+    },
+    {
+     "question": "Brick.",
+     "expect": {"resumes_turn": 0, "slots_include": {"substrate": "brick"},
+                "path_not_in": ["ask back"], "pending_after": false,
+                "session_slots_after": {"substrate": "brick"}}
+    }
+   ]
+  }
+ ]
+}
