@@ -145,8 +145,32 @@ Two parts. Gates are pass or fail, assessed from published facts; a candidate fa
 | G1 | Licence permits commercial deployment | The partnership leads to deployment; bespoke terms are a legal question, not a trade-off |
 | G2 | Runs usefully on a processor with no graphics card | A model taking a minute per answer cannot be demonstrated in seven |
 | G3 | Published under a stable tag | An assessor pulls it from a clean clone; a preview cannot be a dependency |
-| G4 | Can be made deterministic — fixed tag, temperature zero, fixed seed | The reproducibility target is an identical transcript on a second run |
+| G4 | Can be made deterministic — fixed tag, temperature zero, fixed seed | So a transcript can be re-derived. **Measured, and weaker than this row first claimed** — see the note below |
 | G5 | No mandatory reasoning tokens | Output tokens are the whole latency budget on a processor; thinking must be absent or switchable off |
+
+**What G4 actually buys, measured rather than assumed.** This row used to say
+the target was "an identical transcript on a second run". It is not met. Asked
+the same question twice against the same snapshot, with the same model tag,
+temperature zero and seed zero, the prose differs — one run answered that Ultra
+"is suitable for internal walls as an insulating lime plaster base coat", the
+next added "that acts as a draught excluder", a clause that is equally published
+and equally well cited. The evaluation harness sees the same thing across S8, S9
+and probe P1.
+
+What *is* reproducible is everything the system actually relies on: the route
+taken, the passages retrieved, the citation markers, and — the one that matters
+— the figures. "between 10 and 30mm" came back verbatim in both runs, cited to
+the same datasheet section, because check 2 compares every number against the
+passage it cites and a paraphrased figure does not print. The guarantee is
+**reproducible evidence, not reproducible wording**, and that is the honest
+claim to make in the room.
+
+It is worth being clear about why the weaker claim is still enough. Nothing in
+the design depends on the model saying the same words twice; everything depends
+on it not saying a number the evidence does not support. A transcript is
+evidence of what the system *can* do and of which route each question took, and
+both of those re-derive. Anyone quoting byte-identical output as the
+reproducibility story would be quoting something this build does not deliver.
 
 **Two kinds of reasoning, and only one of them is wanted.** This design needs the model to reason *over supplied passages* — recognise that a passage about solid masonry covers a 1930s solid brick wall, join a base coat to a compatible finish coat because a passage links them, pick the right curing figure when a section lists two finish coats with different waits. That is bounded, grounded reasoning and it is the entire Compose job.
 
