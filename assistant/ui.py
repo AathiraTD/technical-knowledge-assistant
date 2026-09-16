@@ -3,12 +3,12 @@
 `python -m assistant.ui`, then open the address it prints.
 
 No Streamlit and no Flask. Streamlit pulls pyarrow, which publishes no Windows
-ARM64 wheel and falls back to a source build needing MSVC — a clean-clone
+ARM64 wheel and falls back to a source build needing MSVC -- a clean-clone
 failure on an assessor's machine, for a page that is a form and a list. The
 standard library serves both, and the only dependency this adds is zero.
 
 The page is a view. Every routing decision, check and refusal happens in the
-library the CLI calls, so the two interfaces cannot disagree — and the
+library the CLI calls, so the two interfaces cannot disagree -- and the
 evaluation harness drives the library rather than either of them.
 
 Structured logging is on by default here, to stderr, which is the opposite of
@@ -27,7 +27,7 @@ and in `assistant/session.py`: a cookie names the session, the session holds the
 facts earlier turns established about the caller's building, and those are
 handed to `ask(carried=...)`. The engine merges them under whatever the current
 question says, so a correction always wins. The session holds slots and never an
-audience — the audience set is resolved per request from what this server was
+audience -- the audience set is resolved per request from what this server was
 started to allow, and a session that could widen it would be an access-control
 bug with a cookie on it.
 """
@@ -74,7 +74,7 @@ SESSION_COOKIE = "tka_session"
 # this file decodes a pixel: the bytes are sniffed for a recognised container
 # signature and then handed to Ollama, which is the only thing that reads them.
 # Introducing an image library to validate an image would add exactly the
-# attack surface — a C decoder fed hostile bytes — that the validation is for.
+# attack surface -- a C decoder fed hostile bytes -- that the validation is for.
 
 # The whole request body, headers of the parts included. A photograph from a
 # phone is a few megabytes and `assistant/vision.py` refuses anything over eight
@@ -83,8 +83,8 @@ SESSION_COOKIE = "tka_session"
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 
 # How many photographs one request may carry. The guided visual survey of
-# decision 16.1 asks for a handful — a wider elevation, an exposed section, the
-# ground line — and a number well past that is not a survey.
+# decision 16.1 asks for a handful -- a wider elevation, an exposed section, the
+# ground line -- and a number well past that is not a survey.
 MAX_IMAGES_PER_REQUEST = 4
 
 # How many one session may send in total. Perception costs minutes of CPU per
@@ -99,8 +99,8 @@ MAX_IMAGES_PER_SESSION = 12
 MAX_TRACKED_SESSIONS = 1024
 
 # Container signatures, by content rather than by name. The uploaded filename is
-# never consulted for anything at all — not for the media type, not for storage,
-# not for logging, not for the hand-off — because a filename is a string the
+# never consulted for anything at all -- not for the media type, not for storage,
+# not for logging, not for the hand-off -- because a filename is a string the
 # caller chose and "wall.png" is not evidence that anything is a PNG. These are
 # the formats a phone or a laptop actually produces, and the list is an
 # allowlist: an unrecognised signature is refused rather than passed along to
@@ -167,128 +167,482 @@ PAGE = """<!doctype html>
     --ink:#1c2321; --muted:#5d6b66; --line:#dfe5e1; --bg:#f7f9f7;
     --card:#ffffff; --accent:#4a7c59; --warn:#8a5a2b; --warnbg:#fdf6ec;
   }}
+  @media (prefers-color-scheme: dark) {{
+    :root:not([data-theme="light"]) {{
+      --ink:#f5f5f4; --muted:#a0aaa5; --line:#3a4440; --bg:#1a1f1d;
+      --card:#252a28; --accent:#5a8c69; --warn:#b8845a; --warnbg:#3a2f1f;
+    }}
+  }}
+  :root[data-theme="dark"] {{
+    --ink:#f5f5f4; --muted:#a0aaa5; --line:#3a4440; --bg:#1a1f1d;
+    --card:#252a28; --accent:#5a8c69; --warn:#b8845a; --warnbg:#3a2f1f;
+  }}
+
   * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:var(--bg); color:var(--ink);
-         font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
-  .wrap {{ max-width:780px; margin:0 auto; padding:32px 20px 80px; }}
-  header h1 {{ font-size:22px; margin:0 0 6px; }}
-  header p {{ color:var(--muted); margin:0 0 4px; font-size:14px; }}
-  .meta {{ color:var(--muted); font-size:12.5px; margin-top:10px;
-           border-top:1px solid var(--line); padding-top:10px; }}
-  form {{ display:flex; gap:8px; margin:22px 0 8px; }}
-  input[type=text] {{ flex:1; padding:12px 14px; border:1px solid var(--line);
-                      border-radius:8px; font-size:16px; background:var(--card); }}
-  input[type=text]:focus {{ outline:2px solid var(--accent); outline-offset:-1px; }}
-  button {{ padding:12px 20px; border:0; border-radius:8px; background:var(--accent);
-            color:#fff; font-size:15px; cursor:pointer; }}
-  button:hover {{ background:#3d6749; }}
-  .working {{ background:var(--warnbg); border:1px solid var(--warn);
-              border-radius:10px; padding:14px 18px; margin-bottom:18px;
-              color:var(--warn); }}
-  .working p {{ margin:6px 0 0; font-size:13px; }}
-  button[disabled] {{ opacity:.6; cursor:progress; }}
-  .opts {{ color:var(--muted); font-size:13px; margin-bottom:26px; }}
-  .opts label {{ margin-right:14px; }}
-  .card {{ background:var(--card); border:1px solid var(--line); border-radius:10px;
-           padding:18px 20px; margin-bottom:16px; }}
-  .part {{ font-size:12.5px; text-transform:uppercase; letter-spacing:.06em;
-           color:var(--muted); margin-bottom:10px; }}
-  .answer {{ white-space:pre-wrap; }}
-  .tag {{ display:inline-block; font-size:12px; padding:2px 9px; border-radius:99px;
-          background:#eef3ef; color:var(--accent); margin-left:8px; }}
+  body {{ margin:0; padding:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100vh; }}
+
+  header {{
+    background:var(--card); border-bottom:1px solid var(--line);
+    padding:16px 20px; display:flex; justify-content:space-between;
+    align-items:center; gap:16px;
+  }}
+  header h1 {{ font-size:18px; margin:0; flex:1; }}
+  .header-controls {{ display:flex; gap:12px; align-items:center; }}
+  .audience-badge {{
+    font-size:12px; padding:4px 10px; border-radius:99px;
+    background:#eef3ef; color:var(--accent); white-space:nowrap;
+  }}
+  .new-chat-btn {{
+    padding:8px 14px; font-size:14px; border:1px solid var(--line);
+    background:var(--card); color:var(--accent); border-radius:6px;
+    cursor:pointer; transition:all 0.2s;
+  }}
+  .new-chat-btn:hover {{ background:var(--line); }}
+
+  .chat-container {{ flex:1; display:flex; flex-direction:column;
+                      overflow:hidden; }}
+  .chat-messages {{ flex:1; overflow-y:auto; padding:20px;
+                    display:flex; flex-direction:column; gap:12px; }}
+
+  .landing {{ display:flex; flex-direction:column; align-items:center;
+             justify-content:center; text-align:center; padding:40px 20px; }}
+  .landing h2 {{ font-size:32px; margin:0 0 12px; }}
+  .landing p {{ color:var(--muted); margin:0; max-width:400px;
+               font-size:16px; }}
+
+  .message {{ display:flex; gap:12px; animation:slideIn 0.3s ease-out; }}
+  @keyframes slideIn {{ from {{ opacity:0; transform:translateY(8px); }}
+                       to {{ opacity:1; transform:translateY(0); }} }}
+
+  .message.user {{ justify-content:flex-end; }}
+  .message.assistant {{ justify-content:flex-start; }}
+
+  .message-bubble {{
+    max-width:75%; padding:12px 14px; border-radius:12px;
+    word-wrap:break-word;
+  }}
+  .message.user .message-bubble {{
+    background:var(--accent); color:#fff;
+  }}
+  .message.assistant .message-bubble {{
+    background:var(--card); border:1px solid var(--line);
+    color:var(--ink);
+  }}
+
+  .answer-text {{ margin:0; white-space:pre-wrap; line-height:1.6; }}
+  .citation {{ cursor:pointer; color:var(--accent); font-weight:500;
+             border-bottom:1px solid var(--accent); padding:0 1px; }}
+  .citation:hover {{ text-decoration:underline; }}
+
+  .sources-disclosure {{
+    margin-top:12px; border-top:1px solid var(--line); padding-top:8px;
+  }}
+  .disclosure-btn {{
+    background:none; border:none; color:var(--accent); cursor:pointer;
+    font-size:13px; padding:0; text-align:left; font-weight:500;
+  }}
+  .disclosure-btn:hover {{ text-decoration:underline; }}
+  .disclosure-btn::before {{
+    content:"▶ "; display:inline-block; transition:transform 0.2s;
+    margin-right:4px;
+  }}
+  .disclosure-btn.open::before {{ transform:rotate(90deg); }}
+
+  .source-list {{
+    display:none; margin-top:8px; padding:8px;
+    background:var(--line); border-radius:6px;
+    font-size:13px;
+  }}
+  .source-list.open {{ display:block; }}
+  .source-item {{
+    margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #ddd;
+  }}
+  .source-item:last-child {{ border-bottom:none; margin-bottom:0; padding-bottom:0; }}
+  .source-name {{ font-weight:500; color:var(--ink); }}
+  .source-date {{ color:var(--muted); font-size:12px; }}
+  .source-link {{ color:var(--accent); word-break:break-all; font-size:12px;
+                 display:block; margin-top:4px; }}
+
+  .diagnostics-disclosure {{
+    margin-top:10px; border-top:1px solid var(--line); padding-top:8px;
+  }}
+  .diagnostics-list {{
+    display:none; margin-top:8px; padding:8px;
+    background:var(--line); border-radius:6px; font-size:12px;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  }}
+  .diagnostics-list.open {{ display:block; }}
+  .diag-line {{ margin-bottom:4px; }}
+  .diag-key {{ color:var(--muted); min-width:120px; display:inline-block; }}
+
+  .tag {{ display:inline-block; font-size:11px; padding:2px 7px;
+         border-radius:99px; background:#eef3ef; color:var(--accent);
+         margin-left:8px; vertical-align:middle; }}
   .tag.refused {{ background:#fdecec; color:#9b3b3b; }}
-  h3 {{ font-size:13px; text-transform:uppercase; letter-spacing:.06em;
-        color:var(--muted); margin:18px 0 8px; }}
-  ol.src {{ margin:0; padding-left:20px; font-size:14px; }}
-  ol.src li {{ margin-bottom:7px; }}
-  ol.src a {{ color:var(--accent); word-break:break-all; }}
-  .caveats {{ background:var(--warnbg); border-left:3px solid var(--warn);
-              padding:10px 14px; font-size:14px; border-radius:0 6px 6px 0; }}
-  .caveats li {{ margin-bottom:5px; }}
-  .diag {{ font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;
-           color:var(--muted); background:#f4f6f4; border-radius:6px;
-           padding:10px 12px; margin-top:14px; white-space:pre-wrap; }}
-  .empty {{ color:var(--muted); font-size:14px; }}
-  details.passage {{ border:1px solid var(--line); border-radius:8px;
-                     padding:10px 14px; margin-top:14px; background:#fbfcfb; }}
-  details.passage summary {{ cursor:pointer; font-size:13px; color:var(--muted); }}
-  details.passage .quote {{ white-space:pre-wrap; font-size:14px; margin-top:10px;
-                            color:var(--ink); }}
-  ol.hist {{ margin:0; padding-left:20px; font-size:14px; color:var(--muted); }}
-  ol.hist li {{ margin-bottom:9px; }}
-  ol.hist b {{ color:var(--ink); font-weight:600; }}
+
+  .input-area {{
+    background:var(--card); border-top:1px solid var(--line);
+    padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;
+    align-items:flex-start;
+  }}
+  .input-wrapper {{
+    flex:1; display:flex; gap:8px; min-height:40px; align-items:flex-end;
+  }}
+  .input-field {{
+    flex:1; padding:10px 12px; border:1px solid var(--line);
+    border-radius:6px; font-size:15px; background:var(--bg);
+    color:var(--ink); font-family:inherit;
+  }}
+  .input-field:focus {{ outline:2px solid var(--accent); outline-offset:-1px; }}
+  .attach-btn, .send-btn {{
+    padding:8px 12px; border:none; border-radius:6px; cursor:pointer;
+    font-size:16px; transition:all 0.2s;
+  }}
+  .attach-btn {{
+    background:transparent; color:var(--muted); border:1px solid var(--line);
+  }}
+  .attach-btn:hover {{ background:var(--line); color:var(--ink); }}
+  .send-btn {{
+    background:var(--accent); color:#fff; padding:10px 14px;
+  }}
+  .send-btn:hover {{ background:#3d6749; }}
+  .send-btn:disabled {{ opacity:0.5; cursor:not-allowed; }}
+
+  .input-extras {{
+    width:100%; font-size:12px; color:var(--muted);
+    display:flex; justify-content:space-between; align-items:center;
+    padding:0 0 8px;
+  }}
+  .input-info {{ display:flex; gap:12px; }}
+  .upload-notes {{
+    color:var(--warn); font-size:11px; margin:0; padding:0;
+  }}
+
+  #file-input {{ display:none; }}
+
+  footer {{
+    background:var(--card); border-top:1px solid var(--line);
+    padding:12px 16px; font-size:12px; color:var(--muted);
+    text-align:center; display:flex; justify-content:space-between;
+    align-items:center;
+  }}
+  .audience-display {{
+    font-size:11px; color:var(--muted);
+  }}
+
+  .thinking {{
+    color:var(--muted); font-size:13px; font-style:italic;
+    text-align:center; padding:8px;
+  }}
+  .thinking::after {{
+    content:" ."; animation:dots 1.5s steps(4, end) infinite;
+  }}
+  @keyframes dots {{
+    0%, 20% {{ content:" ."; }}
+    40% {{ content:" .."; }}
+    60% {{ content:" ..."; }}
+    80%, 100% {{ content:" ."; }}
+  }}
 </style>
-<div class="wrap">
-<header>
-  <h1>Lime Green technical assistant</h1>
-  <p>Answers only from Lime Green's published material, cites every source by
-     document name, and refuses when the material does not answer the question.</p>
-  <div class="meta">{meta}</div>
-</header>
 
-<form method="get" action="/" onsubmit="working()">
-  <input type="text" name="q" value="{q}" placeholder="Ask about a product…" autofocus>
-  <button type="submit" id="ask">Ask</button>
-</form>
-<!-- A second form rather than one that posts everything. The ordinary question
-     stays a GET so the answer keeps a shareable address and the back button
-     works, which is how every existing link and the evaluation harness reach
-     this page; an upload cannot be a GET, so it gets its own. -->
-<details class="passage">
-  <summary>Ask about a photograph</summary>
-  <form method="post" action="/" enctype="multipart/form-data" onsubmit="working()">
-    <input type="text" name="q" placeholder="What would you like to know about it?">
-    <input type="file" name="image" accept="image/*" multiple>
-    <button type="submit">Ask</button>
-  </form>
-  <p class="empty">The photograph is read for what is visible in it — what the
-     wall is built of, inside or outside, exposure, a symptom — and for nothing
-     else. It never chooses a product and never decides what has gone wrong:
-     that stays a judgement for the technical team. Anything read this way is
-     reported as coming from the photograph rather than as something you said,
-     and the image is not stored. Expect a wait of minutes: a vision model on a
-     processor with no graphics card is slow.</p>
-</details>
-<div class="working" id="working" hidden>
-  <strong>Thinking…</strong> <span id="elapsed">0s</span>
-  <p>A question the model has not seen before takes tens of seconds on a
-     processor with no graphics card — prompt reading is the cost, not typing
-     the answer. Asking the same question again returns immediately.</p>
-</div>
-<div class="opts">
-  <label><input type="checkbox" name="v" form="" onchange="toggle('v',this)"
-    {vchecked}> show how it was answered</label>
-  <label>audience:
-    <select onchange="setAudience(this.value)">
-      {audience_options}
-    </select>
-  </label>
-  <span>asserted here, authenticated in production</span>
+<div class="chat-container">
+  <header>
+    <h1>Lime Green technical assistant</h1>
+    <div class="header-controls">
+      <div class="audience-badge" id="audience-display">{audience_display}</div>
+      <button class="new-chat-btn" onclick="newChat()">New chat</button>
+    </div>
+  </header>
+
+  <div class="chat-messages" id="chat-messages">
+    {initial_content}
+  </div>
+
+  <div class="input-area">
+    <div style="width:100%;">
+      <div class="input-extras">
+        <div class="input-info">
+          <span>🔒 Lime Green sources only</span>
+          <ul class="upload-notes" id="upload-notes"></ul>
+        </div>
+      </div>
+      <div class="input-wrapper">
+        <input type="text" class="input-field" id="question-input"
+               placeholder="Ask a question…" autocomplete="off">
+        <button class="attach-btn" title="Upload image" onclick="triggerFileInput()">+</button>
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">→</button>
+        <input type="file" id="file-input" name="image" accept="image/*" multiple>
+      </div>
+    </div>
+  </div>
 </div>
 
-{body}
-</div>
+<footer>
+  <div>Responses are grounded in Lime Green published material</div>
+  <div class="audience-display" id="footer-audience">{footer_audience}</div>
+</footer>
+
 <script>
-function param(k,v){{const u=new URL(location);v?u.searchParams.set(k,v):u.searchParams.delete(k);location=u;}}
-function toggle(k,el){{param(k, el.checked?'1':'');}}
-function setAudience(v){{param('a',v);}}
-// The form is a plain GET, so the browser shows nothing at all until the
-// server answers — and on this hardware that is tens of seconds. Silence for
-// that long is indistinguishable from a broken button, which is exactly how it
-// was first reported. The counter is the point: it says the wait is real work
-// rather than a hang, and it degrades to an ordinary form if scripting is off.
-function working(){{
-  var box = document.getElementById('working');
-  var out = document.getElementById('elapsed');
-  var btn = document.getElementById('ask');
-  if (!box) return;
-  box.hidden = false;
-  if (btn) {{ btn.disabled = true; btn.textContent = 'Asking…'; }}
-  var t0 = Date.now();
-  setInterval(function(){{
-    out.textContent = Math.round((Date.now() - t0) / 1000) + 's';
-  }}, 1000);
+let conversationActive = false;
+
+function newChat() {{
+  document.cookie = 'tka_session=; Path=/; HttpOnly; SameSite=Lax; expires=Thu, 01 Jan 1970 00:00:00 UTC;';
+  location.reload();
 }}
+
+function triggerFileInput() {{
+  document.getElementById('file-input').click();
+}}
+
+function sendMessage() {{
+  const input = document.getElementById('question-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  const files = document.getElementById('file-input').files;
+  const hasImages = files.length > 0;
+
+  // Add user message to chat
+  addMessage('user', question);
+  input.value = '';
+  input.focus();
+  document.getElementById('file-input').value = '';
+
+  // Send to server
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+
+  if (hasImages) {{
+    // Use FormData for image upload
+    const formData = new FormData();
+    formData.append('q', question);
+    for (let file of files) {{
+      formData.append('image', file);
+    }}
+
+    fetch('/', {{
+      method: 'POST',
+      body: formData
+    }})
+    .then(r => r.json())
+    .then(data => handleResponse(data))
+    .catch(err => addMessage('assistant', 'Error: ' + err.message))
+    .finally(() => btn.disabled = false);
+  }} else {{
+    // Use GET for text-only
+    const q = encodeURIComponent(question);
+    fetch('/?q=' + q, {{
+      headers: {{ 'Accept': 'application/json' }}
+    }})
+    .then(r => r.json())
+    .then(data => handleResponse(data))
+    .catch(err => addMessage('assistant', 'Error: ' + err.message))
+    .finally(() => btn.disabled = false);
+  }}
+}}
+
+function addMessage(role, text) {{
+  const container = document.getElementById('chat-messages');
+  if (container.querySelector('.landing')) {{
+    container.innerHTML = '';
+    conversationActive = true;
+  }}
+  const msgEl = document.createElement('div');
+  msgEl.className = 'message ' + role;
+  msgEl.innerHTML = '<div class="message-bubble">' + escapeHtml(text) + '</div>';
+  container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function handleResponse(data) {{
+  if (!data.parts || data.parts.length === 0) {{
+    addMessage('assistant', 'No response received.');
+    return;
+  }}
+
+  const part = data.parts[0];
+  const answer = part;
+
+  if (answer.refused) {{
+    renderRefusal(answer, data.upload_notes);
+  }} else {{
+    renderAnswer(answer, data.upload_notes);
+  }}
+}}
+
+function renderAnswer(answer, uploadNotes) {{
+  const text = answer.text || answer.body || 'No response';
+  const container = document.getElementById('chat-messages');
+
+  const msgEl = document.createElement('div');
+  msgEl.className = 'message assistant';
+
+  // Add upload notes if any
+  if (uploadNotes && uploadNotes.length > 0) {{
+    uploadNotes.forEach(note => {{
+      const noteEl = document.createElement('div');
+      noteEl.className = 'message assistant';
+      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      container.appendChild(noteEl);
+    }});
+  }}
+
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+
+  // Render text with citations
+  const textHtml = renderTextWithCitations(text);
+  const p = document.createElement('p');
+  p.className = 'answer-text';
+  p.innerHTML = textHtml;
+  bubble.appendChild(p);
+
+  // Add path tag
+  const tag = document.createElement('span');
+  tag.className = 'tag' + (answer.refused ? ' refused' : '');
+  tag.textContent = answer.path;
+  p.appendChild(tag);
+
+  // Add sources disclosure
+  if (answer.sources && answer.sources.length > 0) {{
+    const sourcesDiv = document.createElement('div');
+    sourcesDiv.className = 'sources-disclosure';
+    const btn = document.createElement('button');
+    btn.className = 'disclosure-btn';
+    btn.textContent = 'Sources';
+    btn.onclick = (e) => {{ e.preventDefault(); toggleSources(btn, sourcesList); }};
+    sourcesDiv.appendChild(btn);
+
+    const sourcesList = document.createElement('div');
+    sourcesList.className = 'source-list';
+    answer.sources.forEach(src => {{
+      const item = document.createElement('div');
+      item.className = 'source-item';
+      item.innerHTML = '<div class="source-name">' + escapeHtml(src.name) +
+        (src.section ? ' -- ' + escapeHtml(src.section) : '') +
+        (src.date ? ' (' + escapeHtml(src.date) + ')' : '') + '</div>' +
+        '<a href="' + escapeHtml(src.url) + '" class="source-link" target="_blank" rel="noreferrer">' +
+        escapeHtml(src.url) + '</a>';
+      sourcesList.appendChild(item);
+    }});
+    sourcesDiv.appendChild(sourcesList);
+    bubble.appendChild(sourcesDiv);
+  }}
+
+  // Add diagnostics disclosure
+  if (answer.diagnostics && Object.keys(answer.diagnostics).length > 0) {{
+    const diagDiv = document.createElement('div');
+    diagDiv.className = 'diagnostics-disclosure';
+    const btn = document.createElement('button');
+    btn.className = 'disclosure-btn';
+    btn.textContent = 'Why this answer?';
+    const diagList = renderDiagnostics(answer.diagnostics, answer.failed_checks);
+    btn.onclick = (e) => {{ e.preventDefault(); toggleDiagnostics(btn, diagList); }};
+    diagDiv.appendChild(btn);
+    diagDiv.appendChild(diagList);
+    bubble.appendChild(diagDiv);
+  }}
+
+  msgEl.appendChild(bubble);
+  container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function renderRefusal(answer, uploadNotes) {{
+  const text = answer.body || answer.text || 'No response';
+  const container = document.getElementById('chat-messages');
+
+  // Add upload notes if any
+  if (uploadNotes && uploadNotes.length > 0) {{
+    uploadNotes.forEach(note => {{
+      const noteEl = document.createElement('div');
+      noteEl.className = 'message assistant';
+      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      container.appendChild(noteEl);
+    }});
+  }}
+
+  const msgEl = document.createElement('div');
+  msgEl.className = 'message assistant';
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+
+  const textHtml = renderTextWithCitations(text);
+  const p = document.createElement('p');
+  p.className = 'answer-text';
+  p.innerHTML = textHtml;
+  bubble.appendChild(p);
+
+  const tag = document.createElement('span');
+  tag.className = 'tag refused';
+  tag.textContent = answer.path;
+  p.appendChild(tag);
+
+  msgEl.appendChild(bubble);
+  container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function renderDiagnostics(diag, failedChecks) {{
+  const div = document.createElement('div');
+  div.className = 'diagnostics-list';
+
+  function addLine(key, value) {{
+    const line = document.createElement('div');
+    line.className = 'diag-line';
+    line.innerHTML = '<span class="diag-key">' + escapeHtml(key) + '</span> ' +
+                     escapeHtml(String(value));
+    div.appendChild(line);
+  }}
+
+  if (diag.path) addLine('route', diag.path);
+  if (diag.step) addLine('step', diag.step);
+  if (diag.reason) addLine('why', diag.reason);
+  if (diag.refusal_reason) addLine('why', diag.refusal_reason);
+  if (diag.top_score !== undefined) addLine('top score', diag.top_score.toFixed(3));
+  if (diag.evidence_count !== undefined) addLine('evidence', diag.evidence_count);
+  if (diag.generation_seconds !== undefined) addLine('generated', diag.generation_seconds + 's');
+  if (failedChecks && failedChecks.length > 0) {{
+    addLine('checks failed', failedChecks.join(', '));
+  }}
+
+  return div;
+}}
+
+function renderTextWithCitations(text) {{
+  return escapeHtml(text).replace(/\\[(\\d+)\\]/g, '<span class="citation">[$1]</span>');
+}}
+
+function toggleSources(btn, list) {{
+  btn.classList.toggle('open');
+  list.classList.toggle('open');
+}}
+
+function toggleDiagnostics(btn, list) {{
+  btn.classList.toggle('open');
+  list.classList.toggle('open');
+}}
+
+function escapeHtml(text) {{
+  const map = {{
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }};
+  return text.replace(/[&<>"']/g, m => map[m]);
+}}
+
+// Enter key to send
+document.getElementById('question-input').addEventListener('keydown', (e) => {{
+  if (e.key === 'Enter' && !e.shiftKey) {{
+    e.preventDefault();
+    sendMessage();
+  }}
+}});
 </script>
 """
 
@@ -297,79 +651,97 @@ def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
 
-def render_history(turns: list[tuple[str, str]]) -> str:
-    """The conversation so far, so a follow-up reads as one.
-
-    Without it the page answers "brick" with a wall of text and no sign of the
-    question it belongs to, which is the single-turn experience decision 10
-    complains about wearing a session cookie.
-    """
-    if not turns:
-        return ""
-    rows = "".join(f"<li><b>{_esc(q)}</b><br>{_esc(a)}</li>" for q, a in turns)
-    return (f"<div class='card'><div class='part'>Earlier in this conversation"
-            f"</div><ol class='hist'>{rows}</ol></div>")
+def render_landing() -> str:
+    """The landing page shown on first load with no messages yet."""
+    return (
+        '<div class="landing">'
+        '<h2>How can I help?</h2>'
+        '<p>Ask about Lime Green products, installation, compatibility, or anything '
+        'else published in their technical material.</p>'
+        '</div>'
+    )
 
 
 def render_html(reply, verbose: bool) -> str:
+    """Render an answer as a chat message with collapsible sources and diagnostics.
+
+    Unlike the old render_html, this outputs HTML/JS suitable for the chat
+    interface with collapsible sections for sources and diagnostics.
+    """
+    if not reply.parts:
+        return ""
+
+    # For now, render only the first part (single-turn response)
+    part, answer = reply.parts[0]
+
     blocks = []
-    multi = len(reply.parts) > 1
-    for i, (part, answer) in enumerate(reply.parts, 1):
-        head = (f'<div class="part">Part {i} — {_esc(part)}</div>' if multi else "")
-        tag = ('<span class="tag refused">refused</span>' if answer.refused
-               else f'<span class="tag">{_esc(answer.path)}</span>')
-        # `body`, not `text`: on a refusal the raw passage is the tail of the
-        # text, and leading a public visitor with 600 characters of datasheet is
-        # the complaint this disclosure answers. It is shown in full below,
-        # folded, so nothing the refusal carries is lost — only demoted.
-        out = [f'<div class="card">{head}',
-               f'<div class="answer">{_esc(answer.body)}</div>{tag}']
 
-        if answer.disclosure:
-            # Open on the diagnostics view, where the reader is auditing rather
-            # than asking, and closed for the visitor who only wanted a sentence.
-            out.append(f"<details class='passage'{' open' if verbose else ''}>"
-                       f"<summary>Show source passage</summary>"
-                       f"<div class='quote'>{_esc(answer.disclosure)}</div></details>")
+    # Message container
+    blocks.append('<div class="message assistant">')
+    blocks.append('<div class="message-bubble">')
 
-        # Assumed means assumed. A value the caller supplied is reported inside
-        # the answer text by `AnswerEngine._finish` as something they said, and
-        # deliberately not repeated here under a heading that would call it a
-        # guess — that mislabelling is the defect this block used to carry.
-        if answer.assumptions:
-            out.append("<h3>Assumed</h3><div class='empty'>"
-                       + _esc("; ".join(answer.assumptions)) + "</div>")
+    # Answer text with citations rendered as spans
+    text = answer.body if answer.body else answer.text
+    # Escape HTML, then restore citation markers with spans
+    text_html = _esc(text)
+    # Replace [n] citations with citation spans (simple loop since we expect few)
+    import re
+    text_html = re.sub(r"\[(\d+)\]", r'<span class="citation">[\1]</span>', text_html)
+    blocks.append(f'<p class="answer-text">{text_html}')
 
-        if answer.caveats:
-            items = "".join(f"<li>{_esc(c)}</li>" for c in answer.caveats)
-            out.append(f"<h3>Also published about these products</h3>"
-                       f"<ul class='caveats'>{items}</ul>")
+    # Add path tag
+    tag_class = 'tag refused' if answer.refused else 'tag'
+    blocks.append(f'<span class="{tag_class}">{_esc(answer.path)}</span></p>')
 
-        if answer.sources:
-            rows = "".join(
-                f"<li>{_esc(s['name'])}"
-                + (f" — {_esc(s['section'])}" if s["section"] else "")
-                + (f" ({_esc(s['date'])})" if s["date"] else "")
-                + f"<br><a href='{_esc(s['url'])}' rel='noreferrer'>{_esc(s['url'])}</a></li>"
-                for s in answer.sources)
-            out.append(f"<h3>Sources</h3><ol class='src'>{rows}</ol>")
+    # Sources disclosure section
+    if answer.sources:
+        blocks.append('<div class="sources-disclosure">')
+        blocks.append('<button class="disclosure-btn" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\');">Sources</button>')
+        blocks.append('<div class="source-list">')
+        for src in answer.sources:
+            blocks.append('<div class="source-item">')
+            blocks.append(f'<div class="source-name">{_esc(src["name"])}')
+            if src.get("section"):
+                blocks.append(f' -- {_esc(src["section"])}')
+            if src.get("date"):
+                blocks.append(f' <span class="source-date">({_esc(src["date"])})</span>')
+            blocks.append('</div>')
+            blocks.append(f'<a href="{_esc(src["url"])}" class="source-link" target="_blank" rel="noreferrer">{_esc(src["url"])}</a>')
+            blocks.append('</div>')
+        blocks.append('</div>')
+        blocks.append('</div>')
 
-        if verbose:
-            d = answer.diagnostics
-            lines = [f"path      {answer.path}",
-                     f"step      {d.get('step', '-')}",
-                     f"why       {d.get('reason', d.get('refusal_reason', '-'))}",
-                     f"top score {d.get('top_score', 0)}",
-                     f"slots     {d.get('slots', {})}"]
-            if d.get("generation_seconds"):
-                lines.append(f"generated {d['generation_seconds']}s")
-            if answer.failed_checks:
-                lines.append("checks that failed:")
-                lines += [f"  - {c}" for c in answer.failed_checks]
-            out.append(f"<div class='diag'>{_esc(chr(10).join(lines))}</div>")
+    # Diagnostics disclosure section
+    if answer.diagnostics or answer.failed_checks:
+        blocks.append('<div class="diagnostics-disclosure">')
+        blocks.append('<button class="disclosure-btn" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\');">Why this answer?</button>')
+        blocks.append('<div class="diagnostics-list">')
 
-        out.append("</div>")
-        blocks.append("".join(out))
+        d = answer.diagnostics
+        if d.get('path'):
+            blocks.append(f'<div class="diag-line"><span class="diag-key">route</span> {_esc(d["path"])}</div>')
+        if d.get('step'):
+            blocks.append(f'<div class="diag-line"><span class="diag-key">step</span> {_esc(str(d["step"]))}</div>')
+        if d.get('reason'):
+            blocks.append(f'<div class="diag-line"><span class="diag-key">why</span> {_esc(d["reason"])}</div>')
+        elif d.get('refusal_reason'):
+            blocks.append(f'<div class="diag-line"><span class="diag-key">why</span> {_esc(d["refusal_reason"])}</div>')
+        if d.get('top_score') is not None:
+            blocks.append(f'<div class="diag-line"><span class="diag-key">top score</span> {d["top_score"]:.3f}</div>')
+        if d.get('evidence_count') is not None:
+            blocks.append(f'<div class="diag-line"><span class="diag-key">evidence</span> {d["evidence_count"]}</div>')
+        if d.get('generation_seconds'):
+            blocks.append(f'<div class="diag-line"><span class="diag-key">generated</span> {d["generation_seconds"]}s</div>')
+        if answer.failed_checks:
+            checks_str = ", ".join(answer.failed_checks)
+            blocks.append(f'<div class="diag-line"><span class="diag-key">checks</span> {_esc(checks_str)}</div>')
+
+        blocks.append('</div>')
+        blocks.append('</div>')
+
+    blocks.append('</div>')
+    blocks.append('</div>')
+
     return "".join(blocks)
 
 
@@ -383,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
     # assistant/session.py for what is carried and what is deliberately not.
     sessions: SessionStore = SessionStore()
     # How many photographs each session has sent. Separate from the session
-    # store on purpose — see UploadBudget.
+    # store on purpose -- see UploadBudget.
     uploads: UploadBudget = UploadBudget()
     correlation_id: str
     session_id: str
@@ -417,8 +789,8 @@ class Handler(BaseHTTPRequestHandler):
         # One line, delegating immediately. The renderer lives in
         # assistant/metrics.py rather than here because a later slice rewrites
         # this page wholesale and a Prometheus exposition format entangled with
-        # the HTML would be rewritten with it. Nothing about the endpoint —
-        # its window, its labels, its privacy posture — is decided in this file.
+        # the HTML would be rewritten with it. Nothing about the endpoint --
+        # its window, its labels, its privacy posture -- is decided in this file.
         if url.path == "/metrics":
             self._send_plain(metrics.render(self.assistant.repo).encode("utf-8"),
                              metrics.CONTENT_TYPE)
@@ -445,7 +817,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path not in ("/", "/ask"):
             # Drained first. A request whose body is never read is answered on a
             # connection the client is still writing into, and what the client
-            # then sees is a reset rather than the 404 — the status code is
+            # then sees is a reset rather than the 404 -- the status code is
             # correct and unreadable, which is the worst of both. It showed up
             # as an intermittently failing test rather than as a bug report,
             # which is exactly what a race looks like from the outside.
@@ -470,7 +842,7 @@ class Handler(BaseHTTPRequestHandler):
 
         Returns whether it managed to. It refuses to drain a body larger than
         the cap, because reading twelve megabytes in order to say "that is too
-        large" would be doing the work the cap exists to avoid — that case
+        large" would be doing the work the cap exists to avoid -- that case
         closes the connection instead, which is the one honest way to stop a
         client mid-upload. A body with no declared length cannot be drained at
         all, for the same reason it cannot be accepted.
@@ -492,8 +864,8 @@ class Handler(BaseHTTPRequestHandler):
 
         Returns `(fields, images, notes)`, or `(None, [], [])` when the request
         has already been answered with a status code. `notes` are the things the
-        caller should be told about their own upload — a file that is not an
-        image, a count over the cap — because silently dropping an attachment
+        caller should be told about their own upload -- a file that is not an
+        image, a count over the cap -- because silently dropping an attachment
         and answering as though none was sent is the kind of quiet failure this
         codebase refuses everywhere else.
 
@@ -591,13 +963,12 @@ class Handler(BaseHTTPRequestHandler):
         if not session_open:
             self.session_id = self._session()
         carried = self.sessions.carried(self.session_id)
-        earlier = self.sessions.turns(self.session_id)
         pending = self.sessions.pending(self.session_id)
         asked = question
         if pending and question:
             # The previous turn ended in an ask-back, so this one may be the
             # answer to it rather than a new question. Detection is the router's
-            # own vocabulary — not a second copy of it here — and only the slot
+            # own vocabulary -- not a second copy of it here -- and only the slot
             # step 5 actually asked for counts: "brick" resumes the pending
             # question, "and what colour is it" does not.
             stated = self.assistant.router.slots.detect(question)
@@ -630,8 +1001,9 @@ class Handler(BaseHTTPRequestHandler):
                 "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
-                     "text": a.text, "sources": a.sources, "caveats": a.caveats,
-                     "diagnostics": a.diagnostics, "failed_checks": a.failed_checks,
+                     "text": a.text, "body": a.body, "sources": a.sources,
+                     "caveats": a.caveats, "diagnostics": a.diagnostics,
+                     "failed_checks": a.failed_checks,
                      # Structured rather than prose, so a channel adapter can
                      # render provenance its own way instead of parsing ours.
                      "facts": [{"slot": f.slot, "value": f.value,
@@ -650,33 +1022,26 @@ class Handler(BaseHTTPRequestHandler):
             self._send(body, "application/json; charset=utf-8")
             return
 
+        # HTML response for GET / (chat interface)
+        audience_display = audiences[0] if audiences else "public"
         if question:
             try:
                 reply = self.assistant.ask(asked, audiences=audiences,
                                            correlation_id=self.correlation_id,
                                            carried=carried, images=images)
                 self._remember(question, reply)
-                body_html = render_html(reply, verbose)
+                initial_content = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
-                body_html = (f"<div class='card'><div class='answer'>"
-                             f"{_esc(str(exc))}</div></div>")
+                initial_content = (f"<div class='message assistant'>"
+                                   f"<div class='message-bubble'>Error: {_esc(str(exc))}"
+                                   f"</div></div>")
         else:
-            body_html = ("<div class='card'><div class='empty'>Ask a question above. "
-                         "Try “how much water does Solo need per bag”, or something "
-                         "the site does not publish — it will say so rather than "
-                         "guess.</div></div>")
+            initial_content = render_landing()
 
-        options = "".join(
-            f"<option value='{a}'{' selected' if a == audience else ''}>{a}</option>"
-            for a in ("public", "trade", "staff"))
-        if notes:
-            body_html = ("<div class='card'><div class='empty'>"
-                         + "".join(_esc(n) + "<br>" for n in notes)
-                         + "</div></div>") + body_html
-        page = PAGE.format(meta=self.meta, q=_esc(question),
-                           body=render_history(earlier) + body_html,
-                           vchecked="checked" if verbose else "",
-                           audience_options=options)
+        page = PAGE.format(
+            initial_content=initial_content,
+            audience_display=audience_display,
+            footer_audience=f"audience: {audience_display}")
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
     def _remember(self, question: str, reply) -> None:
@@ -691,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
         **A slot read off a photograph is dropped here, and that is the rule the
         whole vision seam rests on.** `diagnostics["slots"]` is the router's
         merged view, so once an upload can fill a slot it carries values nobody
-        said — and folding those into the session would persist a model's
+        said -- and folding those into the session would persist a model's
         uncalibrated reading of an image as though the caller had stated it, on
         every later turn, invisibly, after the image has scrolled out of the
         page. The provenance recorded on the answer is what distinguishes them,
@@ -727,7 +1092,7 @@ class Handler(BaseHTTPRequestHandler):
         `/metrics`: a scrape arriving every fifteen seconds would open a fresh
         `SessionStore` entry each time, so an unauthenticated endpoint would
         drive eviction of the conversations of people actually using the page.
-        A scraper has no conversation. It gets the document and nothing else —
+        A scraper has no conversation. It gets the document and nothing else --
         no cookie, no correlation id, no state created by having asked.
         """
         self.send_response(200)
@@ -799,7 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     # The port actually bound, not the one that was asked for. They differ when
     # the port is left to the operating system, and the address is both printed
-    # and opened in a browser — so reporting the request rather than the bind
+    # and opened in a browser -- so reporting the request rather than the bind
     # advertises an address nothing is listening on.
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
     address = f"http://{shown}:{server.server_address[1]}/"
