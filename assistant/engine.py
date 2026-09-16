@@ -121,6 +121,20 @@ class Assistant:
         # definition of what a term means.
         self.engine.retriever = self.router
 
+    def detect_answer_to_askback_slots(self, question: str) -> dict[str, str]:
+        """Extract slots if question looks like an answer to an ask-back.
+
+        Returns a dict of newly-detected slots (substrate, location, exposure)
+        if the question is short and contains load-bearing slot terms.
+        Otherwise returns empty dict.
+
+        Used by the UI to detect when a user is answering a missing-fact
+        ask-back so we can re-ask the pending question with merged slots.
+        """
+        if not self.router.slots.is_answer_to_askback(question):
+            return {}
+        return self.router.slots.detect(question)
+
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
             correlation_id: str = "", carried: dict | None = None,
             images=None, session_id: str = "", turn_id: str = "") -> Reply:

@@ -970,20 +970,29 @@ class Handler(BaseHTTPRequestHandler):
         carried = self.sessions.carried(self.session_id)
         pending = self.sessions.pending(self.session_id)
         asked = question
+        auto_answered = None  # If set, we auto-answered a pending question
         if pending and question:
             # The previous turn ended in an ask-back, so this one may be the
-            # answer to it rather than a new question. Detection is the router's
-            # own vocabulary -- not a second copy of it here -- and only the slot
-            # step 5 actually asked for counts: "brick" resumes the pending
-            # question, "and what colour is it" does not.
-            stated = self.assistant.router.slots.detect(question)
-            if "substrate" in stated:
-                carried = {**carried, **stated}
+            # answer to it rather than a new question. A short input with
+            # load-bearing slot terms (substrate, location, exposure) is likely
+            # answering "What is the substrate?" rather than asking a new one.
+            stated = self.assistant.detect_answer_to_askback_slots(question)
+            if stated:
+                # Merge new slots with carried, answer the pending question
+                merged = {**carried, **stated}
+                auto_answered = self.assistant.ask(pending, audiences=audiences,
+                                                   correlation_id=self.correlation_id,
+                                                   carried=merged, images=[])
+                # Update carried slots for next question (if there is one)
+                carried = merged
                 asked = pending
 
         if path == "/ask":
             try:
-                reply = (self.assistant.ask(asked, audiences=audiences,
+                # If we auto-answered a pending question, use that reply.
+                # Otherwise, ask the current question.
+                reply = (auto_answered if auto_answered else
+                         self.assistant.ask(asked, audiences=audiences,
                                             correlation_id=self.correlation_id,
                                             carried=carried, images=images)
                          if question else None)
@@ -996,7 +1005,7 @@ class Handler(BaseHTTPRequestHandler):
                                       ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8", status=503)
                 return
-            self._remember(question, reply)
+            self._remember(question, reply, auto_answered=bool(auto_answered))
             payload = {
                 "question": question,
                 "answered": asked,
@@ -1031,10 +1040,13 @@ class Handler(BaseHTTPRequestHandler):
         audience_display = audiences[0] if audiences else "public"
         if question:
             try:
-                reply = self.assistant.ask(asked, audiences=audiences,
-                                           correlation_id=self.correlation_id,
-                                           carried=carried, images=images)
-                self._remember(question, reply)
+                # If we auto-answered a pending question, use that reply.
+                # Otherwise, ask the current question.
+                reply = (auto_answered if auto_answered else
+                         self.assistant.ask(asked, audiences=audiences,
+                                            correlation_id=self.correlation_id,
+                                            carried=carried, images=images))
+                self._remember(question, reply, auto_answered=bool(auto_answered))
                 initial_content = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 initial_content = (f"<div class='message assistant'>"
@@ -1049,7 +1061,7 @@ class Handler(BaseHTTPRequestHandler):
             footer_audience=f"audience: {audience_display}")
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _remember(self, question: str, reply) -> None:
+    def _remember(self, question: str, reply, auto_answered: bool = False) -> None:
         """Fold what this turn established back into the session.
 
         The slots taken are the ones the router actually detected, read off the
@@ -1057,6 +1069,11 @@ class Handler(BaseHTTPRequestHandler):
         disagree about what was assumed. `pending` is set only by an ask-back
         and cleared by anything else, so a question that was answered never
         resumes later.
+
+        When `auto_answered` is True, we've just answered a pending question
+        with merged slots (carried + newly detected from the ask-back answer).
+        In that case, the slots are taken from carried (since they were used
+        to answer the pending question), and pending is cleared.
 
         **A slot read off a photograph is dropped here, and that is the rule the
         whole vision seam rests on.** `diagnostics["slots"]` is the router's
@@ -1076,16 +1093,26 @@ class Handler(BaseHTTPRequestHandler):
         """
         if reply is None:
             return
-        slots: dict = {}
-        pending = ""
-        for _part, answer in reply.parts:
-            observed = {fact.slot for fact in answer.facts
-                        if fact.provenance is Provenance.OBSERVED}
-            slots.update({name: value
-                          for name, value in answer.diagnostics.get("slots", {}).items()
-                          if name not in observed})
-            if answer.path == Path_.ASK_BACK.value:
-                pending = reply.question
+
+        if auto_answered:
+            # We just auto-answered a pending question with merged slots.
+            # Slots should be the carried slots (what we used to answer).
+            # Pending should be cleared (we answered it).
+            slots = self.sessions.carried(self.session_id)
+            pending = ""
+        else:
+            # Normal case: extract slots from the answer, detect ask-backs.
+            slots: dict = {}
+            pending = ""
+            for _part, answer in reply.parts:
+                observed = {fact.slot for fact in answer.facts
+                            if fact.provenance is Provenance.OBSERVED}
+                slots.update({name: value
+                              for name, value in answer.diagnostics.get("slots", {}).items()
+                              if name not in observed})
+                if answer.path == Path_.ASK_BACK.value:
+                    pending = reply.question
+
         summary = "\n\n".join(answer.text for _part, answer in reply.parts)
         self.sessions.remember(self.session_id, question, summary, slots, pending)
 
