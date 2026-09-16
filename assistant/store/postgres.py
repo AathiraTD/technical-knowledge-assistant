@@ -562,7 +562,7 @@ class PostgresKnowledgeRepository:
 
         No vector is involved, so `score` is 0.0 and is not a similarity.
         """
-        if not product or not terms:
+        if not terms:
             return []
         conditions = " OR ".join(
             f"(POSITION(%(t{i})s IN LOWER(c.content)) > 0"
@@ -581,9 +581,13 @@ class PostgresKnowledgeRepository:
         JOIN documents d         ON d.id = v.document_id
         WHERE v.is_active
           AND c.audience = ANY(%(audiences)s)
-          AND COALESCE(c.product, '') <> ''
-          AND (POSITION(LOWER(COALESCE(c.product, '')) IN LOWER(%(product)s)) > 0
-            OR POSITION(LOWER(%(product)s) IN LOWER(COALESCE(c.product, ''))) > 0)
+          -- An empty product means the caller named none and the lookup is on
+          -- the terms alone; the same containment-either-way rule as the
+          -- embedded adapter, which the contract suite holds both to.
+          AND (%(product)s = ''
+            OR (COALESCE(c.product, '') <> ''
+              AND (POSITION(LOWER(COALESCE(c.product, '')) IN LOWER(%(product)s)) > 0
+                OR POSITION(LOWER(%(product)s) IN LOWER(COALESCE(c.product, ''))) > 0)))
           AND ({conditions})
         ORDER BY d.authority ASC, c.source_date DESC NULLS LAST,
                  d.canonical_url, c.chunk_index

@@ -601,10 +601,30 @@ def test_a_targeted_lookup_caps_what_it_returns(repo):
 
 
 def test_a_targeted_lookup_with_nothing_to_go_on_returns_nothing(repo):
+    """No terms, or terms nothing carries, finds nothing. An empty product does
+    not mean nothing — it means every product."""
     publish_a_coverage_sheet(repo)
-    assert repo.find_passages("", ("coverage",)) == []
     assert repo.find_passages("Ultra", ()) == []
     assert repo.find_passages("Ultra", ("pot life",)) == []
+    assert repo.find_passages("", ()) == []
+
+
+def test_a_targeted_lookup_without_a_product_searches_the_whole_corpus(repo):
+    """Empty product means unscoped, not empty.
+
+    A question can name a defect without naming a product — "my render is
+    showing patchy colour" — and the evidence for it is a knowledge-base
+    article, which carries no product tag for a scope to match. Requiring a
+    product made the lookup useless for exactly the questions that need it
+    most, because those are the ones semantic retrieval also handles worst.
+    """
+    publish_a_coverage_sheet(repo)
+    unscoped = repo.find_passages("", ("coverage",))
+    assert unscoped, "an unscoped lookup found nothing"
+    assert all("coverage" in f"{h.chunk.section} {h.chunk.content}".lower()
+               for h in unscoped)
+    # And it is still a lookup, not a scan: a term nothing carries finds nothing.
+    assert repo.find_passages("", ("pot life",)) == []
 
 
 def test_retrieve_on_an_empty_index(repo):
@@ -967,3 +987,4 @@ def test_logging_an_answer_is_not_rolled_back_with_the_snapshot_it_describes(rep
     logged = repo.answer_log()
     assert [e.question for e in logged] == ["Logged from inside the snapshot."]
     assert logged[0].chunk_ids == [cited]
+
