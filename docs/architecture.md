@@ -42,7 +42,7 @@ C4Container
         Container_Boundary(data, "Retrieval data") {
             ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks, embeddings, caveats, excluded documents, crawl runs, index snapshots. Exactly one active version per document, enforced by the database")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
-            ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
+            ContainerDb(answercache, "Answer cache", "Built — exact-key, in process", "Finished answers keyed on the normalised question, audience set, snapshot id, generation model, and chunking version; the template-keyed form is roadmap")
         }
 
         Container_Boundary(answering, "Question-answering path") {
@@ -109,7 +109,7 @@ C4Container
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
     UpdateElementStyle(vision, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
-    UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(answercache, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
     UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
@@ -170,7 +170,7 @@ flowchart TD
     REFUSE["Refuse"]
     MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
     CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
-    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff audience, on refusal: nearest candidates, scores, passage text · public and trade: hand-off only"]
+    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest<br/>(a richer staff-only refusal view — nearest candidates with scores and passage text — is roadmap, not built)"]
     OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
     IN --> SPLIT --> POLICY
@@ -296,11 +296,11 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Indexing queue** | Built | Durable local SQLite jobs, idempotent enqueue, backoff, expiring leases and dead-letter evidence; one ingestion host |
 | **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics, and both implement the same delta contract: `apply_delta`, `active_content_hashes`, `versions` and `crawl_runs` |
 | **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
-| **Answer cache** | Roadmap | Composite parts keyed on template, slots, audience set and index version; expires with each snapshot swap |
+| **Answer cache** | Built, exact-key | Finished answers keyed on the normalised question, the audience set, the snapshot id, the generation model and the chunking version. Refusals cached too. The template-keyed form decision 14 designs is roadmap; this is the weaker exact-match form, identical on safety and poorer on hit rate |
 | **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
 | **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
 | **Web UI** | Built | A thin standard-library HTTP page over the same library, for the demonstration |
-| **Evaluation harness** | Built | Seven transcript situations, probe suite, threshold sweep, pass/fail, self-describing header, one synthetic staff-tagged fixture that must be invisible in public mode |
+| **Evaluation harness** | Built | Nine transcript situations — including the two multi-source ones decision 7.3 scores grounded reasoning on — plus the probe suite, threshold sweep, pass/fail, self-describing header, and one synthetic staff-tagged fixture that must be invisible in public mode |
 | **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
 | **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
 | **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |

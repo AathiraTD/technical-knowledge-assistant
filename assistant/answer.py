@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import observability as obs
 from . import ollama
 from .model import Retrieved
 from .router import Decision, Path_
@@ -196,8 +197,22 @@ def run_checks(
             cited_index[m].document.product.lower()
             for m in marks if m in cited_index and cited_index[m].document.product
         }
+        # A passage may legitimately name another product. The Forte datasheet's
+        # Finishing Coats section says which finish coats go over Forte and how
+        # long to wait, naming Tradirend and Natural Finish outright — so a
+        # sentence about Tradirend citing the Forte sheet is correctly
+        # attributed, because the Forte sheet is what published it.
+        #
+        # Without this the check refused exactly the multi-document
+        # compatibility answers the brief asks for, which is a false refusal and
+        # the most expensive kind of mistake this system can make: the material
+        # said it, the citation was right, and the answer still did not print.
+        cited_text = " ".join(
+            cited_index[m].chunk.content for m in marks if m in cited_index)
         named = {p for p in products_in_hits
-                 if p and p not in cited_products and _names_product(sentence, p)}
+                 if p and p not in cited_products
+                 and _names_product(sentence, p)
+                 and not _names_product(cited_text, p)}
         if named:
             failures.append(
                 f"check 3: a figure is stated against {sorted(named)[0]!r} but cited "
@@ -230,6 +245,17 @@ def run_checks(
         low = candidate.lower()
         if low in known or low in passage_blob:
             continue
+        # The manufacturer's own name in front of a published product is not an
+        # invented product. The site writes it both ways itself — "Lime Green
+        # Solo" and "Lime Green Duro" are harvested, plain "Natural Finish" is
+        # too — so which form ends up in the list is an accident of how each
+        # page was written. Refusing "Lime Green Natural Finish" cost a correct,
+        # fully cited, two-document answer on evaluation situation S9, which is
+        # over-refusal rather than a caught invention. Only the prefix is
+        # forgiven: "Lime Green Supercoat" still fails, because "Supercoat" is
+        # not published.
+        if _without_brand(low) in known or _without_brand(low) in passage_blob:
+            continue
         if _looks_like_a_name(candidate):
             failures.append(f"check 5: {candidate!r} is not a name the site publishes")
 
@@ -257,6 +283,17 @@ _COMMON = {
     "when", "where", "what", "if", "for", "use", "using", "apply", "mix",
     "water", "wall", "walls", "coat", "coats", "sources", "answer", "note",
 }
+
+
+# The manufacturer, as the site writes it. Not configuration: this is the one
+# brand whose corpus this is, and a second brand appearing here would be a
+# competitor, which the prompt forbids the model from mentioning at all.
+_BRAND = "lime green"
+
+
+def _without_brand(name: str) -> str:
+    """A published product with the maker's name in front is still that product."""
+    return name.removeprefix(_BRAND).strip() if name.startswith(_BRAND) else name
 
 
 def _looks_like_a_name(candidate: str) -> bool:
@@ -377,7 +414,16 @@ class AnswerEngine:
             assumptions=("\nStated assumptions: " + "; ".join(assumptions)
                          if assumptions else ""),
         )
-        text, seconds = ollama.generate(prompt, model=self.model, system=SYSTEM)
+        try:
+            text, seconds = ollama.generate(prompt, model=self.model,
+                                            system=SYSTEM)
+        except ollama.OllamaUnavailable as error:
+            obs.event("ollama_error", stage="generate", model=self.model,
+                      error=type(error).__name__, detail=str(error))
+            raise
+        obs.event("generation", model=self.model, seconds=round(seconds, 2),
+                  passages=len(hits), prompt_chars=len(prompt),
+                  answer_words=len(text.split()))
 
         asked = decision.slots.get("property_asked", "")
         terms = (self.retriever.slots.terms_for("property_asked", asked)
@@ -385,6 +431,10 @@ class AnswerEngine:
         failures = run_checks(text, hits, self.names, terms)
 
         if failures:
+            # The single most operationally important line in the system: it is
+            # how over-refusal is noticed, and which check is responsible.
+            obs.event("check_failed", checks=failures, model=self.model,
+                      passages=len(hits))
             answer = self.refuse(decision,
                                  "the generated answer did not pass its checks")
             answer.failed_checks = failures
@@ -480,6 +530,9 @@ class AnswerEngine:
                       diagnostics={"step": "manifest", "topic": "document_request"})
 
     def refuse(self, decision: Decision, why: str) -> Answer:
+        obs.event("refusal", why=why, step=decision.step,
+                  missing_term=decision.missing_term,
+                  top_score=decision.hits[0].score if decision.hits else 0.0)
         parts = []
         if decision.missing_term:
             parts.append(

@@ -327,6 +327,33 @@ def test_a_failed_check_becomes_a_refusal_rather_than_a_repair(monkeypatch):
     assert "0800 538 5746" in a.text
 
 
+def test_a_stopped_model_server_is_reported_and_not_disguised(monkeypatch, caplog):
+    """A missing model must fail loudly, not silently become a refusal.
+
+    The distinction matters operationally. A refusal says the corpus does not
+    answer the question and is a designed outcome; a stopped Ollama says the
+    deployment is broken. Collapsing the second into the first would hide an
+    outage behind an answer that looks deliberate, and the refusal rate would
+    stay flat while the system served nothing.
+    """
+    import pytest
+
+    def unavailable(*_a, **_k):
+        raise ollama.OllamaUnavailable("connection refused on 127.0.0.1:11434")
+
+    monkeypatch.setattr(ollama, "generate", unavailable)
+
+    with caplog.at_level("INFO", logger="assistant"):
+        with pytest.raises(ollama.OllamaUnavailable):
+            engine().compose(
+                decision(Path_.COMPOSE, [MIXING], step="8",
+                         slots={"property_asked": "water"}), "How much water?")
+
+    logged = [r for r in caplog.records if getattr(r, "event", "") == "ollama_error"]
+    assert logged, "an outage passed through without an event"
+    assert logged[0].fields["stage"] == "generate"
+
+
 # ------------------------------------------------- the remaining edge branches
 
 

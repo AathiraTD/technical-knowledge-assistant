@@ -30,7 +30,7 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Six checks | built and verified | 16 unit tests, one per failure they exist to catch — `tests/test_checks.py` |
 | Answer engine | built and verified | Seven paths, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
 | CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
-| Evaluation harness | built and verified | **7/7 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. Transcript in `eval/results/transcript.txt` |
+| Evaluation harness | built and verified | **9/9 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. The two multi-source situations cover the brief's second test type. Transcript in `eval/results/transcript.txt` |
 | Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
 | PostgreSQL adapter | built and verified | Real pgvector contract, ingestion lifecycle, concurrent reader and configuration migration tests |
 | Container deployment | partial | Image builds and runs ingestion as non-root against PostgreSQL with model doubles; Compose validates and initializes the index before the UI. Full live-model deployment is not claimed |
@@ -38,7 +38,8 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Vision | documented only | Refused by policy, not by capability — decision 16 |
 | Scheduled ingestion | built and verified | Conditional refresh, durable job deduplication, retries, crash recovery and dead-letter status; external scheduler supplies cadence |
 | Approved staff ingestion | built and verified | Reviewed JSON sources, shared chunking/caveats, version history and audience enforcement |
-| Answer cache, generation queue | documented only | Separate from the implemented ingestion queue |
+| Answer cache | built and verified | Exact-key, audience- and snapshot-scoped; a repeated question drops from 40.78 s to 0.017 s. The template-keyed form decision 14 designs is still roadmap |
+| Generation queue, rate limiting | documented only | Separate from the implemented ingestion queue. Concurrent serving is built and tested; queueing and degradation under load are not |
 | Test coverage | built and verified | 100% line and branch target includes crawler, extraction, indexing, jobs, model clients and both stores; [current measurements](docs/knowledge-pipeline-verification.md) |
 
 ## Read this first

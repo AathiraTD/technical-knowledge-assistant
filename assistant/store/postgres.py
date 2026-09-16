@@ -32,11 +32,13 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from ..repository import IndexMismatch
+from datetime import datetime, timezone
+from ..repository import IndexMismatch, PublicationBusy
 from pathlib import Path
 
 from ..model import (
     AUTHORITY,
+    AnswerLogEntry,
     Caveat,
     CrawlRun,
     Chunk,
@@ -50,9 +52,19 @@ from ..model import (
 
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.postgres.sql"
 
+# How long a publisher waits for the one that is already publishing. Long
+# enough that a genuinely slow large delta is not cut off, short enough that a
+# nightly job fails with a diagnosis instead of still hanging in the morning.
+PUBLISH_LOCK_TIMEOUT = 30
+
 TIE_BAND = 0.02
 _AUTHORITY_SPREAD = max(len(AUTHORITY), 1)
 AUTHORITY_BONUS = TIE_BAND / _AUTHORITY_SPREAD
+
+
+def _now() -> str:
+    """The house timestamp: UTC, to the second, as the rest of the pipeline writes it."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -241,7 +253,26 @@ class PostgresKnowledgeRepository:
         """
         try:
             with self.conn.cursor() as cur:
-                cur.execute("SELECT pg_advisory_xact_lock(8675309)")
+                # Bound the wait before taking the lock. `pg_advisory_xact_lock`
+                # blocks forever, so an indexer that died without its connection
+                # being reaped leaves every later run hanging with no output and
+                # nothing in the log to explain it — the failure mode that looks
+                # like "indexing is slow tonight" for a week. With a timeout the
+                # same situation raises 55P03 and says what is wrong.
+                cur.execute(f"SET LOCAL lock_timeout = '{PUBLISH_LOCK_TIMEOUT}s'")
+                try:
+                    cur.execute("SELECT pg_advisory_xact_lock(8675309)")
+                except Exception as error:
+                    # `psycopg` is imported lazily in __init__, so the error is
+                    # matched on sqlstate rather than on an imported class.
+                    if getattr(error, "sqlstate", None) != "55P03":
+                        raise
+                    raise PublicationBusy(
+                        f"Another indexer has been publishing for more than "
+                        f"{PUBLISH_LOCK_TIMEOUT}s and still holds the publication "
+                        f"lock. Nothing was changed. If no indexer is running, a "
+                        f"crashed one is still holding its connection open."
+                    ) from error
                 if "parent_snapshot" in snapshot.notes:
                     current = self.snapshot()
                     if snapshot.notes["parent_snapshot"] != (current.snapshot_id if current else None):
@@ -594,6 +625,61 @@ class PostgresKnowledgeRepository:
             is_active=bool(row[8]), extraction_quality=row[9] or "unknown",
             notes=row[10] or "",
         )
+
+    # ------------------------------------------------------------------ audit
+
+    def log_answer(self, entry: AnswerLogEntry) -> None:
+        """Record one answer, on its own connection, committed on its own.
+
+        Deliberately not on `self.conn`. `read_snapshot()` puts that connection
+        into `REPEATABLE READ READ ONLY` for the life of an answer, and an
+        insert there does not fail quietly — it raises, aborts the transaction
+        and takes the rest of the answer's reads down with it. A short-lived
+        connection of its own commits independently, which is what makes it
+        safe for the call site to log from inside the snapshot it describes.
+
+        Do not move this onto the reading connection. The cost of a connection
+        is paid once per answered question, against a retrieval and a
+        generation; the cost of getting it wrong is an answer that dies on its
+        own audit row.
+        """
+        import psycopg
+
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute(
+                # The question is stored and the generated answer is not. The
+                # route, the snapshot and the chunk ids are what make a reply
+                # explicable; keeping the prose of every conversation
+                # indefinitely is a privacy decision nobody has asked for.
+                """INSERT INTO answer_log
+                   (asked_at, question, audiences, path_taken, snapshot_id,
+                    chunk_ids, generation_model, check_failed)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (entry.asked_at or _now(), entry.question,
+                 list(entry.audiences), entry.path_taken,
+                 # Empty means "no snapshot was consulted", and the column is a
+                 # foreign key: NULL is the only honest way to say that.
+                 entry.snapshot_id or None,
+                 list(entry.chunk_ids), entry.generation_model,
+                 entry.check_failed),
+            )
+
+    def answer_log(self, limit: int = 20) -> list[AnswerLogEntry]:
+        """Recent answers, newest first."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """SELECT asked_at, question, audiences, path_taken, snapshot_id,
+                          chunk_ids, generation_model, check_failed
+                   FROM answer_log ORDER BY asked_at DESC, id DESC LIMIT %s""",
+                (limit,))
+            rows = cur.fetchall()
+        return [
+            AnswerLogEntry(
+                question=r[1], path_taken=r[3], audiences=tuple(r[2]),
+                snapshot_id=r[4] or "", chunk_ids=list(r[5]),
+                generation_model=r[6], check_failed=r[7], asked_at=str(r[0]))
+            for r in rows
+        ]
 
     # ------------------------------------------------------------- reporting
 

@@ -76,6 +76,28 @@
     "refuse"
    ],
    "refused": true
+  },
+  {
+   "id": "S8",
+   "name": "Multi-source: what goes on top, and how long first",
+   "question": "Which finish coats are compatible with Forte render, including the hardening time required first?",
+   "pass": true,
+   "notes": [],
+   "paths": [
+    "compose"
+   ],
+   "refused": false
+  },
+  {
+   "id": "S9",
+   "name": "Multi-source: compatibility and a condition, from two sheets",
+   "question": "Is Natural Finish compatible with Duro, including the temperature range Duro needs?",
+   "pass": true,
+   "notes": [],
+   "paths": [
+    "compose"
+   ],
+   "refused": false
   }
  ],
  "probes": [
@@ -183,24 +205,24 @@
  "sweep": [
   {
    "threshold": 0.35,
-   "questions": 4,
-   "answered": 4,
+   "questions": 6,
+   "answered": 6,
    "refused": 0,
    "wrongly_refused": 0,
    "wrongly_admitted": 2
   },
   {
    "threshold": 0.45,
-   "questions": 4,
-   "answered": 4,
+   "questions": 6,
+   "answered": 6,
    "refused": 0,
    "wrongly_refused": 0,
    "wrongly_admitted": 2
   },
   {
    "threshold": 0.55,
-   "questions": 4,
-   "answered": 4,
+   "questions": 6,
+   "answered": 6,
    "refused": 0,
    "wrongly_refused": 0,
    "wrongly_admitted": 2
@@ -231,6 +253,16 @@
    "id": "S7",
    "top_score": 0.717,
    "should_answer": false
+  },
+  {
+   "id": "S8",
+   "top_score": 0.803,
+   "should_answer": true
+  },
+  {
+   "id": "S9",
+   "top_score": 0.641,
+   "should_answer": true
   }
  ]
 }

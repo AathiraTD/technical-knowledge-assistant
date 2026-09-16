@@ -121,6 +121,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS index_snapshots_one_active
     ON index_snapshots (is_active) WHERE is_active = 1;
 
 -- ------------------------------------------------------------- answer_log
+-- What one answer used: the snapshot it read, the passages it cited and the
+-- route it took. The question is kept and the generated answer is not, because
+-- the route and the evidence are what make a reply explicable and retaining
+-- the prose of every conversation indefinitely is a separate decision nobody
+-- has taken. `audiences` and `chunk_ids` are JSON arrays here and TEXT[] in
+-- db/schema.postgres.sql; a chunk id is the citation string 'url#vN-i', never
+-- a row number. Written on a connection of its own, so an answer logged inside
+-- a read snapshot is not rolled back with it.
 CREATE TABLE IF NOT EXISTS answer_log (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     asked_at            TEXT    NOT NULL,

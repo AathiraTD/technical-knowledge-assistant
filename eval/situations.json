@@ -1,5 +1,5 @@
 {
-  "_comment": "Seven situations, one per thing the system claims to do. Each names the path it must take and what must be true of the answer. A situation that merely 'looks good' proves nothing, so every expectation here is mechanical: a path, a source, a refusal state, or a string that must or must not appear.",
+  "_comment": "Nine situations, one per thing the system claims to do, covering all three question types the brief names: a straightforward product question (S1), a question requiring information from multiple pieces of information (S8, S9) and a question the material deliberately cannot answer (S7, and the near-miss S2). Each names the path it must take and what must be true of the answer. A situation that merely 'looks good' proves nothing, so every expectation here is mechanical: a path, a source, a refusal state, a count of distinct source documents, or a string that must or must not appear.",
   "situations": [
     {
       "id": "S1",
@@ -95,6 +95,35 @@
         ],
         "refused": true,
         "verified_absent": "pot life — 0 matches across all 94 extracted documents"
+      }
+    },
+    {
+      "id": "S8",
+      "name": "Multi-source: what goes on top, and how long first",
+      "question": "Which finish coats are compatible with Forte render, including the hardening time required first?",
+      "why": "The brief's second required test type, which had no situation. It cannot be answered from one passage: the compatible finish coats and the hardening time sit in different sections, and the named products are described on their own pages. Worded to stay one question on purpose. The first draft used 'and how long must it harden', which the topic splitter correctly cut into two parts, and a question answered in halves is not a test of synthesis. Verified against the shipped index: compose, router step 8, top score 0.803, three distinct documents. min_source_documents is the check that matters, because citing two documents is what turns 'multi-source' from a description into a measurement.",
+      "expect": {
+        "path_in": [
+          "compose"
+        ],
+        "refused": false,
+        "must_cite": true,
+        "min_source_documents": 2,
+        "source_contains": "forte"
+      }
+    },
+    {
+      "id": "S9",
+      "name": "Multi-source: compatibility and a condition, from two sheets",
+      "question": "Is Natural Finish compatible with Duro, including the temperature range Duro needs?",
+      "why": "The second multi-source situation decision 7.3 refers to when it scores grounded reasoning on 'the two multi-source situations'. Compatibility is stated on one sheet and the temperature limit on another, so an answer quoting only one is incomplete rather than wrong. Also worded to stay one question. Verified: compose, step 8, top score 0.641, five distinct documents.",
+      "expect": {
+        "path_in": [
+          "compose"
+        ],
+        "refused": false,
+        "must_cite": true,
+        "min_source_documents": 2
       }
     }
   ]

@@ -533,12 +533,25 @@ def _build(repo, verbose, rebuild, staff_dir) -> dict:
                 updates.append(update)
             report_rows.append(row)
         for url in unchanged:
+            # An unchanged document is skipped, not absent. Writing zeros here
+            # was wrong in a way that only showed up on a no-change run: the
+            # report then described the *delta* instead of the *index*, so a
+            # corpus of 94 clean-and-partial documents carrying 119 caveats
+            # reported as 94 rows of "unchanged" and zero caveats — and the
+            # report is what `DECISIONS.md` cites as the evidence for extraction
+            # quality. The facts are still in the store, so read them back
+            # rather than inventing placeholders.
+            retained = repo.active_version(url)
             report_rows.append({"url": url, "name": Path(entries[url]["path"]).name,
                                 "type": entries[url]["doc_type"],
-                                "quality": "unchanged", "detector": "-",
+                                "quality": (retained.extraction_quality
+                                            if retained else "unknown"),
+                                "detector": "retained",
                                 "sections": 0, "chunks": 0, "chars": 0,
-                                "date": "", "caveats": 0, "change": "unchanged",
-                                "note": "skipped: content hash unchanged"})
+                                "date": "", "caveats": len(repo.caveats(url)),
+                                "change": "unchanged",
+                                "note": "skipped: content hash unchanged; "
+                                        "quality and caveats read from the index"})
         for url in failed:
             if url in {row["url"] for row in report_rows}:
                 continue
@@ -650,7 +663,10 @@ def _build(repo, verbose, rebuild, staff_dir) -> dict:
             "reprocessed": len(updates),
             "removed_urls": removed,
         },
-        "caveats": sum(len(u.caveats) for u in updates),
+        # Summed from the rows, not from `updates`: the same mistake as the
+        # unchanged rows themselves. `updates` holds only what this run
+        # processed, so a no-change run reported a corpus with no caveats in it.
+        "caveats": sum(row.get("caveats", 0) for row in report_rows),
         "excluded": len(excluded),
         "colours": live.notes.get("colours", []),
         "products": live.notes.get("products", []),
@@ -686,7 +702,7 @@ def summarise(report: dict) -> str:
         f" + {report['evaluation_fixtures']} evaluation fixture"
         f"{'s' if report['evaluation_fixtures'] != 1 else ''} (staff-only)",
         f"  chunks           {report['chunks']}",
-        f"  caveats tagged   {report['caveats']}",
+        f"  caveats held     {report['caveats']}",
         f"  excluded on file {report['excluded']}",
         f"  colours          {len(report['colours'])}",
         f"  products         {len(report['products'])}",

@@ -155,6 +155,33 @@ def test_invented_merchant_is_refused():
     assert "check 5" in names_of(failures), failures
 
 
+def test_the_makers_name_in_front_of_a_real_product_is_not_an_invention():
+    """Regression, from evaluation situation S9.
+
+    The site names its own products both ways — "Lime Green Solo" and "Lime
+    Green Duro" are harvested from the pages, plain "Natural Finish" is too —
+    so whether a given product appears in the list with or without the brand is
+    an accident of how each page happened to be written. Check 5 refused a
+    correct, fully cited, two-document answer because the model wrote "Lime
+    Green Natural Finish" and only "Natural Finish" was harvested. That is
+    over-refusal, and over-refusal on the brief's multi-source test type.
+    """
+    sheet = passage("Natural Finish is compatible with Duro.", section="Compatibility")
+    failures = run_checks(
+        "Lime Green Natural Finish is compatible with Duro [1].",
+        [sheet], {**NAMES, "products": [*NAMES["products"], "Natural Finish"]}, [])
+    assert "check 5" not in names_of(failures), failures
+
+
+def test_the_makers_name_does_not_launder_an_invented_product():
+    """Only the prefix is forgiven; what follows it still has to be published."""
+    failures = run_checks(
+        "Mix Solo with 5-6 litres of clean water per 25 kg sack [1]. "
+        "Lime Green Supercoat is the alternative [1].",
+        [SOLO], NAMES, [])
+    assert "check 5" in names_of(failures), failures
+
+
 # ---------------------------------------------------------------- check 6
 
 def test_asked_for_property_absent_is_refused():
@@ -188,6 +215,42 @@ def test_an_ordinary_capitalised_word_is_not_reported_as_an_invented_name():
     failures = run_checks("Add 5 litres of Water per 25 kg sack [1].",
                           [sheet], NAMES, [])
     assert "check 5" not in names_of(failures), failures
+
+
+def test_a_passage_that_names_another_product_may_be_cited_for_it():
+    """The Forte sheet says which finish coats go over Forte, naming them.
+
+    A sentence about Tradirend citing the Forte sheet is correctly attributed,
+    because the Forte sheet is what published the claim. Refusing it is a false
+    refusal on exactly the multi-document answers the brief asks for.
+    """
+    forte = passage(
+        "Lime Green Tradirend, Natural Finish or Finish WP: key the Forte with "
+        "a render scarifier and leave to harden for 3 to 5 days.",
+        product="Forte Render Base Coat", section="Finishing Coats",
+        url="https://example/forte")
+    tradirend = passage("Tradirend is a traditional lime render.",
+                        product="Tradirend Lime Render", section="Description",
+                        url="https://example/tradirend")
+
+    failures = run_checks(
+        "Apply Tradirend after leaving the Forte to harden for 3 to 5 days [1].",
+        [forte, tradirend], NAMES, [])
+    assert "check 3" not in names_of(failures), failures
+
+
+def test_a_figure_from_one_sheet_still_cannot_be_moved_to_an_unrelated_product():
+    """The guard must stay closed where the cited passage never names the product."""
+    solo = passage("Mix with 5-6 litres of clean water per 25 kg sack.",
+                   product="Solo Onecoat Lime Plaster", section="Mixing")
+    duro = passage("Duro is a general purpose lime undercoat.",
+                   product="Duro Lime Plaster Base Coat", section="Description",
+                   url="https://example/duro")
+
+    failures = run_checks(
+        "Duro needs 5-6 litres of clean water per 25 kg sack [1].",
+        [solo, duro], NAMES, [])
+    assert "check 3" in names_of(failures), failures
 
 
 if __name__ == "__main__":

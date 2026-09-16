@@ -10,6 +10,16 @@ standard library serves both, and the only dependency this adds is zero.
 The page is a view. Every routing decision, check and refusal happens in the
 library the CLI calls, so the two interfaces cannot disagree — and the
 evaluation harness drives the library rather than either of them.
+
+Structured logging is on by default here, to stderr, which is the opposite of
+the CLI's default and for the opposite reason: this surface produces no
+transcript to keep clean, and a server nobody can see is not operable. Each
+answered request carries its own correlation id, returned in
+`X-Correlation-Id` and in the JSON body, so a reported problem can be found in
+the log rather than reproduced. A 404 is the exception: it is served by
+`send_error` and never reaches the sender that attaches the header, which is
+tolerable because a request for a path that does not exist has no answer to
+trace.
 """
 
 from __future__ import annotations
@@ -23,10 +33,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ollama, use_utf8
+from . import observability as obs, ollama, use_utf8
+from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
 from .repository import IndexMismatch
-from .store import EmbeddedRepository
 from .store.factory import open_repository
 
 PAGE = """<!doctype html>
@@ -163,11 +173,20 @@ def render_html(reply, verbose: bool) -> str:
 class Handler(BaseHTTPRequestHandler):
     assistant: Assistant
     meta: str
+    # What this server was started to allow. A request may narrow this and can
+    # never widen it, so `?a=staff` against a public instance stays public.
+    audiences: tuple[str, ...] = PUBLIC_ONLY
+    correlation_id: str
 
     def log_message(self, *args) -> None:      # keep the console for answers
         pass
 
     def do_GET(self) -> None:
+        # One id per request, established before anything can answer and handed
+        # back on every response. It is what turns "it refused and I do not know
+        # why" into a line in the log: the caller quotes the id, the operator
+        # greps for it, and every event the answer produced comes back together.
+        self.correlation_id = obs.new_id()
         url = urlparse(self.path)
         if url.path not in ("/", "/ask"):
             self.send_error(404)
@@ -175,13 +194,26 @@ class Handler(BaseHTTPRequestHandler):
         params = parse_qs(url.query)
         question = (params.get("q", [""])[0] or "").strip()
         verbose = params.get("v", [""])[0] == "1"
-        audience = params.get("a", ["public"])[0]
-        audiences = tuple(a.strip() for a in audience.split(",") if a.strip())
+        audience = params.get("a", [""])[0]
+        audiences = resolve(audience, self.audiences)
 
         if url.path == "/ask":
-            reply = self.assistant.ask(question, audiences=audiences) if question else None
+            try:
+                reply = (self.assistant.ask(question, audiences=audiences,
+                                            correlation_id=self.correlation_id)
+                         if question else None)
+            except (ollama.OllamaUnavailable, IndexMismatch) as exc:
+                # The HTML branch has always handled this; the JSON branch did
+                # not, so an unreachable model answered a request with a
+                # stack trace and no status code worth acting on.
+                self._send(json.dumps({"error": str(exc), "question": question,
+                                       "correlation_id": self.correlation_id},
+                                      ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8", status=503)
+                return
             payload = {
                 "question": question,
+                "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
                      "text": a.text, "sources": a.sources, "caveats": a.caveats,
@@ -195,9 +227,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if question:
             try:
-                reply = self.assistant.ask(question, audiences=audiences)
+                reply = self.assistant.ask(question, audiences=audiences,
+                                           correlation_id=self.correlation_id)
                 body_html = render_html(reply, verbose)
-            except ollama.OllamaUnavailable as exc:
+            except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 body_html = (f"<div class='card'><div class='answer'>"
                              f"{_esc(str(exc))}</div></div>")
         else:
@@ -214,10 +247,11 @@ class Handler(BaseHTTPRequestHandler):
                            audience_options=options)
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _send(self, body: bytes, content_type: str) -> None:
-        self.send_response(200)
+    def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Correlation-Id", self.correlation_id)
         self.end_headers()
         self.wfile.write(body)
 
@@ -230,17 +264,32 @@ def main(argv: list[str] | None = None) -> int:
                         help="bind address; 0.0.0.0 inside a container")
     parser.add_argument("--db", default="data/index/knowledge.db")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument(
+        "--allow-audience", default="public",
+        help="which audiences this server may read, comma separated. A request "
+             "can narrow this and never widen it, so the default refuses to "
+             "serve staff material however the URL is written.")
     args = parser.parse_args(argv)
+    # On by default here, unlike the CLI: a server produces no transcript to
+    # protect, and one that logs nothing cannot be operated. stderr keeps the
+    # address and the JSON lines on separate streams.
+    obs.configure(sys.stderr)
 
-    repo = open_repository(args.db)
+    # Threaded server, one shared store: see assistant/store/locking.py.
+    repo = open_repository(args.db, thread_safe=True)
     try:
         assistant = Assistant(repo)
     except (IndexMismatch, ollama.OllamaUnavailable) as exc:
+        # Let the store go before giving up on it. A refused start is followed
+        # by a rebuild into the same file, and a connection left open is one
+        # the operating system is still holding.
+        repo.close()
         print(f"\n{exc}\n", file=sys.stderr)
         return 1
 
     snapshot = repo.snapshot()
     Handler.assistant = assistant
+    Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (
         f"{snapshot.document_count} documents · {snapshot.chunk_count} passages · "
         f"index built {snapshot.created_at[:10]} · retrieval "
@@ -248,9 +297,13 @@ def main(argv: list[str] | None = None) -> int:
         f"abstention threshold {assistant.retriever.threshold}"
     )
 
-    shown = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
-    address = f"http://{shown}:{args.port}/"
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    # The port actually bound, not the one that was asked for. They differ when
+    # the port is left to the operating system, and the address is both printed
+    # and opened in a browser — so reporting the request rather than the bind
+    # advertises an address nothing is listening on.
+    shown = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+    address = f"http://{shown}:{server.server_address[1]}/"
     print(f"Lime Green technical assistant on {address}")
     print("JSON for the same question at /ask?q=...   Ctrl-C to stop.")
     if not args.no_browser:

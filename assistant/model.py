@@ -172,6 +172,34 @@ class CrawlRun:
 
 
 @dataclass
+class AnswerLogEntry:
+    """One answered question, recorded so the answer stays explicable.
+
+    The audit chain runs documents → versions → chunks → snapshot, and this is
+    its last link. Without it the store can say what the index held on a date
+    and cannot say which part of it an answer actually used, which is the half
+    of "why did it say that?" that matters. The route, the snapshot id and the
+    chunk ids together are enough to reconstruct the evidence a reply was built
+    from, because generation is deterministic against them.
+
+    A refusal is worth logging for the same reason as an answer: `check_failed`
+    names the check that stopped it, so over-refusal is measurable rather than
+    anecdotal.
+
+    `asked_at` may be left empty, in which case the store timestamps it.
+    """
+
+    question: str
+    path_taken: str  # route | extract | compose | defer | refuse
+    audiences: tuple[str, ...] = ("public",)
+    snapshot_id: str = ""
+    chunk_ids: list[str] = field(default_factory=list)
+    generation_model: str = ""
+    check_failed: str = ""
+    asked_at: str = ""
+
+
+@dataclass
 class Retrieved:
     """A chunk with its score, as returned by retrieval."""
 

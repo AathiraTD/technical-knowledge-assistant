@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant.engine import Assistant, render          # noqa: E402
-from assistant.store import EmbeddedRepository          # noqa: E402
+from assistant.store.factory import open_repository     # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
@@ -78,6 +78,17 @@ def check_situation(spec: dict, reply) -> tuple[bool, list[str]]:
     if expect.get("must_cite") and not any(a.sources for _q, a in reply.parts):
         ok = False
         notes.append("nothing was cited")
+
+    # What makes a multi-source claim checkable. Retrieval spanning documents is
+    # not the same as an answer drawing on them, and the difference is only
+    # visible in what the answer cites.
+    wanted_documents = expect.get("min_source_documents")
+    if wanted_documents:
+        cited = {s["url"] for _q, a in reply.parts for s in a.sources}
+        if len(cited) < wanted_documents:
+            ok = False
+            notes.append(f"cited {len(cited)} distinct document(s), "
+                         f"expected at least {wanted_documents}")
 
     if expect.get("must_not_contain_digits_with_pound") and re.search(r"£\s*\d", text):
         ok = False
@@ -186,12 +197,16 @@ def sweep(assistant, questions: list[dict], values: list[float]) -> list[dict]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="eval.run")
     parser.add_argument("--db", default="data/index/knowledge.db")
+    parser.add_argument("--dsn", default=None,
+                        help="PostgreSQL DSN; otherwise SQLite at --db. "
+                             "The harness must be able to run against the "
+                             "store the system actually serves from.")
     parser.add_argument("--skip-sweep", action="store_true")
     parser.add_argument("--only", help="run one id, e.g. S2 or P7")
     args = parser.parse_args(argv)
 
     RESULTS.mkdir(parents=True, exist_ok=True)
-    repo = EmbeddedRepository(ROOT / args.db)
+    repo = open_repository(str(ROOT / args.db), dsn=args.dsn)
     assistant = Assistant(repo)
     snapshot = repo.snapshot()
 
@@ -287,7 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         # A question "should answer" when the corpus contains the answer. S2 and
         # S7 do not, and S3 to S5 never reach the threshold because the policy
         # gate or a slot catches them first, so only the retrieval cases count.
-        should = {"S1": True, "S2": False, "S6": True, "S7": False}
+        should = {"S1": True, "S2": False, "S6": True, "S7": False,
+                  "S8": True, "S9": True}
         questions = [{"question": s["question"], "id": s["id"],
                       "should_answer": should.get(s["id"], True)}
                      for s in _load("situations.json")["situations"]

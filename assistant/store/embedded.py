@@ -23,12 +23,14 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
 from ..model import (
     AUTHORITY,
+    AnswerLogEntry,
     Caveat,
     CrawlRun,
     Chunk,
@@ -62,6 +64,11 @@ _AUTHORITY_SPREAD = max(len(AUTHORITY), 1)
 AUTHORITY_BONUS = TIE_BAND / _AUTHORITY_SPREAD
 
 
+def _now() -> str:
+    """The house timestamp: UTC, to the second, as the rest of the pipeline writes it."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 def _f32(vector: list[float]) -> bytes:
     return np.asarray(vector, dtype=np.float32).tobytes()
 
@@ -73,10 +80,16 @@ def _unpack(blob: bytes) -> np.ndarray:
 class SQLiteKnowledgeRepository:
     """`KnowledgeRepository` over a single SQLite file."""
 
-    def __init__(self, path: str | Path = "data/index/knowledge.db") -> None:
+    def __init__(self, path: str | Path = "data/index/knowledge.db",
+                 *, check_same_thread: bool = True) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path)
+        # A connection is bound to its opening thread unless told otherwise.
+        # The threaded server opens the store once and answers from request
+        # threads, so it passes False and wraps this in LockedRepository; the
+        # default stays True so a single-threaded caller keeps SQLite's own
+        # guard rather than losing it silently.
+        self.db = sqlite3.connect(self.path, check_same_thread=check_same_thread)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.execute("PRAGMA journal_mode = WAL")
@@ -608,6 +621,65 @@ class SQLiteKnowledgeRepository:
             checked_at=r["checked_at"], is_active=bool(r["is_active"]),
             extraction_quality=r["extraction_quality"], notes=r["notes"],
         )
+
+    # ------------------------------------------------------------------ audit
+
+    def log_answer(self, entry: AnswerLogEntry) -> None:
+        """Record one answer, on its own connection, committed on its own.
+
+        Deliberately not on `self.db`. `read_snapshot()` opens a transaction
+        there and rolls it back when the answer is finished, so a row inserted
+        inside a snapshot read would be discarded at precisely the moment it
+        was wanted — silently, because a rollback is not an error. A second
+        connection to the same file commits independently, and the journal is
+        WAL, so the write does not wait for the reader or disturb it.
+
+        That is the property the call site depends on: logging may happen
+        inside the snapshot it describes. Moving this onto the reading
+        connection to save a handle would reintroduce the bug.
+        """
+        writer = sqlite3.connect(self.path)
+        try:
+            writer.execute("PRAGMA foreign_keys = ON")
+            writer.execute(
+                # The question is stored and the generated answer is not. The
+                # route, the snapshot and the chunk ids are what make a reply
+                # explicable; keeping the prose of every conversation
+                # indefinitely is a privacy decision nobody has asked for.
+                """INSERT INTO answer_log
+                   (asked_at, question, audiences, path_taken, snapshot_id,
+                    chunk_ids, generation_model, check_failed)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (entry.asked_at or _now(), entry.question,
+                 json.dumps(list(entry.audiences)), entry.path_taken,
+                 # Empty means "no snapshot was consulted", and the column is a
+                 # foreign key: NULL is the only honest way to say that.
+                 entry.snapshot_id or None,
+                 json.dumps(list(entry.chunk_ids)),
+                 entry.generation_model, entry.check_failed),
+            )
+            writer.commit()
+        finally:
+            writer.close()
+
+    def answer_log(self, limit: int = 20) -> list[AnswerLogEntry]:
+        """Recent answers, newest first."""
+        rows = self.db.execute(
+            """SELECT asked_at, question, audiences, path_taken, snapshot_id,
+                      chunk_ids, generation_model, check_failed
+               FROM answer_log ORDER BY asked_at DESC, id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [
+            AnswerLogEntry(
+                question=r["question"], path_taken=r["path_taken"],
+                audiences=tuple(json.loads(r["audiences"])),
+                snapshot_id=r["snapshot_id"] or "",
+                chunk_ids=list(json.loads(r["chunk_ids"])),
+                generation_model=r["generation_model"],
+                check_failed=r["check_failed"], asked_at=r["asked_at"])
+            for r in rows
+        ]
 
     # ------------------------------------------------------------- reporting
 

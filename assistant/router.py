@@ -310,13 +310,37 @@ class Router:
         re.I,
     )
 
-    def _needs_substrate(self, question: str, slots: dict) -> bool:
-        """Substrate is only load-bearing when a product is being chosen.
+    # Whether the question is about the asker's own building. A first person, a
+    # possessive, a symptom they can see, or a photograph they have taken all
+    # say "this is my wall"; their absence says the question is about the range.
+    _ABOUT_MY_BUILDING = re.compile(
+        r"\b(?:my|our|mine|ours|i|i'm|i've|we|we're|we've|us|me)\b", re.I)
 
-        Asking how much water Solo needs does not need a substrate; asking what
-        to plaster a wall with does, and answering it without one is guessing.
+    def _needs_substrate(self, question: str, slots: dict) -> bool:
+        """Substrate is load-bearing when a product is being chosen *for a wall*.
+
+        Two conditions, not one. A product choice alone is not enough, because
+        "what products are suitable for lime-based external finishes" is a
+        question about the catalogue, and asking which wall it is for answers a
+        question nobody asked. That question is the brief's own worked example,
+        and it used to reach an ask-back — the single most likely thing an
+        assessor types, met with a clarifying question instead of an answer.
+
+        "Which plaster should I use" is the other shape: the same choice, but
+        about a specific job, where a recommendation without a substrate is a
+        guess in a liability-sensitive domain. The word that separates them is
+        the first person.
+
+        A symptom or a photograph counts as the same signal. Nobody describes
+        crazing or attaches a picture about a product range in the abstract.
         """
-        return bool(self._PRODUCT_CHOICE.search(question))
+        if not self._PRODUCT_CHOICE.search(question):
+            return False
+        return bool(
+            self._ABOUT_MY_BUILDING.search(question)
+            or "symptom" in slots
+            or "photograph" in slots
+        )
 
     _LOCATION_SENSITIVE = ("coverage", "thickness", "coats", "drying", "finish",
                            "painting", "temperature")

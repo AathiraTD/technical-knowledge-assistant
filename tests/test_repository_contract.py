@@ -26,8 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.model import (                                    # noqa: E402
-    Caveat, Chunk, CrawlRun, Document, DocumentUpdate, DocumentVersion,
-    Excluded, Snapshot,
+    AnswerLogEntry, Caveat, Chunk, CrawlRun, Document, DocumentUpdate,
+    DocumentVersion, Excluded, Snapshot,
 )
 from assistant.repository import KnowledgeRepository             # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository            # noqa: E402
@@ -528,3 +528,109 @@ def test_a_delta_that_fails_leaves_every_row_where_it_was(repo):
     assert _counts(repo) == before, "a failed delta left rows behind"
     assert "GOOD" in " ".join(h.chunk.content for h in repo.retrieve(A, top_k=5))
     assert repo.snapshot().snapshot_id == "s1"
+
+
+# ------------------------------------------------------------- the answer log
+
+URL = "https://example/solo"
+
+
+def one_answer(repo) -> str:
+    """Publish a single passage so there is a snapshot and a chunk to cite."""
+    repo.publish([doc(URL)], [ver(URL)],
+                 [chunk(URL, 0, "Add 5 to 6 litres per sack.", A)],
+                 snap("snap-1", chunks=1, docs=1))
+    return f"{URL}#v1-0"
+
+
+def test_an_answer_records_the_evidence_that_produced_it(repo):
+    """Without the snapshot and the passages, "why did it say that?" is guesswork."""
+    cited = one_answer(repo)
+    repo.log_answer(AnswerLogEntry(
+        question="How much water does Solo need?",
+        path_taken="extract",
+        audiences=("public", "trade"),
+        snapshot_id="snap-1",
+        chunk_ids=[cited],
+        generation_model="test-model",
+        asked_at="2026-01-02T09:00:00+00:00",
+    ))
+
+    logged = repo.answer_log()
+    assert len(logged) == 1
+    entry = logged[0]
+    assert entry.question == "How much water does Solo need?"
+    assert entry.path_taken == "extract"
+    assert entry.audiences == ("public", "trade")
+    assert entry.snapshot_id == "snap-1"
+    assert entry.chunk_ids == [cited], "the cited passages were not recoverable"
+    assert entry.generation_model == "test-model"
+    assert entry.check_failed == ""
+
+
+def test_a_refusal_is_logged_with_the_check_that_stopped_it(repo):
+    """A refusal nobody counted is an over-refusal rate nobody can quote."""
+    one_answer(repo)
+    repo.log_answer(AnswerLogEntry(
+        question="What is the vapour permeability of Solo?",
+        path_taken="refuse",
+        snapshot_id="snap-1",
+        check_failed="relevance",
+        asked_at="2026-01-02T09:01:00+00:00",
+    ))
+
+    entry = repo.answer_log()[0]
+    assert entry.path_taken == "refuse"
+    assert entry.check_failed == "relevance"
+    assert entry.chunk_ids == []
+    assert entry.generation_model == "", "a refusal must not claim the model ran"
+
+
+def test_an_answer_given_before_any_index_existed_is_still_logged(repo):
+    """A question asked against an empty store is a fact about the store, not a write to drop."""
+    repo.log_answer(AnswerLogEntry(question="Anything at all?", path_taken="refuse",
+                                   check_failed="no_snapshot"))
+    entry = repo.answer_log()[0]
+    assert entry.snapshot_id == ""
+    assert entry.audiences == ("public",)
+
+
+def test_the_store_timestamps_an_answer_that_arrives_without_one(repo):
+    """A row with no time in it cannot be put in order, which is all the log is for."""
+    repo.log_answer(AnswerLogEntry(question="When was this asked?", path_taken="route"))
+    assert repo.answer_log()[0].asked_at.startswith("20")
+
+
+def test_the_answer_log_reads_newest_first_and_respects_its_limit(repo):
+    """Oldest first, uncapped, is the shape that makes an audit trail unusable."""
+    one_answer(repo)
+    for minute, question in enumerate(["first", "second", "third"]):
+        repo.log_answer(AnswerLogEntry(
+            question=question, path_taken="extract", snapshot_id="snap-1",
+            asked_at=f"2026-01-02T09:0{minute}:00+00:00"))
+
+    assert [e.question for e in repo.answer_log()] == ["third", "second", "first"]
+    assert [e.question for e in repo.answer_log(limit=2)] == ["third", "second"]
+
+
+def test_an_empty_answer_log_is_a_state_and_not_a_failure(repo):
+    assert repo.answer_log() == []
+
+
+def test_logging_an_answer_is_not_rolled_back_with_the_snapshot_it_describes(repo):
+    """The write shares a connection with the read snapshot and the audit row vanishes."""
+    cited = one_answer(repo)
+
+    with repo.read_snapshot() as pinned:
+        assert pinned is not None and pinned.snapshot_id == "snap-1"
+        repo.log_answer(AnswerLogEntry(
+            question="Logged from inside the snapshot.", path_taken="extract",
+            snapshot_id=pinned.snapshot_id, chunk_ids=[cited],
+            asked_at="2026-01-02T09:02:00+00:00"))
+        # The read must survive the write: same snapshot, same evidence.
+        assert repo.snapshot().snapshot_id == "snap-1"
+        assert len(repo.retrieve(A)) == 1
+
+    logged = repo.answer_log()
+    assert [e.question for e in logged] == ["Logged from inside the snapshot."]
+    assert logged[0].chunk_ids == [cited]

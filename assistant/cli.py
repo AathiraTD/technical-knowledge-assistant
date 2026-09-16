@@ -8,6 +8,12 @@ The audience set is asserted here with a flag rather than authenticated. That
 is a real limitation and it is stated in the banner rather than hidden: in
 production the audience comes from a signed-in session, and identity is the
 first thing a deployment adds.
+
+Structured logging is behind `--log` and writes to stderr rather than stdout.
+Stdout is the transcript: the evaluation harness parses it and the submission
+quotes it, so a log line in the middle of an answer is a corrupted artefact
+rather than an inconvenience. The web page makes the opposite call, because a
+server nobody can see is not operable.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import ollama, use_utf8
+from . import observability as obs, ollama, use_utf8
 from .engine import Assistant, render
 from .repository import IndexMismatch
 from .store import EmbeddedRepository
@@ -48,17 +54,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-t", "--threshold", type=float, default=None,
                         help="override the abstention threshold")
     parser.add_argument("--db", default="data/index/knowledge.db")
+    parser.add_argument(
+        "--log", action="store_true",
+        help="write structured JSON events to stderr. Off by default: stdout "
+             "is the transcript and the evaluation harness parses it, so log "
+             "lines must not appear in it.")
     args = parser.parse_args(argv)
+    if args.log:
+        # stderr, so the transcript on stdout is byte-identical either way.
+        obs.configure(sys.stderr)
 
     audiences = tuple(a.strip() for a in args.audience.split(",") if a.strip())
 
     repo = _open(args)
     try:
         assistant = Assistant(repo, threshold=args.threshold)
-    except IndexMismatch as exc:
-        print(f"\n{exc}\n", file=sys.stderr)
-        return 1
-    except ollama.OllamaUnavailable as exc:
+    except (IndexMismatch, ollama.OllamaUnavailable) as exc:
+        # Close the store before giving up. Process exit would release it
+        # anyway, but the operator's next move after an index mismatch is to
+        # rebuild into this very file, and holding it open is the one thing
+        # that would make that fail too.
+        repo.close()
         print(f"\n{exc}\n", file=sys.stderr)
         return 1
 
@@ -85,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
         if question.endswith(" -v"):
             question, verbose = question[:-3].strip(), True
         _ask_once(assistant, question, audiences, verbose)
-    return 0
 
 
 def _ask_once(assistant, question: str, audiences, verbose: bool) -> int:

@@ -295,6 +295,58 @@ def test_the_report_names_every_document_and_what_happened_to_it(harness):
                for r in report["rows"] if r["change"] == "unchanged")
 
 
+def test_the_report_still_describes_the_index_after_a_no_change_run(harness):
+    """Regression: an unchanged run used to make the report forget the corpus.
+
+    Unchanged rows were written as placeholders — `quality: "unchanged"`,
+    `caveats: 0` — so after a second crawl of an unchanged site the report said
+    the corpus held no caveats and no document of any known quality. That is not
+    cosmetic: `DECISIONS.md` cites this report as the evidence for extraction
+    quality, and it is what an assessor opens to check the claim. On the real
+    corpus a no-change run turned 50 clean / 45 partial and 119 caveats into 94
+    rows of "unchanged" and a zero. The facts never left the store; the report
+    stopped asking for them.
+
+    The staged corpus here is deliberately caveat-bearing. `THREE` is not — its
+    "Do not apply below 5 degrees C" misses the temperature pattern, which wants
+    a degree symbol — so using it would have made the caveat half of this test
+    pass by comparing zero against zero.
+    """
+    run, repo = harness
+    corpus = {
+        "solo": a_page("Solo Onecoat",
+                       "A one-coat lime plaster. Do not apply in temperatures "
+                       "below 5°C or above 30°C."),
+        "duro": a_page("Duro Basecoat",
+                       "A lime undercoat. It is not suitable for DIY plastering.",
+                       water="4.5 to 5", coverage="2.5"),
+    }
+
+    first = run(corpus)
+    second = run(corpus)
+
+    assert second["delta"]["unchanged"] == 2 and second["delta"]["reprocessed"] == 0
+
+    first_quality = {r["url"]: r["quality"] for r in first["rows"]}
+    second_quality = {r["url"]: r["quality"] for r in second["rows"]}
+    assert second_quality == first_quality, "quality was forgotten on a no-change run"
+    assert "unchanged" not in set(second_quality.values())
+
+    # Compared run-to-run rather than against `counts()["document_caveats"]`,
+    # which totals every version ever held: on the real corpus that is 119
+    # against the 99 the active versions carry, so an equality with it would
+    # break the first time a document was superseded.
+    held = sum(r["caveats"] for r in first["rows"])
+    assert held > 0, "the staged corpus was supposed to carry caveats"
+    assert sum(r["caveats"] for r in second["rows"]) == held, (
+        "the report counts caveats from work it did, not from what the index holds")
+    assert second["caveats"] == held, "the report's own total forgot them too"
+
+    # And each row still says plainly that no work was done for it.
+    assert all(r["change"] == "unchanged" for r in second["rows"])
+    assert all(r["detector"] == "retained" for r in second["rows"])
+
+
 def test_a_missing_cached_file_is_reported_rather_than_fatal(harness, tmp_path):
     """One unreadable file must not cost the other ninety-three."""
     run, repo = harness

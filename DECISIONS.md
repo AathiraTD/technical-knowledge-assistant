@@ -21,7 +21,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 11 | Caveats | Tagged per document at ingestion, appended by code — not a chunking problem |
 | 12 | Audience and data model | Three audiences, eight classification axes, filtered at retrieval in code |
 | 13 | Second source | Staff-knowledge capture justifies the queue; CRM is a channel, not a corpus |
-| 14 | Caching | Production only, keyed on template, slots, audience and index version |
+| 14 | Caching | Designed template-keyed for production; **the exact-key form is built**, audience- and snapshot-scoped |
 | 15 | Interface | CLI canonical; a thin standard-library HTTP UI over the same library |
 | 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
 | 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
@@ -77,7 +77,7 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 **Prove it.** Both schemas execute. The partial unique index refuses a second active version of the same document — an attempt to activate version 2 while version 1 is live raises an integrity error from the database, not from application code. Index build time and mean query latency are printed in the transcript header.
 
-**Current implementation and limits.** Both adapters run the contract and ingestion lifecycle tests. SQLite uses WAL and serializes writers; PostgreSQL serializes publication with a transaction advisory lock. Both reject stale parent snapshots and retain history on rebuild. Readers pin one release per answer. Raw evidence stays on a versioned filesystem, so source archives and the database must be backed up together. Decision 19 records the validation and concurrency rationale.
+**Current implementation and limits.** Both adapters run the contract and ingestion lifecycle tests. SQLite uses WAL and serializes writers; PostgreSQL serializes publication with a transaction advisory lock, and **waits a bounded 30 seconds for it**. That bound was added after measurement rather than by design: `pg_advisory_xact_lock` waits forever, so an indexer killed without its connection being reaped would have stalled every later run with no output and nothing in the log — a failure that reads as "indexing is slow tonight" for as long as nobody looks. The timeout is raised as `PublicationBusy`, named at the repository boundary so the indexer catches it without importing a driver, and a cancellation that is *not* the timeout is re-raised as itself, because a mis-set server parameter is a fault to read rather than a busy indexer to retry. Both reject stale parent snapshots and retain history on rebuild. Readers pin one release per answer. Raw evidence stays on a versioned filesystem, so source archives and the database must be backed up together. Decision 19 records the validation and concurrency rationale.
 
 ## 4. Framework: hand-rolled, not LangChain or LlamaIndex
 
@@ -109,7 +109,7 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 The corpus is two families of datasheet. The older sheets mark a heading with a heavier font; the newer ones use one font throughout and mark a heading by putting it alone on a short line. A font-only detector reports the second family as flat and falls back to whole-page chunks — which is how `medium-mortar-tds.pdf` first came out as two 3,000-character blobs despite having thirteen clean sections. Running both detectors and taking the union recovers Description / Mixing / Application / Aftercare across the corpus.
 
-Final counts: 94 published documents plus one staff-tagged evaluation fixture, 579 passages, none over the 4,000-character ceiling, 52 documents classed clean and 43 partial, none failed. The passage count fell from 644 once the download furniture on product pages was removed — see the note under decision 8.
+Final counts: 94 published documents plus one staff-tagged evaluation fixture, 552 passages, longest 3,674 characters against a 4,000 ceiling, 49 of the 94 classed clean and 45 partial, none failed. The active versions carry 99 tagged caveat sentences; the table holds 119, the extra 20 belonging to superseded versions that are retained but never retrieved. The passage count fell from 644 once the download furniture on product pages was removed — see the note under decision 8.
 
 **Where it breaks.** "Partial" mostly means a short page rather than a bad extraction — a product page with two sections is a two-section page. The genuine weakness is the 34-page roof design guide, which yields 74 passages whose headings are drawing references rather than section names; it is retrievable but its citations read less well than a datasheet's. The ingestion report names every document and its quality, so this is inspectable rather than asserted.
 
@@ -311,7 +311,7 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Where it breaks.** The queue stays roadmap. If capture turns out to yield structured configuration only, there is no second chunk producer and the queue should collapse to a scheduled re-index with one lock.
 
-## 14. Caching: production only, template-keyed
+## 14. Caching: template-keyed by design, exact-key as built
 
 **Why it exists.** A hundred concurrent public questions become a generation queue, and the same nineteen templates recur.
 
@@ -319,7 +319,9 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Why this one.** The Ask stage found that roughly eighty per cent of demand is nineteen question templates, so a template-keyed cache hits often where an exact-string cache would barely hit — two people never phrase it identically. The key is the template identifier, the detected slot values, the caller's audience set and the index version. A semantic cache is rejected on principle rather than cost: serving a "close enough" stored answer is exactly what a system built on refusing rather than approximating must not do. Reuse is safe because answers are deterministic — temperature zero, fixed seed, fixed snapshot — and invalidation is free, because the index version is in the key and the atomic swap acts as a cache epoch. Refusals are cached too: a refusal costs a full retrieval to produce.
 
-**Where it breaks.** The audience set must be in the key or a staff answer reaches a public caller — a leak, not a performance bug. Keyed too loosely, it serves the right template for the wrong substrate.
+**What is actually built**, stated separately from the design because they differ. Templates do not exist in this codebase, so `assistant/cache.py` implements the weaker **exact-key** form this decision itself rates lower: it hits only when the same question is asked in the same words, after case and whitespace folding. Weaker on hit rate, identical on safety — the audience set, the snapshot id, the generation model and the chunking version are all in the key. Measured effect on a repeated question: 40.78 s to 0.017 s. Refusals are cached too.
+
+**Where it breaks.** The audience set must be in the key or a staff answer reaches a public caller — a leak, not a performance bug, and the first test in `tests/test_cache.py` is that leak. Keyed too loosely, it serves the right template for the wrong substrate. The exact-key form has the opposite problem: two people rarely phrase a question identically, so the hit rate in production would be poor until templates exist.
 
 ## 15. Interface: CLI canonical, a thin UI over it
 
@@ -414,7 +416,7 @@ The caveat the prototype hardware imposes: vision encoders are compute-heavy, an
 
 ## 17. Embedding cache: content-addressed, and shipped
 
-**Why it exists.** Embedding 579 passages on this laptop takes about fifteen minutes on CPU. That is paid on a first build, which is tolerable, and then paid again on every rebuild, which is not — and a rebuild happens whenever chunking changes, which during development is constantly. It was paid twice before this existed, once when a transient HTTP 400 ended a run at 97 per cent.
+**Why it exists.** Embedding 552 passages on this laptop takes about fifteen minutes on CPU. That is paid on a first build, which is tolerable, and then paid again on every rebuild, which is not — and a rebuild happens whenever chunking changes, which during development is constantly. It was paid twice before this existed, once when a transient HTTP 400 ended a run at 97 per cent.
 
 **Alternatives.** Accept the rebuild cost. Ship the built index instead of the cache. Keep no cache and tell the assessor to wait.
 
@@ -424,7 +426,7 @@ Shipping the cache rather than the index is the part worth defending. The index 
 
 **Prove it.** The same build, twice: 892 seconds computing 644 vectors, then 11 seconds with 644 cache hits and none computed. The counts appear in the ingestion report, so a run that quietly recomputed everything cannot be mistaken for one that did not.
 
-**Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 579 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
+**Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 552 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
 
 ## 18. Delta ingestion: skip, supersede, deactivate
 
@@ -486,7 +488,7 @@ Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo w
 - **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
 - **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
 - **The audience set is asserted, not authenticated.** The filter is real and enforced in code at retrieval; the identity behind the claim is missing.
-- **One user at a time.** No queue, no rate limit, no cache: the concurrency story is drawn and argued, not built.
+- **No queue and no rate limit.** Concurrent *serving* is now built and tested — the web page runs on a threading server, the SQLite adapter is opened for cross-thread use and serialised behind one lock, each answer pins a consistent read, and an audience-scoped answer cache sits in front. What is still only drawn is the part that matters under real load: a generation queue with a visible wait, per-session rate limiting, and extract-only degradation. Generation remains one at a time per Ollama instance, so concurrency raises throughput for cached and non-compose answers and not for the compose path.
 - **Staff mode always extracts.** Staff compose on request, and the staff drafting mode, are roadmap — the advisor verifies from the passage text, and time is the constraint.
 - **Datasheet quality is inherited.** Sheets date from 2015 to 2025; one prints "3m3" for a coverage figure and "8oC" for a temperature; a PDF title names a different product than its page. Quoted as printed, flagged in the ingestion report, never corrected.
 
@@ -494,8 +496,8 @@ Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo w
 
 | Open | Closed by | When |
 |---|---|---|
-| Embedding model | Building the index with each and comparing five known-answer questions | Slice 1 |
-| Generation latency, and so live demo versus transcript | Warm timing of a five-passage compose | Slice 1 |
+| Embedding model | Building the index with each and comparing five known-answer questions | **Still open.** `qwen3-embedding:0.6b` is the development default actually in use and recorded in every snapshot; the comparison against `nomic-embed-text` has not been run, so this is an unmeasured default rather than a selected model |
+| ~~Generation latency~~ | **Closed, and it does not meet the target.** A warm five-passage compose measures 35–90 s on this processor against the trade's ten-second expectation. Two things were changed and measured rather than argued: `keep_alive` removes a 7.4 s model reload on any question asked more than five minutes after the last one, and `num_predict` bounds a runaway answer from 939 tokens / 93 s to 256 tokens / 24 s. Neither touches the median, because the cost is prompt processing on CPU, not output. An exact-key answer cache makes a repeat free. **The demonstration therefore runs from the transcript, and the honest slide number is this one** | Measured |
 | ~~Abstention threshold value~~ | **Closed: 0.45, and the sweep showed why the number matters less than expected.** The two unanswerable situations score higher than the two answerable ones, so no threshold in the swept range separates them. The relevance gate does. See decision 9 | Measured |
 | ~~HTML extraction library~~ | **Closed: BeautifulSoup + lxml.** The pipeline needs the DOM regardless — link-text classification and name-list harvesting both require it, and trafilatura's automatic main-content extraction would discard the colour block that must be harvested before stripping | Decided |
 

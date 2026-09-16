@@ -444,3 +444,105 @@ def test_a_single_part_is_not_labelled():
     """One question does not need a table of contents."""
     text = render(Reply(question="q", parts=[("how much water", answered())]))
     assert "Part 1" not in text
+
+
+# --------------------------------------------------- the cache and the log
+
+
+def test_an_empty_cache_is_still_a_cache(tmp_path, no_ollama):
+    """`if self.cache` was False on every call because AnswerCache has __len__.
+
+    The cache could never fill, because it was empty. Truthiness on a container
+    means emptiness, and emptiness is not absence.
+    """
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assert len(assistant.cache) == 0
+        assert not assistant.cache, "an empty cache is falsy, which is the trap"
+
+        assistant.ask("How much does Solo cost")
+        assert assistant.cache.misses == 1, "the cache was skipped while empty"
+    finally:
+        repo.close()
+
+
+def test_a_repeated_question_is_served_from_the_cache(tmp_path, no_ollama):
+    """A composed answer costs about forty seconds; a repeat should cost nothing."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assistant.ask("How much does Solo cost")
+        reply = assistant.ask("How much does Solo cost")
+
+        assert assistant.cache.hits == 1
+        assert reply.parts[0][1].diagnostics["cached"] is True
+    finally:
+        repo.close()
+
+
+def test_a_staff_answer_is_not_replayed_to_a_public_caller(tmp_path, no_ollama):
+    """Decision 14's named failure, at the level that would actually leak it."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+        assistant.ask("How much does Solo cost", audiences=("staff",))
+        before = assistant.cache.hits
+        assistant.ask("How much does Solo cost", audiences=("public",))
+
+        assert assistant.cache.hits == before, "a staff entry was served to public"
+    finally:
+        repo.close()
+
+
+def test_the_cache_can_be_turned_off(tmp_path, no_ollama):
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo, cache=False)
+        assistant.ask("How much does Solo cost")
+        assistant.ask("How much does Solo cost")
+        assert assistant.cache is None
+    finally:
+        repo.close()
+
+
+def test_every_answered_part_is_recorded_against_its_snapshot(tmp_path, no_ollama):
+    """The audit chain: an answer names the snapshot and the passages it used."""
+    repo = build_repo(tmp_path)
+    try:
+        Assistant(repo).ask("How much does Solo cost")
+        logged = repo.answer_log(limit=5)
+
+        assert logged, "nothing was recorded"
+        assert logged[0].path_taken == "route"
+        assert logged[0].snapshot_id == "snap-test"
+        assert logged[0].audiences == ("public",)
+    finally:
+        repo.close()
+
+
+def test_a_log_that_fails_does_not_cost_the_answer(tmp_path, no_ollama, monkeypatch):
+    """A store that cannot write the audit row still has a good answer in hand."""
+    repo = build_repo(tmp_path)
+    try:
+        assistant = Assistant(repo)
+
+        def refuse(_entry):
+            raise RuntimeError("the log is unavailable")
+
+        monkeypatch.setattr(repo, "log_answer", refuse)
+        reply = assistant.ask("How much does Solo cost")
+
+        assert reply.parts, "the answer was lost to an audit failure"
+        assert "does not publish prices" in reply.parts[0][1].text
+    finally:
+        repo.close()
+
+
+def test_logging_can_be_turned_off(tmp_path, no_ollama):
+    repo = build_repo(tmp_path)
+    try:
+        Assistant(repo, log=False).ask("How much does Solo cost")
+        assert repo.answer_log(limit=5) == []
+    finally:
+        repo.close()
