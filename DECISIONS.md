@@ -21,10 +21,12 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 11 | Caveats | Tagged per document at ingestion, appended by code — not a chunking problem |
 | 12 | Audience and data model | Three audiences, eight classification axes, filtered at retrieval in code |
 | 13 | Second source | Staff-knowledge capture justifies the queue; CRM is a channel, not a corpus |
-| 14 | Caching | Production only, keyed on template, slots, audience and index version |
-| 15 | Interface | CLI canonical; a thin Streamlit UI over the same library |
+| 14 | Caching | Designed template-keyed for production; **the exact-key form is built**, audience- and snapshot-scoped |
+| 15 | Interface | CLI canonical; a thin standard-library HTTP UI over the same library |
 | 16 | Images | Handled by policy, not by capability — detected, declared, handed off |
 | 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
+| 18 | Delta ingestion | Unchanged documents are not reprocessed; changed ones keep the version they replaced; withdrawn ones are deactivated, never deleted |
+| 19 | Controlled knowledge release | Immutable originals, validated publication, pinned readers, real backend parity and durable ingestion jobs |
 
 ---
 
@@ -42,15 +44,19 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 
 ## 2. Extract path: verbatim by code
 
-**Why it exists.** The brief's first recommended test is a straightforward product question. Something has to print "5 to 6 litres per 25 kg sack" without risking a paraphrase.
+**Why it exists.** The brief's first recommended test is a straightforward product question. Something has to print "between 5 and 6 litres of clean water per 25kg sack" — the Solo datasheet's own words — without risking a paraphrase.
 
 **Alternatives.** The model quotes and stops over two passages, keeping it on every path. The model composes on every path.
 
 **Why this one.** The quote-and-cite printer is built regardless — the cited hand-off and the refusal template both print quoted passages by code — so putting the model on Extract adds a third prompt variant rather than removing one. On a lookup the model can contribute nothing but paraphrase drift, and the checks would then refuse it: "5–6 litres per 25 kg bag" rendered as "5 to 6 litres per bag" trips the qualifier check, which is a false refusal on the brief's first test type. Compliance with "use a local LLM to formulate an answer" is met where formulation actually happens, on Compose; the record already prints Route, Cited hand-off and Refuse with no model at all.
 
-**Prove it.** Warm latency on a two-passage call, measured against the trade's ten-second target: the record's own estimate is prompt reading plus about 80 tokens at 15–25 tokens per second, which sits uncomfortably close to the limit.
+**Prove it.** Latency, now measured rather than estimated — and measured twice, because the first reading was wrong in the system's favour. The nine model calls in `eval/results/transcript.txt` run from 1.66 s to 75.47 s with a median of 3.8 s, which reads like a system comfortably inside the trade's ten-second target. It is not one. Those low figures are Ollama's prompt cache: running the harness repeatedly re-sends prompts it has already processed, and a repeated prompt skips the prefill that is the entire cost. Asked two questions the machine had never seen, the same build spent **199 s** and **115 s** in generation; repeating one of them immediately cost **4.2 s**. So the transcript's median measures the cache, not the model, and the honest figure for a question nobody has asked before is tens of seconds to minutes. See the generation-latency row under *Still open*. Putting the model on Extract as well would have spent that budget again on passages that need no formulation, and the two calculation situations that do take Extract cost nothing at all.
 
-**Where it breaks.** The straightforward test question shows a quoted passage with a citation rather than model prose, so say it on the slide: the model formulates where there is something to formulate. A model quote-and-stop stays a roadmap option, gated on a measured warm call with headroom; nothing in the design assumes it.
+**Where it breaks.** The prediction this entry used to make was wrong, and the repository's own transcript is where it shows. S1 — the brief's first recommended test, "how much water does Solo Onecoat need per bag" — takes **compose**, not extract. Step 7 sends a question to Extract only when every retrieved passage comes from one document, and this one retrieves five passages from three: the Solo datasheet's Mixing, Description and Coverage sections, the Solo product page, and the IWI installation guide. Several documents bear on it, so step 8 fires and the model composes. An assessor reading this entry against the transcript would have caught that in a minute, which is why it is written down here rather than explained away.
+
+The result is nevertheless defensible, and that is the part worth understanding. The sheet prints "Add between 5 and 6 litres of clean water per 25kg sack and mix until a smooth creamy consistency is reached". What printed was "Add between 5 and 6 litres of clean water per 25kg sack [4]. Mix until a smooth creamy consistency is reached [4]." — the same words and the same figures, split into two sentences so that each one carries its own citation marker. Check 2 compares every number against the passage it cites and passed; check 4 keeps qualifiers with their figure and passed. The verbatim guarantee this decision exists to protect held on a path the decision did not predict, because it is enforced *after* generation rather than by keeping the model away from the question.
+
+So the honest form of the claim is narrower than the old one. Extract is not the path the straightforward question takes; it is the path a question takes when the evidence has already collapsed onto one document, and it still fires — step 6 on both calculation situations, step 7 wherever retrieval lands in a single sheet. What Extract buys is not "the first test prints a quote" but "no path in this system depends on the model to copy a number correctly". A model quote-and-stop on Extract remains a roadmap option and nothing assumes it; on the measured latencies above it now looks worse, not better.
 
 ## 3. Store: one boundary, two adapters
 
@@ -63,7 +69,8 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | | Assessment path | Deployment path |
 |---|---|---|
 | Store | SQLite — standard library, one file, ships in the repository | PostgreSQL + pgvector |
-| Similarity | Cosine in numpy after loading; a single matrix multiply over six to eight hundred chunks | `<=>` inside the query, with an HNSW index |
+| Similarity | Cosine in numpy after loading current vectors | Exact `<=>` search over current allowed rows; ANN requires measurement |
+| Audience filter | Applied to the loaded rows in Python, inside the adapter, before ranking | A `WHERE` clause in the same query as the distance operator |
 | Service required | None | Postgres |
 | Schema | `db/schema.sqlite.sql` | `db/schema.postgres.sql` |
 
@@ -73,9 +80,9 @@ SQLite rather than numpy-plus-JSON for the embedded adapter is the choice that b
 
 pgvector rather than a dedicated vector database, because the metadata filtering and the similarity search then happen in **one query** — active version, audience set, authority order and cosine distance together — instead of a numpy search followed by Python filtering followed by a separate metadata lookup. It is also one service for Lime Green to run rather than two, and free.
 
-**Prove it.** Both schemas execute. The partial unique index refuses a second active version of the same document — an attempt to activate version 2 while version 1 is live raises an integrity error from the database, not from application code. Index build time and mean query latency are printed in the transcript header.
+**Prove it.** Both schemas execute. The partial unique index refuses a second active version of the same document — an attempt to activate version 2 while version 1 is live raises an integrity error from the database, not from application code. The transcript header binds each run to what produced it: snapshot id, embedding model and dimension, chunking version, and the document and passage counts. Build time is in the ingestion report; generation time is printed beside each answer.
 
-**Where it breaks.** The assessment adapter is one file and one process: no concurrent writers, and the index is rebuilt rather than updated in place. The Postgres adapter is written against the same interface but is exercised far less than the SQLite one, because the submission runs on SQLite — so treat its test coverage as the weaker of the two and say so rather than implying parity. Raw HTML and PDFs stay on a versioned filesystem in both paths: Postgres holds identity, history and chunks, never the bytes, because a 29 MB blob column buys nothing that a path and a content hash do not.
+**Current implementation and limits.** Both adapters run the contract and ingestion lifecycle tests. SQLite uses WAL and serializes writers; PostgreSQL serializes publication with a transaction advisory lock, and **waits a bounded 30 seconds for it**. That bound was added after measurement rather than by design: `pg_advisory_xact_lock` waits forever, so an indexer killed without its connection being reaped would have stalled every later run with no output and nothing in the log — a failure that reads as "indexing is slow tonight" for as long as nobody looks. The timeout is raised as `PublicationBusy`, named at the repository boundary so the indexer catches it without importing a driver, and a cancellation that is *not* the timeout is re-raised as itself, because a mis-set server parameter is a fault to read rather than a busy indexer to retry. Both reject stale parent snapshots and retain history on rebuild. Readers pin one release per answer. Raw evidence stays on a versioned filesystem, so source archives and the database must be backed up together. Decision 19 records the validation and concurrency rationale.
 
 ## 4. Framework: hand-rolled, not LangChain or LlamaIndex
 
@@ -107,7 +114,7 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 The corpus is two families of datasheet. The older sheets mark a heading with a heavier font; the newer ones use one font throughout and mark a heading by putting it alone on a short line. A font-only detector reports the second family as flat and falls back to whole-page chunks — which is how `medium-mortar-tds.pdf` first came out as two 3,000-character blobs despite having thirteen clean sections. Running both detectors and taking the union recovers Description / Mixing / Application / Aftercare across the corpus.
 
-Final counts: 94 published documents plus one staff-tagged evaluation fixture, 579 passages, none over the 4,000-character ceiling, 52 documents classed clean and 43 partial, none failed. The passage count fell from 644 once the download furniture on product pages was removed — see the note under decision 8.
+Final counts: 94 published documents plus one staff-tagged evaluation fixture, 552 passages, longest 3,674 characters against a 4,000 ceiling, 49 of the 94 classed clean and 45 partial, none failed. The active versions carry 99 tagged caveat sentences; the table holds 119, the extra 20 belonging to superseded versions that are retained but never retrieved. The passage count fell from 644 once the download furniture on product pages was removed — see the note under decision 8.
 
 **Where it breaks.** "Partial" mostly means a short page rather than a bad extraction — a product page with two sections is a two-section page. The genuine weakness is the 34-page roof design guide, which yields 74 passages whose headings are drawing references rather than section names; it is retrievable but its citations read less well than a datasheet's. The ingestion report names every document and its quality, so this is inspectable rather than asserted.
 
@@ -151,7 +158,7 @@ This is the real reason thinking variants are gated out at G5, stronger than the
 
 | # | Criterion | Weight | How it is measured |
 |---|---|---|---|
-| C1 | Citation-marker discipline — one marker per sentence, only for supplied passages | 20 | Check 1 pass rate across the seven situations |
+| C1 | Citation-marker discipline — one marker per sentence, only for supplied passages | 20 | Check 1 pass rate across the nine situations |
 | C2 | Verbatim fidelity — figures and qualifiers copied, not paraphrased | 20 | Checks 2 and 4 pass rate; the qualifier probes |
 | C3 | **Grounded reasoning** — joins two or more passages into a correct combination, without inventing the link and without reaching past the text | 20 | The two multi-source situations: does the answer actually combine the documents, or quote them side by side? Does the joining sentence itself carry a citation? Read by the technical team |
 | C4 | Refusal compliance — refuses on instruction instead of helping | 15 | Refusal state on the near-miss and far-miss |
@@ -232,7 +239,7 @@ Two gate rows are unverified and must be checked when the model is pulled, not a
 
 **Depends on.** The unanswerable evaluation questions must be verified absent before they are fixed: grep the built corpus for the property, its synonyms and its units (vapour permeability, µ value, thermal conductivity, lambda, W/mK). If the property turns out to be published under another name, the assistant answers it correctly and the evaluation scores that as a failure, in front of the panel.
 
-**Prove it.** The threshold sweep, run over the four retrieval situations, produced a result worth stating plainly because it is the opposite of what a threshold is supposed to do:
+**Prove it.** The threshold sweep runs over the six situations that reach retrieval. Four of them carry the point, and it is worth stating plainly because it is the opposite of what a threshold is supposed to do:
 
 | Situation | Top score | Should |
 |---|---|---|
@@ -241,7 +248,7 @@ Two gate rows are unverified and must be checked when the model is pulled, not a
 | S7 — the pot life of Duro, published nowhere | 0.717 | refuse |
 | S2 — the U-value of Solo, published nowhere | 0.739 | refuse |
 
-The two questions the corpus **cannot** answer retrieve **more** confidently than the two it can. At 0.35, 0.45 and 0.55 the sweep reports the same thing: four answered, none wrongly refused, and two wrongly admitted. No threshold anywhere in that range separates them, and no threshold could — a question about the U-value of Solo is a well-formed question about a real product, so the Solo datasheet is genuinely its nearest neighbour.
+The two questions the corpus **cannot** answer retrieve **more** confidently than the two straightforward ones it can. At 0.35, 0.45 and 0.55 the sweep reports the same thing across all six: six answered, none wrongly refused, and two wrongly admitted. No threshold anywhere in that range separates them, and no threshold could — a question about the U-value of Solo is a well-formed question about a real product, so the Solo datasheet is genuinely its nearest neighbour.
 
 That is the measured case for this decision. Abstention by distance alone would have admitted both near-misses; the relevance gate refuses both, on step 4, by observing that the asked-for term appears in no retrieved passage. The threshold still earns its place against genuinely off-topic questions, but it is not the mechanism that catches the near-miss, and the sweep is what turns that from an argument into a fact.
 
@@ -273,7 +280,7 @@ That is the measured case for this decision. Abstention by distance alone would 
 
 **Alternatives.** One public corpus. A binary internal/external partition, which is what the record's constraint fork proposed.
 
-**Why this one.** Three audiences — public, trade, staff. The binary fork loses the trade: stockists and contractors see lead times, stock and kit lists that the public does not, and they are the natural first user. Filtering happens at retrieval, in code, never by prompt, because a prompt instruction is not an access control. Eight classification axes are applied at ingestion:
+**Why this one.** Three audiences — public, trade, staff. The binary fork loses the trade: stockists and contractors see lead times, stock and kit lists that the public does not, and they are the natural first user. Filtering happens at retrieval, in code, never by prompt, because a prompt instruction is not an access control. Where in the code is worth naming rather than blurring, because the two adapters do it differently: PostgreSQL filters in the query, a `WHERE` clause beside the distance operator, so a forbidden row is never selected; SQLite loads the active chunks and filters them in Python inside the adapter, before scoring and before anything is returned. Both are enforcement in code ahead of ranking and neither can be argued with by a prompt — but only one of them is a `WHERE` clause, and the adapter that ships and serves the transcript is the other one. The protection is the same; the mechanism is not, and a claim that the filter is "in the query" is true of the deployment path only. Eight classification axes are applied at ingestion:
 
 | Axis | What it carries | What it enforces |
 |---|---|---|
@@ -309,7 +316,7 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Where it breaks.** The queue stays roadmap. If capture turns out to yield structured configuration only, there is no second chunk producer and the queue should collapse to a scheduled re-index with one lock.
 
-## 14. Caching: production only, template-keyed
+## 14. Caching: template-keyed by design, exact-key as built
 
 **Why it exists.** A hundred concurrent public questions become a generation queue, and the same nineteen templates recur.
 
@@ -317,7 +324,9 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Why this one.** The Ask stage found that roughly eighty per cent of demand is nineteen question templates, so a template-keyed cache hits often where an exact-string cache would barely hit — two people never phrase it identically. The key is the template identifier, the detected slot values, the caller's audience set and the index version. A semantic cache is rejected on principle rather than cost: serving a "close enough" stored answer is exactly what a system built on refusing rather than approximating must not do. Reuse is safe because answers are deterministic — temperature zero, fixed seed, fixed snapshot — and invalidation is free, because the index version is in the key and the atomic swap acts as a cache epoch. Refusals are cached too: a refusal costs a full retrieval to produce.
 
-**Where it breaks.** The audience set must be in the key or a staff answer reaches a public caller — a leak, not a performance bug. Keyed too loosely, it serves the right template for the wrong substrate.
+**What is actually built**, stated separately from the design because they differ. Templates do not exist in this codebase, so `assistant/cache.py` implements the weaker **exact-key** form this decision itself rates lower: it hits only when the same question is asked in the same words, after case and whitespace folding. Weaker on hit rate, identical on safety — the audience set, the snapshot id, the generation model and the chunking version are all in the key. Measured effect on a repeated question: 40.78 s to 0.017 s. Refusals are cached too.
+
+**Where it breaks.** The audience set must be in the key or a staff answer reaches a public caller — a leak, not a performance bug, and the first test in `tests/test_cache.py` is that leak. Keyed too loosely, it serves the right template for the wrong substrate. The exact-key form has the opposite problem: two people rarely phrase a question identically, so the hit rate in production would be poor until templates exist.
 
 ## 15. Interface: CLI canonical, a thin UI over it
 
@@ -325,7 +334,7 @@ The tagging rule in the prototype is trivial but still explicit: everything craw
 
 **Alternatives.** Command line only. FastAPI with a single HTML page. A chat widget.
 
-**Why this one.** The answer engine is a library by design — question and audience set in; answer, sources, status and diagnostics out — so a second surface is a wrapper, not a rewrite, and building one demonstrates the property the production channel adapters depend on rather than asserting it. Streamlit is one dependency and one command on the assessors' machine. The command line stays canonical because the evidence lives there: the transcript and the evaluation harness run through it, so a UI failure must not cost the evidence.
+**Why this one.** The answer engine is a library by design — question and audience set in; answer, sources, status and diagnostics out — so a second surface is a wrapper, not a rewrite, and building one demonstrates the property the production channel adapters depend on rather than asserting it. The implemented UI uses Python's standard-library HTTP server, avoiding a UI framework dependency; Streamlit was the earlier proposal. The command line stays canonical because the evidence lives there: the transcript and the evaluation harness run through it, so a UI failure must not cost the evidence.
 
 **Where it breaks.** One more dependency that has to install cleanly from a clean clone. The UI is single-user and single-turn like everything else. If it misbehaves on the assessors' machine, the command line and the transcript still stand.
 
@@ -412,7 +421,7 @@ The caveat the prototype hardware imposes: vision encoders are compute-heavy, an
 
 ## 17. Embedding cache: content-addressed, and shipped
 
-**Why it exists.** Embedding 579 passages on this laptop takes about fifteen minutes on CPU. That is paid on a first build, which is tolerable, and then paid again on every rebuild, which is not — and a rebuild happens whenever chunking changes, which during development is constantly. It was paid twice before this existed, once when a transient HTTP 400 ended a run at 97 per cent.
+**Why it exists.** Embedding 552 passages on this laptop takes about fifteen minutes on CPU. That is paid on a first build, which is tolerable, and then paid again on every rebuild, which is not — and a rebuild happens whenever chunking changes, which during development is constantly. It was paid twice before this existed, once when a transient HTTP 400 ended a run at 97 per cent.
 
 **Alternatives.** Accept the rebuild cost. Ship the built index instead of the cache. Keep no cache and tell the assessor to wait.
 
@@ -422,16 +431,69 @@ Shipping the cache rather than the index is the part worth defending. The index 
 
 **Prove it.** The same build, twice: 892 seconds computing 644 vectors, then 11 seconds with 644 cache hits and none computed. The counts appear in the ingestion report, so a run that quietly recomputed everything cannot be mistaken for one that did not.
 
-**Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 579 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
+**Where it breaks.** It is a cache of a pure function, so the failure modes are small, but it is derived data in version control — 5.6 MB as committed, which is larger than the live index needs. The cache is append-only and keyed by text, so every superseded chunking run leaves its vectors behind; the current 552 passages account for under half of it. That is honest but untidy, and the fix is a prune step that drops keys no live passage hashes to. Above ten megabytes the right move is to build it in CI and attach it to a release rather than commit it.
+
+## 18. Delta ingestion: skip, supersede, deactivate
+
+**Why it exists.** The schema had eight tables, the store enforced one active version per document, and the contract suite proved the enforcement worked — and none of it was ever used. Every build re-extracted and re-chunked all 94 documents, wrote exactly one version each, and left `crawl_runs` empty. The architecture described an incremental pipeline; the code was a rebuild wearing its schema. That gap is the kind a panel finds by opening the database, so it was worth closing rather than narrating.
+
+**Alternatives.** Keep rebuilding and rely on the embedding cache to make it cheap. Diff against the local version ledger rather than against the store. Delete withdrawn documents outright.
+
+**Why this one.** Three choices inside it are load-bearing.
+
+*The comparison is against what is being served, not against a file.* `active_content_hashes()` reads the live index. A ledger can drift from the index — a failed publish, a hand-edited file, a restored backup — and then a delta computed from the ledger skips work the index actually needs. The index cannot drift from itself.
+
+*A changed document supersedes rather than replaces.* The old version is deactivated and the new one activated in the same transaction, with the old row retained and linked by `supersedes_id`. This is what makes "why did it say that six months ago?" answerable: the passage that produced the answer is still there, marked inactive, and retrieval cannot reach it.
+
+*A withdrawn document is deactivated, never deleted.* A datasheet removed from the site must stop being quoted as current, which deletion would achieve — but deletion also destroys the record that it was ever published, and an answer given while it was live still has to be explicable. Every version is deactivated, the document row stays, and it disappears from retrieval and from the manifest.
+
+The embedding cache is not a substitute for any of this. It made a rebuild fast; it did not make a rebuild incremental, and it did not create a single version record.
+
+**Prove it.** Four runs against the real 94-document corpus, with the shipped cache restored by `git checkout` afterwards:
+
+| Run | What happened | new | changed | unchanged | removed | reprocessed | Time |
+|---|---|---|---|---|---|---|---|
+| 1 | Forced rebuild | 94 | 0 | 0 | 0 | 94 | 23.8 s |
+| 2 | Nothing changed | 0 | 0 | 94 | 0 | **0** | **1.4 s** |
+| 3 | One page edited | 0 | 1 | 93 | 0 | 1 | 1.5 s |
+| 4 | One page withdrawn | 0 | 0 | 93 | 1 | 0 | — |
+
+Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo with two versions, v2 active and v1 retained, and only the revised text retrievable. Run 4 left the withdrawn document's history intact and its row in place while removing it from what is served, taking the index from 95 documents to 94. All four runs are recorded in `crawl_runs`, so the evidence outlives the terminal.
+
+`tests/test_delta_lifecycle.py` runs the same four-run sequence against a small staged corpus in about a second, and the contract suite exercises the same behaviour against every adapter.
+
+**Update, decision 19.** Model, dimension and chunking-version changes now trigger reprocessing automatically. `--rebuild` remains an explicit override and preserves prior versions. Failed extraction cannot replace a good version, and failed sources block a configuration change. Name harvesting remains a full pass over validated pages, because stale names would undermine the checks.
+
+## 19. Controlled knowledge releases and operational evidence
+
+**Why it exists.** The presentations require controlled, current and auditable knowledge. Delta ingestion alone did not establish that: cached pages were never revalidated, URL files overwrote originals, failures could look like withdrawals, rebuilds discarded history, separate readers retained stale vectors, and PostgreSQL was not selected by the indexer. A coherent schema did not prove the lifecycle.
+
+**Alternatives.** Mutable URL caches with a version counter; rebuilding into an empty live store; cache invalidation without a read transaction; a separate vector service; a distributed queue before there is more than one ingestion host.
+
+**Why these choices.**
+
+- Content-addressed originals and one atomic crawl pointer keep source evidence independent of processing. HTTP validators reduce transfer; SHA-256 establishes content identity. A failed crawl leaves the previous source release intact.
+- Validate sources, extraction and vectors before transactional delta activation. Retain failed documents' prior versions; block mixed processing configurations. Record URL/version/hash/path membership and complete crawl counts inside publication.
+- Pin one read transaction per answer. SQLite WAL and PostgreSQL repeatable read keep passages, caveats and vocabulary in the same release. Reload SQLite vectors for the next request. A parent-snapshot check rejects a competing stale publisher.
+- Use exact pgvector search while retaining vectors of different historical dimensions. An ANN index is an optimization to evaluate with recall and latency evidence, not a reason to discard history.
+- Use one backend factory for indexer, CLI, UI and readiness. Test real PostgreSQL rather than accepting a configured adapter that silently skips failures.
+- Accept reviewed staff JSON through the same chunking/version/audience pipeline. The ingestion operator owns approval; collecting expert knowledge and authenticating reviewers remain separate capabilities.
+- Persist scheduled ingestion jobs locally, with bounded retry, leases and dead-letter evidence. Cron or Task Scheduler supplies the schedule. This avoids operating a broker for a single ingestion host.
+
+**Prove it.** [The pipeline runbook](docs/knowledge-pipeline.md) maps presentation requirements to code and tests. Tests cover unchanged/change/withdraw/reactivate, failed extraction and rebuild, corrupt sources and vectors, approval and audience isolation, configuration changes, concurrent readers and publishers, job retries and crash recovery. Both actual databases are exercised. CI requires zero missing lines and branches across the measured libraries.
+
+**Where it breaks.** A mutable model tag is not a model checksum: use distinct immutable tags when changing weights. The queue is local and has a 24-hour crash lease; it is not a distributed broker. Staff JSON approval is an operator-controlled record, not a login or signature. Production source backups, real model evaluation, authenticated caller audiences, vision and answer-serving load controls remain separate requirements. Test coverage measures executed paths; it does not establish perfect answer correctness.
+
+**Primary design references:** [SQLite snapshot isolation](https://www.sqlite.org/isolation.html), [SQLite WAL](https://www.sqlite.org/wal.html), [Psycopg transactions](https://www.psycopg.org/psycopg3/docs/basic/transactions.html), [HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html).
 
 ## Known weaknesses
 
-- **The Postgres adapter is the less-exercised of the two.** The submission runs on SQLite, so the deployment adapter is written against the same interface and the same schema but sees far less use. Parity of design is not parity of testing, and the transcript only evidences one of them.
+- **The Postgres adapter passes the contract; it has not been operated.** It now runs the same repository contract, the same ingestion lifecycle, the publication lock and the concurrent-reader tests against a real PostgreSQL 16 with pgvector, in CI and in a container, so parity of testing is no longer the gap it once was. What is missing is use: the submission runs on SQLite, the transcript evidences only that adapter, and no Postgres instance has answered a question outside a test. Contract-verified is not production-proven.
 - **Compatibility is enforced by citation, not by a rules gate.** Nothing deterministic decides which products are eligible for a substrate before retrieval runs; the assistant can only say what a cited passage says, which prevents invention but does not actively exclude an incompatible product. The proper mechanism is an eligibility stage — substrate and exposure in, candidate products out, retrieval restricted to those — and it needs the product-to-substrate compatibility matrix, which the data inventory records as existing nowhere on the site, scattered across datasheets and advisors' heads. Building that matrix is partnership work; the eligibility gate follows it.
 - **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
 - **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
 - **The audience set is asserted, not authenticated.** The filter is real and enforced in code at retrieval; the identity behind the claim is missing.
-- **One user at a time.** No queue, no rate limit, no cache: the concurrency story is drawn and argued, not built.
+- **No queue and no rate limit.** Concurrent *serving* is now built and tested — the web page runs on a threading server, the SQLite adapter is opened for cross-thread use and serialised behind one lock, each answer pins a consistent read, and an audience-scoped answer cache sits in front. What is still only drawn is the part that matters under real load: a generation queue with a visible wait, per-session rate limiting, and extract-only degradation. Generation remains one at a time per Ollama instance, so concurrency raises throughput for cached and non-compose answers and not for the compose path.
 - **Staff mode always extracts.** Staff compose on request, and the staff drafting mode, are roadmap — the advisor verifies from the passage text, and time is the constraint.
 - **Datasheet quality is inherited.** Sheets date from 2015 to 2025; one prints "3m3" for a coverage figure and "8oC" for a temperature; a PDF title names a different product than its page. Quoted as printed, flagged in the ingestion report, never corrected.
 
@@ -439,8 +501,8 @@ Shipping the cache rather than the index is the part worth defending. The index 
 
 | Open | Closed by | When |
 |---|---|---|
-| Embedding model | Building the index with each and comparing five known-answer questions | Slice 1 |
-| Generation latency, and so live demo versus transcript | Warm timing of a five-passage compose | Slice 1 |
+| Embedding model | Building the index with each and comparing five known-answer questions | **Still open.** `qwen3-embedding:0.6b` is the development default actually in use and recorded in every snapshot; the comparison against `nomic-embed-text` has not been run, so this is an unmeasured default rather than a selected model |
+| ~~Generation latency~~ | **Closed, and it does not meet the target.** A five-passage compose on a question the model has not seen costs tens of seconds: 35–90 s measured on a quiet machine, and 115–199 s measured on this one while containers and other work were running. The transcript's nine model calls read 1.66–75.47 s with a median of 3.8 s, and that median must not be quoted — it is Ollama's prompt cache, earned by running the harness repeatedly against the same questions. The distinction was checked rather than assumed: two questions never asked before cost 199 s and 115 s, and an immediate repeat of the first cost 4.2 s. Two things were changed and measured rather than argued: `keep_alive` removes a 7.4 s model reload on any question asked more than five minutes after the last one, and `num_predict` bounds a runaway answer from 939 tokens / 93 s to 256 tokens / 24 s. Neither touches the median, because the cost is prompt processing on CPU, not output. An exact-key answer cache makes a repeat free. **The demonstration therefore runs from the transcript, and the honest slide number is this one** | Measured |
 | ~~Abstention threshold value~~ | **Closed: 0.45, and the sweep showed why the number matters less than expected.** The two unanswerable situations score higher than the two answerable ones, so no threshold in the swept range separates them. The relevance gate does. See decision 9 | Measured |
 | ~~HTML extraction library~~ | **Closed: BeautifulSoup + lxml.** The pipeline needs the DOM regardless — link-text classification and name-list harvesting both require it, and trafilatura's automatic main-content extraction would discard the colour block that must be harvested before stripping | Decided |
 
@@ -454,6 +516,6 @@ Five decisions of no consequence — the Ollama client (raw HTTP, to avoid a dep
 - *Why 94 units, not forty?* — Decision 1: forty was a scope signal, not a limit; the boundary is a rule and its cost is extraction QA.
 - *How do you catch the near-miss?* — Decision 9: the asked-for property, or a synonym, must appear in the cited passage, or it refuses. A confident retrieval is not enough.
 - *How would this handle hundreds of concurrent users?* — Decision 14 and the serving layer: retrieval is lock-free, generation is the bottleneck, so a queue, a rate limit and a cache go in front of it, and under load only extract, route and refuse are served. Safety never degrades; coverage does.
-- *How do you keep staff-only material out of public answers?* — Decision 12: audience tags filtered at retrieval in code, never by prompt; in production the audience set comes from an authenticated session.
+- *How do you keep staff-only material out of public answers?* — Decision 12: audience tags filtered at retrieval in code, never by prompt — a `WHERE` clause in the PostgreSQL adapter, a row filter inside the SQLite one, and in both cases before anything is ranked or put in front of the model. In production the audience set comes from an authenticated session; today it is asserted, and over HTTP a request can only narrow what the operator allowed.
 - *Why can't it read the photograph the customer attached?* — Decision 16: it could be made to see one, but it would still be forbidden to act on it. Diagnosing a wall is the technical team's call, there is no labelled failure library to ground or evaluate a reading against, and a confident wrong visual diagnosis is the worst failure this system could produce. It says it cannot see the image, quotes what the sheets do say about the symptom, and hands over.
 - *Where do the numbers come from?* — Only from a cited passage, word for word. Units are normalised for the comparison, never for the display. A figure not found in a retrieved passage does not print.

@@ -2,15 +2,19 @@
 
 **What the system is**: two diagrams, a component reference, and the site inventory they rest on. **Why it is this way** — every decision, its alternatives and its cost — is in [`DECISIONS.md`](../DECISIONS.md).
 
-The shape in one sentence: a question is answered only from retrieved passages, every fact cited, with a refusal that still hands over whatever is published when the material runs out — and content is indexed once by hand for the submission, re-indexed only on change in production.
+The shape in one sentence: a question is answered only from retrieved passages, every fact cited, with a refusal that still hands over whatever is published when the material runs out — and the knowledge pipeline validates changed sources and publishes controlled releases on either backend.
 
 These repository diagrams are the reference. The presentation slide carries a collapsed spine of the second one — input, split and gate, retrieve, router, model, checks, reply — not the full flow.
+
+## Knowledge release implementation
+
+[The knowledge pipeline runbook](knowledge-pipeline.md) traces the supplied presentations to code, tests and operation. It covers source revalidation, immutable originals, staff approval, structure-aware chunking, validated vectors, atomic delta publication, request snapshots and both database adapters. [Decision 19](../DECISIONS.md#19-controlled-knowledge-releases-and-operational-evidence) explains the alternatives and tradeoffs.
 
 ## 1. Container view
 
 Colour key (as on the diagram's title): **green = built for the submission**, **amber, rose and pink = production-only**, **cyan and sky = data, website and evaluation**, **violet = local models and the answer engine**, **grey = shipped cache**. The slide version collapses this to built / roadmap / external.
 
-Three groups inside one system boundary: **Indexing path** (the indexer and cache are built and run once by hand; production adds the receiver and queue on the same boxes), **Retrieval data** (the knowledge store and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the snapshot records its model tag and the engine refuses to run against a mismatch), **Question-answering path** (engine, CLI, web UI and evaluation harness built; channel adapters, identity and the serving layer are roadmap).
+Three groups inside one system boundary: **Indexing path** (crawler, immutable cache, approved staff import and local durable job queue are implemented; the external scheduler supplies cadence), **Retrieval data** (the knowledge store and the hand-written configuration — the only place inside the system where the two paths meet; both paths also depend on the same embedding model, which is why the snapshot records its model tag and the engine refuses to run against a mismatch), **Question-answering path** (engine, CLI, web UI and evaluation harness built; channel adapters, identity and the serving layer are roadmap).
 
 Source: [`diagrams/container-view.mmd`](diagrams/container-view.mmd)
 
@@ -29,8 +33,8 @@ C4Container
 
     Container_Boundary(assistant, "Technical Knowledge Assistant") {
         Container_Boundary(indexing, "Indexing path") {
-            Container(receiver, "Change receiver", "Production only", "Reads sitemap last-modified dates; falls back to conditional GET")
-            ContainerQueue(queue, "Indexing queue", "Production only", "Buffers jobs, retries with backoff, and dead-letters failures")
+            Container(receiver, "Refresh trigger", "Scheduled CLI", "Revalidates with ETag and Last-Modified; compares content hashes")
+            ContainerQueue(queue, "Indexing queue", "Local durable SQLite jobs", "Buffers jobs, retries with backoff, and dead-letters failures")
             Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
             ContainerDb(cache, "Source document store", "Versioned filesystem — ships with the submission", "Original HTML and PDFs as fetched, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history")
         }
@@ -38,13 +42,13 @@ C4Container
         Container_Boundary(data, "Retrieval data") {
             ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks, embeddings, caveats, excluded documents, crawl runs, index snapshots. Exactly one active version per document, enforced by the database")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
-            ContainerDb(answercache, "Answer cache", "Production only", "Composite parts keyed on template, slots, audience set, and index version; expires with each snapshot swap")
+            ContainerDb(answercache, "Answer cache", "Built — exact-key, in process", "Finished answers keyed on the normalised question, audience set, snapshot id, generation model, and chunking version; the template-keyed form is roadmap")
         }
 
         Container_Boundary(answering, "Question-answering path") {
             Container_Boundary(access, "Inputs and integrations") {
                 Container(cli, "CLI", "Python", "Question and audience set in; answer, sources, refusal, and diagnostics out; canonical for the transcript and the harness")
-                Container(ui, "Web UI", "Streamlit", "A thin page over the same library, for the demonstration")
+                Container(ui, "Web UI", "Python stdlib HTTP server", "A thin page over the same library, for the demonstration")
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
@@ -58,7 +62,7 @@ C4Container
         }
     }
 
-    Rel_D(website, indexer, "Crawled once by sitemap")
+    Rel_D(website, indexer, "Sitemap discovery and conditional refresh")
     Rel_D(website, receiver, "Sitemap last-modified")
     Rel_D(staff, queue, "New or changed documents")
     Rel_R(receiver, queue, "Enqueues changed URLs")
@@ -79,7 +83,7 @@ C4Container
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
     Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
-    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered in the query, authority then similarity")
+    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered in code before ranking, authority then similarity")
     Rel_U(engine, config, "Reads routing and policy")
     Rel_U(engine, emb, "Embeds question")
     Rel_U(engine, gen, "Composes answer from retrieved passages")
@@ -100,12 +104,12 @@ C4Container
     UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
 
     UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
-    UpdateElementStyle(queue, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
+    UpdateElementStyle(queue, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
     UpdateElementStyle(vision, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
-    UpdateElementStyle(answercache, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(answercache, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
     UpdateRelStyle(website, receiver, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="38", $offsetY="18")
@@ -138,7 +142,9 @@ C4Container
 
 **Who sees what.** Every chunk carries audience tags and retrieval filters to the caller's audience set — in code, never by prompt. Three audiences, not two: **staff** (authenticated, full corpus plus internal material), **trade** (stockists and contractors, who in production may have portal access to trade lead times, stock and kit lists), and **public** (anonymous, published material only). In the prototype the audience set is a flag the caller asserts; in production it comes from the identity step.
 
-**Concurrency.** Retrieval scales trivially — a snapshot read is lock-free, so hundreds of concurrent retrievals cost nothing. Generation is the only bottleneck, one at a time per Ollama instance. Production therefore adds a serving layer (generation queue with a visible wait, per-session rate limiting) that degrades by dropping the compose path, not by dropping a check, and an answer cache in front of it.
+The two adapters enforce that filter in different places, and the difference is worth stating rather than smoothing over, because it is the claim a panel is most likely to probe. The PostgreSQL adapter filters in the query: `c.audience = ANY(...)` sits beside the distance operator in the same statement, so a forbidden row is never selected. The SQLite adapter — the one that ships, and the one that serves every answer in the transcript — selects the active chunks, then filters them by audience in Python inside the adapter, before scoring and before returning anything. Both filter in code, both filter before ranking, and neither is reachable by a prompt instruction; a staff-tagged fixture is provably invisible to a public caller in the evaluation and in the tests. What differs is only the mechanism, so "the filter is a `WHERE` clause" is accurate of the deployment path and not of the assessment path. The residual exposure is not the filter but the assertion behind it: the audience set is claimed, not authenticated, and over HTTP a request may only narrow what the operator started the server with.
+
+**Concurrency.** Each answer pins a consistent read transaction; writers publish atomically. SQLite serializes writes and PostgreSQL supports concurrent readers. Capacity still requires load measurement. Generation is the only bottleneck, one at a time per Ollama instance. Production therefore adds a serving layer (generation queue with a visible wait, per-session rate limiting) that degrades by dropping the compose path, not by dropping a check, and an answer cache in front of it.
 
 ## 2. Answer engine detail
 
@@ -157,7 +163,7 @@ flowchart TD
     POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
     ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tags: name, date, link"]
     SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom · cause asked · photograph · property asked for;<br/>the photograph slot adds the cannot-see-photographs line to whatever path is taken; it does not by itself route to diagnosis;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions<br/>[production] a vision model fills substrate, coatings, symptom and exposure from photographs,<br/>each with a confidence; below the floor the slot stays uncued and the flow is unchanged"]
-    RETRIEVE["Retrieval [via KnowledgeRepository]<br/>embed the question (Ollama); similarity over the knowledge store; top-k with a per-document cap;<br/>active versions only; filtered to the caller's audience set in the query, never by prompt;<br/>ranked by authority (datasheet > product page > knowledge-base article > FAQ), newest wins within a type;<br/>refuses to run if the snapshot's embedding model or chunking version does not match"]
+    RETRIEVE["Retrieval [via KnowledgeRepository]<br/>embed the question (Ollama); similarity over the knowledge store; top-k with a per-document cap;<br/>active versions only; filtered to the caller's audience set in code before ranking, never by prompt<br/>(a WHERE clause in the PostgreSQL adapter; a row filter inside the SQLite adapter, which is the one that ships);<br/>ranked by authority (datasheet > product page > knowledge-base article > FAQ), newest wins within a type;<br/>refuses to run if the snapshot's embedding model or chunking version does not match"]
     ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 a cause or defect is asked → diagnosis (a photograph alone is not a diagnosis request) · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
     DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
     EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
@@ -166,7 +172,7 @@ flowchart TD
     REFUSE["Refuse"]
     MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
     CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
-    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest;<br/>staff audience, on refusal: nearest candidates, scores, passage text · public and trade: hand-off only"]
+    HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest<br/>(a richer staff-only refusal view — nearest candidates with scores and passage text — is roadmap, not built)"]
     OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
     IN --> SPLIT --> POLICY
@@ -282,21 +288,21 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 
 | Component | Status | What it does |
 |---|---|---|
-| **Lime Green website** | External | The only content source in scope: 94 technical units, inventoried below |
+| **Lime Green website** | External | Published website corpus: 94 technical units, inventoried below; approved staff imports are an additional source |
 | **Embedding model** (Ollama) | External | Turns chunks and questions into vectors; qwen3-embedding:0.6b or nomic-embed-text, verified at build |
 | **Generation model** (Ollama) | External | Composes over retrieved passages on the Compose path only; qwen3.5:4b, with qwen3:4b-instruct as the fallback |
-| **Staff-knowledge capture** | Roadmap | Agreed answer set, failure library and compatibility matrix as text; the policy list goes to the authored configuration |
-| **Indexer** | Built, run once by hand | Crawl by sitemap → cache → extract (PyMuPDF for PDFs) → classify by link text → strip boilerplate and hazard blocks → chunk by heading, bullets and labelled sub-paragraphs kept whole → tag each document's caveat sentences → embed → write the index, the product, colour and merchant name lists, and the ingestion report → atomic swap |
+| **Staff-knowledge capture** | Partial | Approved JSON ingestion is implemented. Expert authoring, authenticated approvals, failure library and compatibility matrix remain partnership work |
+| **Indexer** | Built, delta-aware | Diffs the crawl against the content hashes of what is **currently served**, then processes only new and changed documents: extract (PyMuPDF for PDFs) → classify by link text → strip boilerplate and hazard blocks → chunk by heading, bullets and labelled sub-paragraphs kept whole → tag caveat sentences → embed → apply the delta in one transaction. A changed document supersedes the version it replaces and that version is retained; a withdrawn one is deactivated, never deleted; an unchanged one is hashed but not re-extracted, re-chunked or re-embedded. Name harvesting is deliberately a full pass every run, because it costs a second and stale lists would leave a withdrawn colour in the vocabulary check 5 trusts. Model/dimension/chunking changes automatically reprocess the corpus; `--rebuild` forces reprocessing while retaining history |
 | **Source document store** | Built, shipped | Original HTML and PDFs as fetched, on a versioned filesystem, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history. Ships so the assessors run offline without repeating the crawl |
-| **Change receiver** | Roadmap | Reads the sitemap's last-modified, falls back to conditional GET per page, enqueues changed URLs |
-| **Indexing queue** | Roadmap | Buffers change jobs from both sources; retries with backoff; dead-letters after the limit |
-| **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics |
+| **Refresh trigger** | Built | Scheduled CLI jobs invoke conditional crawl and indexing. A configured cron or Task Scheduler job supplies cadence |
+| **Indexing queue** | Built | Durable local SQLite jobs, idempotent enqueue, backoff, expiring leases and dead-letter evidence; one ingestion host |
+| **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics, and both implement the same delta contract: `apply_delta`, `active_content_hashes`, `versions` and `crawl_runs` |
 | **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
-| **Answer cache** | Roadmap | Composite parts keyed on template, slots, audience set and index version; expires with each snapshot swap |
+| **Answer cache** | Built, exact-key | Finished answers keyed on the normalised question, the audience set, the snapshot id, the generation model and the chunking version. Refusals cached too. The template-keyed form decision 14 designs is roadmap; this is the weaker exact-match form, identical on safety and poorer on hit rate |
 | **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
 | **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
-| **Web UI** | Built | A thin Streamlit page over the same library, for the demonstration |
-| **Evaluation harness** | Built | Seven transcript situations, probe suite, threshold sweep, pass/fail, self-describing header, one synthetic staff-tagged fixture that must be invisible in public mode |
+| **Web UI** | Built | A thin standard-library HTTP page over the same library, for the demonstration |
+| **Evaluation harness** | Built | Nine transcript situations — including the two multi-source ones decision 7.3 scores grounded reasoning on — plus the probe suite, threshold sweep, pass/fail, self-describing header, and one synthetic staff-tagged fixture that must be invisible in public mode |
 | **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
 | **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
 | **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |
@@ -338,4 +344,4 @@ Method: `sitemap.xml` (exists, complete, referenced from `robots.txt`); every pr
 
 **What this fixes in the build:** chunk by heading; never split a bullet or a labelled sub-paragraph; strip header blocks, hazard and PPE blocks, and repeated colour lists; normalise m2/m²/m3 and °C/oC for comparison only, never for display; carry the page-side product name, the printed date and the link text into metadata; and tag each document's caveat sentences at ingestion (deferral sentences excluded — they take the cited hand-off path) so they are appended by code whenever a chunk of that document is printed or composed over.
 
-**Corpus boundary applied to these facts.** In: 36 product pages, 34 technical datasheets, 3 Warmshell system guides, 2 Warmshell system pages, 1 FAQ page (32 Q&A chunks), 15 knowledge-base articles, 3 commercial pages — **94 units, roughly 600–800 chunks, measured at build.** Spend order if extraction QA bites: datasheets → FAQ → high-tier articles → contact and find-a-supplier → product pages → Warmshell guides → remaining articles → order-a-sample; anything dropped is listed in the manifest as excluded, by name and link.
+**Corpus boundary applied to these facts.** In: 36 product pages, 34 technical datasheets, 3 Warmshell system guides, 2 Warmshell system pages, 1 FAQ page (32 Q&A chunks), 15 knowledge-base articles, 3 commercial pages — **94 units, plus one staff-tagged evaluation fixture; 552 passages, measured at build.** Spend order if extraction QA bites: datasheets → FAQ → high-tier articles → contact and find-a-supplier → product pages → Warmshell guides → remaining articles → order-a-sample; anything dropped is listed in the manifest as excluded, by name and link.

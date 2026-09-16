@@ -11,9 +11,13 @@ asks a price and a coverage should not have one path chosen for both.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from . import observability as obs
+from . import ollama
 from .answer import Answer, AnswerEngine
+from .cache import AnswerCache
+from .model import AnswerLogEntry
 from .retrieve import Retriever
 from .router import Decision, Path_, Router, split_by_topic
 
@@ -39,6 +43,7 @@ class Reply:
     question: str
     parts: list[tuple[str, Answer]] = field(default_factory=list)
     audiences: tuple[str, ...] = ("public",)
+    correlation_id: str = ""
 
     @property
     def refused(self) -> bool:
@@ -52,29 +57,127 @@ class Reply:
 class Assistant:
     """Retrieval, routing and answering behind one call."""
 
-    def __init__(self, repo, threshold: float | None = None) -> None:
+    def __init__(self, repo, threshold: float | None = None, *,
+                 cache: bool = True, log: bool = True) -> None:
+        self.log = log
         self.repo = repo
         self.retriever = Retriever(repo, **({"threshold": threshold}
                                             if threshold is not None else {}))
         self.router = Router()
         self.engine = AnswerEngine(repo, self.router)
+        # Exact-key, audience-scoped, snapshot-scoped. See assistant/cache.py
+        # for why it is not the template-keyed cache decision 14 designs.
+        self.cache = AnswerCache() if cache else None
         # The engine needs the slot vocabulary for the relevance check, and the
         # router owns it. Handing over the router rather than a copy keeps one
         # definition of what a term means.
         self.engine.retriever = self.router
 
-    def ask(self, question: str, audiences: tuple[str, ...] = ("public",)) -> Reply:
+    def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
+            correlation_id: str = "") -> Reply:
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
-        for part in split_by_topic(question):
-            reply.parts.append((part, self._answer_part(part, audiences)))
+        # One id for the whole message, including every part it splits into, so
+        # the lines for a two-topic question can be read as one event. A caller
+        # that already has a request id — a web request, a channel adapter —
+        # passes it in rather than starting a second trace for the same work.
+        with obs.correlation(correlation_id) as cid:
+            reply.correlation_id = cid
+            with obs.timed("answer", audiences=list(audiences),
+                           question_words=len(question.split()),
+                           question=obs.fingerprint(question)) as summary:
+                self._ask(question, audiences, reply, cid)
+                summary["parts"] = len(reply.parts)
+                summary["paths"] = reply.paths
+                summary["refused"] = reply.refused
         return reply
+
+    def _ask(self, question: str, audiences: tuple[str, ...], reply: Reply,
+             cid: str) -> None:
+        with self.repo.read_snapshot() as snapshot:
+            self.retriever._verify()
+            # Names/contact are release metadata too; refresh them together
+            # with the passages rather than retaining the startup snapshot.
+            self.engine.names = {key: snapshot.notes.get(key, default) for key, default in
+                                 (("products", []), ("colours", []), ("merchants", []), ("contact", {}))}
+            for part in split_by_topic(question):
+                key = self._cache_key(part, audiences, snapshot)
+                # `is not None`, not truthiness. AnswerCache defines __len__,
+                # so an empty cache is falsy and `if self.cache` was False on
+                # every call — the cache could never fill, because it was empty.
+                answer = self.cache.get(key) if self.cache is not None else None
+                obs.event("cache", hit=answer is not None,
+                          question=obs.fingerprint(part),
+                          snapshot_id=snapshot.snapshot_id)
+                if answer is None:
+                    answer = self._answer_part(part, audiences)
+                    answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
+                    answer.diagnostics["embedding_model"] = snapshot.embedding_model
+                    answer.diagnostics["chunking_version"] = snapshot.chunking_version
+                    if self.cache is not None:
+                        self.cache.put(key, answer)
+                else:
+                    # Copy before annotating. The cache holds one Answer and
+                    # hands the same object to every caller, so writing this
+                    # request's correlation id onto it overwrites the last
+                    # reader's — two concurrent callers on the threading server
+                    # would each find the other's trace in their diagnostics.
+                    # The answer text was never at risk; the ability to trace it
+                    # was, which is exactly what the id is for.
+                    answer = replace(answer, diagnostics={**answer.diagnostics,
+                                                          "cached": True})
+                # Carried on the answer as well as in the log, so a diagnostics
+                # dump and a log line can be joined without the store.
+                answer.diagnostics["correlation_id"] = cid
+                reply.parts.append((part, answer))
+
+        # Logged outside the read snapshot, deliberately. SQLite's snapshot ends
+        # in a rollback and the Postgres one is REPEATABLE READ READ ONLY, so an
+        # insert inside either is lost or raises.
+        if self.log:
+            self._log(reply)
+
+    def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot):
+        return AnswerCache.key(part, audiences, snapshot.snapshot_id,
+                               ollama.GENERATION_MODEL, snapshot.chunking_version)
+
+    def _log(self, reply: Reply) -> None:
+        """Record each part, and never let recording break the answer.
+
+        A store that cannot write the log still has a perfectly good answer in
+        hand. Losing it to an audit failure would invert the priority the rest
+        of the design is built on.
+        """
+        for part, answer in reply.parts:
+            entry = AnswerLogEntry(
+                question=part,
+                path_taken=answer.path,
+                audiences=reply.audiences,
+                snapshot_id=answer.diagnostics.get("snapshot_id", ""),
+                chunk_ids=list(answer.diagnostics.get("chunk_ids", [])),
+                generation_model=(ollama.GENERATION_MODEL
+                                  if answer.diagnostics.get("generation_seconds")
+                                  else ""),
+                check_failed="; ".join(answer.failed_checks),
+            )
+            try:
+                self.repo.log_answer(entry)
+            except Exception as error:
+                # Never let an audit failure cost a good answer — but never let
+                # it pass unnoticed either. `CLAUDE.md`: do not silently swallow
+                # failures. The answer survives; the operator finds out.
+                obs.event("store_error", operation="log_answer",
+                          error=type(error).__name__, detail=str(error))
 
     def _answer_part(self, part: str, audiences: tuple[str, ...]) -> Answer:
         matched = self.router.gate.match(part)
         if matched:
             topic, spec = matched
+            # The policy gate is a routing decision like any other, and it is
+            # the one that keeps the model away from prices and stock. It is
+            # worth being able to count how often it fires.
+            obs.event("route", path=Path_.ROUTE.value, topic=topic, step="gate")
             if spec.get("from_manifest"):
                 return self.engine.documents_for(part, audiences)
             return self.engine.route(topic, spec)
@@ -82,6 +185,10 @@ class Assistant:
         hits = self.retriever.search(part, audiences=audiences)
         decision = self.router.route(
             part, hits, self.retriever.above_threshold(hits), audiences)
+        obs.event("route", path=decision.path.value, step=decision.step,
+                  reason=decision.reason,
+                  top_score=hits[0].score if hits else 0.0,
+                  slots=sorted(decision.slots))
 
         return {
             Path_.EXTRACT: lambda: self.engine.extract(decision),

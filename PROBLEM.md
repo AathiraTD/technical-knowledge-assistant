@@ -40,30 +40,39 @@ Everything runs locally. No data leaves the machine.
 | Crawler | Sitemap-driven, robots-aware, rate-limited, content-hashed, with a version ledger |
 | Extraction | Two heading detectors for PDFs, DOM-aware for HTML, quality recorded per document |
 | Indexer | Structure-aware chunking, caveat tagging, name harvesting, atomic snapshot publish |
-| Storage | `KnowledgeRepository` with a SQLite adapter; the same schema in PostgreSQL + pgvector |
-| Retrieval | Local embeddings, audience filtering in the query, authority ranking with recency |
+| Delta ingestion | Unchanged documents skipped entirely; changed ones superseded with history retained; withdrawn ones deactivated; every run recorded |
+| Storage | `KnowledgeRepository` with two adapters behind it — SQLite ships and serves every answer in the transcript; PostgreSQL + pgvector passes the same contract against a real instance |
+| Retrieval | Local embeddings, audience filtering in code before ranking — a `WHERE` clause in PostgreSQL, a row filter in Python in SQLite — authority ranking with recency |
 | Router | Eleven-topic policy gate, eight slots, eight ordered decisions |
 | Answering | Five paths plus two composites, six post-generation checks, hand-off rendering |
 | Interfaces | A CLI and a web page, both over one library |
-| Evaluation | **7/7 situations, 10/10 probes**, audience filter passing both ways, a threshold sweep, and 284 unit tests |
+| Evaluation | **9/9 situations, 10/10 probes**, audience filter passing both ways, a threshold sweep, and 648 unit tests |
 
 ## What was not built, and why
 
 **Authentication.** The audience set is asserted at the command line, not proved.
-The filter itself is real — it runs as a `WHERE` clause against rows, and the
-evaluation demonstrates a staff-tagged document being invisible to a public
-caller — but nothing stops a caller asserting `--audience staff`. Identity is
-the first thing a deployment adds, and it slots in above the retrieval call
-without changing it.
+The filter itself is real — it is applied to rows inside the repository, before
+anything is ranked and long before a prompt is built, and the evaluation
+demonstrates a staff-tagged document being invisible to a public caller — but
+nothing stops a caller asserting `--audience staff`. Identity is the first thing
+a deployment adds, and it slots in above the retrieval call without changing it.
+The web page is narrower than the command line: a request there may only narrow
+the audience set the operator started the server with, never widen it, because a
+query string is not a credential.
 
-**The PostgreSQL adapter runs nowhere yet.** It is written in full, against the
-same Protocol and the same eight tables, putting the audience filter, the
-active-version join, the authority ordering and the distance operator into one
-query. It has never executed. `psycopg` publishes no Windows ARM64 wheel and
-Docker's daemon is not running on the build machine, so the contract suite
-**skips** it rather than passing it, and the CI workflow runs it against a real
-pgvector service precisely because this machine cannot. Parity of design is not
-parity of testing, and until that job goes green the claim is unproven.
+**A deployed PostgreSQL instance.** The adapter itself is no longer the gap it
+once was: it is written against the same Protocol and the same eight tables,
+putting the audience filter, the active-version join, the authority ordering and
+the distance operator into one query, and it now executes — the repository
+contract, the ingestion lifecycle, the publication lock and the concurrent-reader
+tests all run against a real PostgreSQL 16 with pgvector, in CI and in a
+container, and the evidence is recorded in
+[`docs/knowledge-pipeline-verification.md`](docs/knowledge-pipeline-verification.md).
+What is still absent is a deployment. `psycopg` publishes no Windows ARM64 wheel,
+so on this build machine those 43 tests **skip** rather than run, the transcript
+is produced on SQLite, and nothing has yet served a question from Postgres under
+load. The adapter is built and verified against the contract; the operation of it
+is not evidenced here.
 
 **Vision.** Users want to photograph a wall and be told what to plaster it with.
 The model family chosen has a vision sibling, so this is a capability question
@@ -74,11 +83,28 @@ output this system could produce. The roadmap for doing it properly is
 documented; the current behaviour is to say it cannot see the image, quote what
 the sheets do say about the symptom, and hand over.
 
-**The re-crawl hook.** The crawler detects change by content hash and the design
-for an event-triggered delta re-index is recorded, but it runs by hand.
+**The re-crawl trigger.** Ingestion is now a true delta: a second crawl of an
+unchanged site reprocesses nothing, a changed document supersedes the version it
+replaces and keeps it, and a withdrawn one is deactivated rather than deleted.
+What is still absent is the *trigger* — the pipeline runs by hand rather than
+from a change hook.
 
-**Caching of answers, queueing, and concurrency.** Designed and documented for
-production, not built. At one user on one laptop there is nothing to cache.
+**Queueing and load shedding.** A generation queue with a visible wait,
+per-session rate limiting and extract-only degradation under load are designed
+and documented, not built. Generation is one at a time per Ollama instance, so
+that is the part that would actually bind under real demand.
+
+Two things this used to disclaim have since been built, and the exclusion is
+narrowed rather than quietly dropped. The **answer cache** exists — exact-key
+rather than the template-keyed form the record designs, audience- and
+snapshot-scoped, taking a repeated question from 40.78 s to 0.017 s.
+**Concurrent serving** exists too, because the web page raised a database error
+on every question until it did: the store is opened for cross-thread use and
+serialised behind one reentrant lock, each answer pins a consistent read, and
+correlation ids are per-context so two simultaneous questions cannot pick up
+each other's trace. Neither was scope creep — the first fell out of measuring
+latency, the second out of fixing a demo-breaking bug — but both make the old
+sentence understate what ships.
 
 **Safety data sheets.** Deliberately not indexed. They are controlled documents
 that must be read whole and current, and quoting them in fragments is the wrong
@@ -93,14 +119,15 @@ refusal state, or a string that must or must not appear. The transcript is in
 
 | | |
 |---|---|
-| Situations | 7 of 7 |
+| Situations | 9 of 9 |
 | Guardrail probes | 10 of 10 |
 | Audience filter | staff material invisible to a public caller, visible to staff |
-| Unit tests | 284, passing with every outbound socket blocked |
+| Unit tests | 648 passed, 43 skipped, with every outbound socket blocked. The skips are the PostgreSQL-gated tests, which need `ASSISTANT_POSTGRES_DSN`; CI supplies one and runs them |
 | Safety-critical coverage | 100% line and branch |
 
-The threshold sweep produced the result worth arguing about. The two questions
-the corpus cannot answer retrieve **more** confidently than the two it can:
+The threshold sweep runs over the six situations that reach retrieval, and
+produced the result worth arguing about. The two questions the corpus cannot
+answer retrieve **more** confidently than the two straightforward ones it can:
 
 | Situation | Top score | Should |
 |---|---|---|
@@ -109,12 +136,14 @@ the corpus cannot answer retrieve **more** confidently than the two it can:
 | The pot life of Duro, published nowhere | 0.717 | refuse |
 | The U-value of Solo, published nowhere | 0.739 | refuse |
 
-No threshold in the swept range separates them, and none could: a question about
-the U-value of Solo is a well-formed question about a real product, so the Solo
-datasheet genuinely is its nearest neighbour. Abstention by distance alone would
-have admitted both. The relevance gate refuses both, by observing that the
-asked-for term appears in no retrieved passage. That is the measured case for
-the design, and it is the opposite of what a similarity score is assumed to do.
+At 0.35, 0.45 and 0.55 the sweep reports the same thing: six answered, none
+wrongly refused, two wrongly admitted. No threshold in the swept range separates
+them, and none could: a question about the U-value of Solo is a well-formed
+question about a real product, so the Solo datasheet genuinely is its nearest
+neighbour. Abstention by distance alone would have admitted both. The relevance
+gate refuses both, by observing that the asked-for term appears in no retrieved
+passage. That is the measured case for the design, and it is the opposite of
+what a similarity score is assumed to do.
 
 ## Known weaknesses
 
@@ -145,7 +174,7 @@ python -m eval.run             # situations, probes, sweep, audience filter
 python -m assistant.health     # is it actually able to answer?
 
 pip install pytest coverage
-python -m pytest -q tests/     # 284 tests, no Ollama, no network, no index
+python -m pytest -q tests/     # 648 tests, no Ollama, no network, no index
 python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
 python -m coverage report --rcfile=.coveragerc
 ```

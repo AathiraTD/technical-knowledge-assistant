@@ -21,6 +21,7 @@ import types
 from pathlib import Path
 
 import pytest
+from assistant.index import CHUNKING_VERSION
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -60,7 +61,7 @@ def build_store(tmp_path, embedding_model: str = "", chunks: int = 2) -> Path:
             snapshot_id="snap-test", created_at="2026-01-01T00:00:00Z",
             embedding_model=embedding_model or ollama.EMBED_MODEL,
             embedding_dimensions=ollama.EMBED_DIMENSIONS,
-            chunking_version="test/1.0", document_count=1, chunk_count=chunks,
+            chunking_version=CHUNKING_VERSION, document_count=1, chunk_count=chunks,
             notes={"products": ["Solo"]})
         repo.publish(documents, versions, made, snapshot)
     finally:
@@ -193,7 +194,7 @@ def test_a_configured_dsn_checks_postgres_instead_of_sqlite(monkeypatch, ollama_
             return Snapshot(snapshot_id="snap-pg", created_at="2026-01-01",
                             embedding_model=ollama.EMBED_MODEL,
                             embedding_dimensions=ollama.EMBED_DIMENSIONS,
-                            chunking_version="test/1.0", document_count=1,
+                            chunking_version=CHUNKING_VERSION, document_count=1,
                             chunk_count=7)
 
     module = types.ModuleType("assistant.store.postgres")

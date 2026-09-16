@@ -12,11 +12,14 @@ question "why isn't the safety data sheet in here?" has an answer on file.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import time
+import uuid
 import urllib.robotparser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -87,6 +90,10 @@ def load_ledger() -> dict:
     lets the index hold exactly one active version of a document — the rule the
     answer engine depends on when it refuses to blend two versions.
     """
+    pointer = CACHE / "crawl-current.json"
+    if pointer.exists():
+        release = CACHE / json.loads(pointer.read_text(encoding="utf-8"))["release"]
+        return json.loads(release.read_text(encoding="utf-8"))["ledger"]
     if LEDGER.exists():
         return json.loads(LEDGER.read_text(encoding="utf-8"))
     return {}
@@ -132,8 +139,44 @@ def reconcile(ledger: dict, url: str, content: bytes | str, headers: dict) -> di
             "supersedes": prior["content_hash"],
             "change": "changed",
         }
+    history = list(prior.get("history", [])) if prior else []
+    if prior and prior["content_hash"] != digest:
+        history.append({k: v for k, v in prior.items() if k != "history"})
+    record["history"] = history
+    source = archive_source(url, content)
+    record["source_path"] = os.path.relpath(source, ROOT).replace("\\", "/")
+    record["is_active"] = True
+    for header, key in (("etag", "etag"), ("last-modified", "last_modified")):
+        if header in headers:
+            record[key] = headers[header]
     ledger[url] = record
     return record
+
+
+def archive_source(url: str, content: bytes | str, *, cache: Path | None = None) -> Path:
+    """Keep original source bytes under immutable URL/content identities."""
+    blob = content.encode("utf-8") if isinstance(content, str) else content
+    identity = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(blob).hexdigest()
+    suffix = ".pdf" if urlparse(url).path.lower().endswith(".pdf") else ".html"
+    path = (cache if cache is not None else CACHE) / "versions" / identity / (digest + suffix)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        atomic_write(path, blob)
+    elif path.read_bytes() != blob:
+        raise ValueError(f"Archived source is corrupt: {path}")
+    return path
+
+
+def atomic_write(path: Path, blob: bytes) -> None:
+    """Publish a complete file; interrupted writes cannot truncate its predecessor."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = path.with_name(uuid.uuid4().hex + ".tmp")
+    try:
+        staging.write_bytes(blob)
+        os.replace(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 def load_config() -> dict:
@@ -195,35 +238,100 @@ def document_kind(link_text: str, cfg: dict) -> str | None:
     return None
 
 
-def fetch(client: httpx.Client, url: str, delay: float) -> httpx.Response:
-    time.sleep(delay)
-    return client.get(url)
+def _origin(url):
+    parsed = httpx.URL(url)
+    return parsed.scheme, parsed.host, parsed.port
+
+
+def _get(client, url, headers):
+    target = url
+    for _ in range(6):
+        response = client.get(target, headers=headers, follow_redirects=False)
+        if not response.has_redirect_location:
+            return response
+        target = urljoin(target, response.headers["location"])
+        if _origin(target) != _origin(url):
+            raise ValueError("Cross-publisher redirect rejected")
+    raise ValueError("Too many source redirects")
+
+
+def fetch(client: httpx.Client, url: str, delay: float,
+          headers: dict | None = None) -> httpx.Response:
+    """Bounded retries for transient transport/server failures."""
+    attempt = 0
+    while True:
+        time.sleep(delay * (2 ** attempt))
+        try:
+            response = _get(client, url, headers)
+        except httpx.TransportError:
+            if attempt == 2:
+                raise
+            attempt += 1
+            continue
+        if response.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
+            return response
+        attempt += 1
 
 
 def load_or_fetch(
-    client: httpx.Client, url: str, dest: Path, delay: float, binary: bool = False
+    client: httpx.Client, url: str, dest: Path, delay: float, binary: bool = False,
+    *, refresh: bool = False, prior: dict | None = None,
 ) -> tuple[bytes | str | None, bool, int, dict]:
     """Return cached content if we already have it, otherwise fetch once.
 
     The cache ships with the submission, so a second run must not hit the
     partner's site again. Returns (content, from_cache, status).
     """
-    if dest.exists() and dest.stat().st_size > 0:
+    cached = dest.exists() and dest.stat().st_size > 0
+    if cached and not refresh:
         content = dest.read_bytes() if binary else dest.read_text(encoding="utf-8")
         return content, True, 200, {}
-    r = fetch(client, url, delay)
+    conditional = {}
+    if cached and prior:
+        if prior.get("etag"):
+            conditional["If-None-Match"] = prior["etag"]
+        if prior.get("last_modified"):
+            conditional["If-Modified-Since"] = prior["last_modified"]
+    r = fetch(client, url, delay, headers=conditional)
+    headers = {k.lower(): v for k, v in r.headers.items()}
+    if r.status_code == 304 and cached:
+        content = dest.read_bytes() if binary else dest.read_text(encoding="utf-8")
+        return content, True, 304, headers
     if r.status_code != 200:
         return None, False, r.status_code, {}
-    headers = {k.lower(): v for k, v in r.headers.items()}
     return (r.content if binary else r.text), False, r.status_code, headers
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Fetch and publish a versioned source release")
+    parser.add_argument("--refresh", action="store_true", help="Revalidate cached sources with HTTP validators")
+    args = parser.parse_args(argv)
+    return run(refresh=args.refresh)
+
+
+def run(refresh: bool = False) -> int:
+    try:
+        return _run(refresh)
+    except Exception as exc:
+        atomic_write(CACHE / "crawl-failure.json", json.dumps({
+            "status": "failed", "error": str(exc),
+            "at": datetime.now(timezone.utc).isoformat(),
+        }).encode("utf-8"))
+        raise
+
+
+def _run(refresh: bool) -> int:
     cfg = load_config()
     site = cfg["site"].rstrip("/")
     log = CrawlLog()
     from_cache = 0
     ledger = load_ledger()
+    # Upgrade legacy URL caches before fetching new bytes, while originals
+    # still exist. New release records always point at immutable evidence.
+    for url, record in ledger.items():
+        old = cache_path(url)
+        if not record.get("source_path") and old.exists():
+            record["source_path"] = os.path.relpath(archive_source(url, old.read_bytes()), ROOT).replace("\\", "/")
     changes: dict[str, int] = {}
 
     (CACHE / "pages").mkdir(parents=True, exist_ok=True)
@@ -244,11 +352,16 @@ def main() -> int:
     ) as client:
         print(f"Sitemap: {cfg['sitemap']}")
         sitemap = fetch(client, cfg["sitemap"], 0)
+        sitemap.raise_for_status()
         urls = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap.text)
+        if not urls:
+            raise ValueError("Empty or malformed sitemap; previous release retained")
         print(f"  {len(urls)} URLs listed\n")
 
         keep: list[str] = []
         for url in urls:
+            if _origin(url) != _origin(site):
+                raise ValueError("Sitemap contains a URL outside the configured publisher")
             path = urlparse(url).path.rstrip("/") or "/"
             ok, reason = wanted(path, cfg)
             if ok:
@@ -279,13 +392,17 @@ def main() -> int:
                 continue
             dest = cache_path(url)
             try:
-                text, cached, status, headers = load_or_fetch(client, url, dest, cfg["delay_seconds"])
+                prior = ledger.get(url)
+                source = ROOT / prior["source_path"] if prior and prior.get("source_path") else dest
+                text, cached, status, headers = load_or_fetch(client, url, source, cfg["delay_seconds"], refresh=refresh, prior=prior)
             except Exception as exc:
                 log.errors.append({"url": url, "error": str(exc)})
                 print(f"  [{i:>3}/{len(keep)}] ERROR {url}: {exc}")
                 continue
 
             if text is None:
+                if status in (404, 410):
+                    continue
                 log.errors.append({"url": url, "status": status})
                 print(f"  [{i:>3}/{len(keep)}] {status} {path}")
                 continue
@@ -303,7 +420,7 @@ def main() -> int:
             log.fetched.append(
                 Fetched(
                     url=url,
-                    path=str(dest.relative_to(ROOT)).replace("\\", "/"),
+                    path=rec["source_path"],
                     kind="page",
                     doc_type=doc_type,
                     title=title,
@@ -328,6 +445,9 @@ def main() -> int:
                 link_text = a.get_text(" ", strip=True)
                 kind = document_kind(link_text, cfg)
                 doc_url = urljoin(url, href)
+                if _origin(doc_url) != _origin(site):
+                    log.skipped.append(Skipped(doc_url, "outside the configured publisher"))
+                    continue
                 if kind is None:
                     if doc_url not in seen_docs:
                         log.skipped.append(
@@ -340,13 +460,6 @@ def main() -> int:
                 seen_docs.add(doc_url)
                 pending_docs.append((doc_url, link_text, title))
 
-        # explicitly included system guides
-        for rel in cfg["system_guides"]["include_urls"]:
-            doc_url = urljoin(site + "/", rel.lstrip("/"))
-            if doc_url not in seen_docs:
-                seen_docs.add(doc_url)
-                pending_docs.append((doc_url, "system guide", "Warmshell system"))
-
         print(f"\nDocuments to fetch: {len(pending_docs)}\n")
 
         for i, (doc_url, link_text, product) in enumerate(pending_docs, 1):
@@ -355,14 +468,19 @@ def main() -> int:
                 continue
             dest = cache_path(doc_url)
             try:
+                prior = ledger.get(doc_url)
+                source = ROOT / prior["source_path"] if prior and prior.get("source_path") else dest
                 blob, cached, status, headers = load_or_fetch(
-                    client, doc_url, dest, cfg["delay_seconds"], binary=True
+                    client, doc_url, source, cfg["delay_seconds"], binary=True,
+                    refresh=refresh, prior=prior,
                 )
             except Exception as exc:
                 log.errors.append({"url": doc_url, "error": str(exc)})
                 print(f"  [{i:>3}/{len(pending_docs)}] ERROR {doc_url}: {exc}")
                 continue
             if blob is None:
+                if status in (404, 410):
+                    continue
                 log.errors.append({"url": doc_url, "status": status})
                 print(f"  [{i:>3}/{len(pending_docs)}] {status} {doc_url}")
                 continue
@@ -377,7 +495,7 @@ def main() -> int:
             log.fetched.append(
                 Fetched(
                     url=doc_url,
-                    path=str(dest.relative_to(ROOT)).replace("\\", "/"),
+                    path=rec["source_path"],
                     kind="system_guide" if is_guide else "datasheet",
                     doc_type="system_guide" if is_guide else "datasheet",
                     link_text=link_text,
@@ -409,10 +527,19 @@ def main() -> int:
         "fetched": [asdict(f) for f in log.fetched],
         "skipped": [asdict(s) for s in log.skipped],
     }
-    (CACHE / "crawl-log.json").write_text(
-        json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    LEDGER.write_text(json.dumps(ledger, indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write(CACHE / "crawl-report.json", json.dumps(out, ensure_ascii=False).encode("utf-8"))
+    if not log.errors:
+        fetched_urls = {entry.url for entry in log.fetched}
+        for url, record in ledger.items():
+            if url not in fetched_urls:
+                record["is_active"] = False
+        release_name = "releases/" + uuid.uuid4().hex + ".json"
+        atomic_write(CACHE / release_name, json.dumps({"log": out, "ledger": ledger}, ensure_ascii=False).encode("utf-8"))
+        atomic_write(CACHE / "crawl-current.json", json.dumps({"release": release_name}).encode("utf-8"))
+        # Compatibility reports are not the publication boundary. Readers use
+        # the single release pointer above, so these cannot be read half-paired.
+        atomic_write(CACHE / "crawl-log.json", json.dumps(out, ensure_ascii=False).encode("utf-8"))
+        atomic_write(LEDGER, json.dumps(ledger, ensure_ascii=False).encode("utf-8"))
 
     print("\n" + "=" * 60)
     print("CRAWL COMPLETE")

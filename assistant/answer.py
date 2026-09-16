@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import observability as obs
 from . import ollama
 from .model import Retrieved
 from .router import Decision, Path_
@@ -102,6 +103,15 @@ _NUMBER = re.compile(
     re.I,
 )
 
+_QUALIFIER = re.compile(
+    r"\b(minimum|maximum|at least|up to|no more than|below|above)\b", re.I)
+
+# How close a qualifier has to sit to its figure in the passage to count as
+# attached. A sentence is the natural unit, and a datasheet sentence runs to
+# roughly this length; wider and a qualifier from the previous sentence starts
+# to count, which is the failure this window exists to stop.
+QUALIFIER_WINDOW = 60
+
 _STOP = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is", "are",
     "be", "with", "as", "at", "by", "it", "this", "that", "from", "can", "will",
@@ -112,6 +122,19 @@ _STOP = {
 def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower())
             if w not in _STOP and len(w) > 2}
+
+
+# Clause separators. Semicolons and colons always start a new assertion; a
+# comma does so only before a word that opens one, because splitting on every
+# comma would cut "5, 6 litres" and every ordinary list.
+_CLAUSE = re.compile(
+    r"\s*[;:]\s*|,\s+(?=(?:and|but|so|then|though|although|while|whereas|"
+    r"it|they|this|these|that|which|there)\b)", re.I)
+
+
+def _clauses(sentence: str) -> list[str]:
+    """A sentence split where a new claim can begin."""
+    return [c.strip() for c in _CLAUSE.split(sentence) if c.strip()]
 
 
 def _normalise_number(token: str) -> str:
@@ -126,6 +149,21 @@ def _normalise_number(token: str) -> str:
     return t
 
 
+# What a coverage or pack-size passage actually says. Deliberately about the
+# words a datasheet uses rather than its headings: Duro prints "1 bag will cover
+# 1 m 2" under "Storage", and Fine Stuff gives coverage its own section. A
+# heading-based rule would find one and miss the other.
+_COVERAGE = re.compile(
+    r"\bcover(?:s|age|ing)?\b|\bspread\s*rate\b|\byield\b|"
+    # An area unit, however the sheet spaces it: "1m2", "1½ m 2", "1 m²".
+    r"m\s?[2²](?![0-9a-z])", re.I)
+
+
+def _mentions_coverage(text: str) -> bool:
+    """Does this passage carry the figure a quantity question needs?"""
+    return bool(_COVERAGE.search(text))
+
+
 def _numbers(text: str) -> list[str]:
     """Figures with their units attached, which is the unit of comparison.
 
@@ -133,6 +171,35 @@ def _numbers(text: str) -> list[str]:
     one; an earlier guard re-checked for a digit here and could never fire.
     """
     return [m.group(0).strip() for m in _NUMBER.finditer(text)]
+
+
+def _figure_is_published(token: str, passage: str) -> bool:
+    """Is this exact figure in the passage — not merely inside one of its figures?
+
+    A plain substring test is what this used to do, and it let a fabricated
+    figure through whenever it happened to be a tail of a real one. Two cases,
+    both found by review rather than by use, and both are the failure the brief
+    names outright — an assistant confidently wrong about a number:
+
+        passage "Pack size is 25 kg"      answer "the pack is 5 kg"    printed
+        passage "16 to 20 m2 per bag"     answer "6 to 20 m2 per bag"  printed
+
+    A 25 kg sack quoted as 5 kg is a wrong mix on site. Dropping a leading digit
+    is also the single most likely token-level error a model makes.
+
+    The fix is to anchor the match at a digit boundary rather than to demand
+    equality with a whole published figure. Equality would be stricter and
+    wrong: the Solo sheet prints "5-6 litres" and an answer saying "between 5
+    and 6 litres" is correct, cites correctly, and must not be refused — it is
+    the brief's own first test question. So the rule is that a figure may sit
+    inside a published figure, but not with another digit or a decimal point
+    pressed against it. "6" may match in "5-6"; it may not match in "16".
+    """
+    # A dot only disqualifies when it is a decimal point — one with a digit on
+    # the far side. Rejecting every dot would reject "8 mm" at the end of a
+    # sentence, which is where figures most often sit.
+    anchored = (rf"(?<!\d)(?<!\d\.){re.escape(token)}(?!\d)(?!\.\d)")
+    return re.search(anchored, passage) is not None
 
 
 def run_checks(
@@ -160,12 +227,33 @@ def run_checks(
         for m in marks:
             h = cited_index[m]
             passage_words |= _words(f"{h.chunk.section} {h.chunk.content}")
-        sentence_words = _words(_CITE.sub("", sentence))
-        if sentence_words and len(sentence_words & passage_words) / len(sentence_words) < 0.4:
-            failures.append(
-                f"check 1: a sentence does not overlap the passage it cites — "
-                f"{sentence[:70]!r}"
-            )
+        # Clause by clause, not sentence by sentence. Measured over a whole
+        # sentence, a grounded opening dilutes a fabricated tail below the
+        # threshold and carries it onto the page under the opening's citation:
+        #
+        #   "Solo suits most solid masonry backgrounds [1]; it is fine on cob."
+        #
+        # printed, while the bare "Ultra is probably fine on cob [1]" refused —
+        # the same invention, hidden behind a true clause. `DECISIONS.md` names
+        # that inference as the design's weakest point and says check 1 kills
+        # it; it only killed the standalone form.
+        #
+        # Each clause is still checked against the whole sentence's citations
+        # rather than being made to carry its own marker, because the model is
+        # told to cite per sentence and splitting that requirement would refuse
+        # ordinary correct answers.
+        for clause in _clauses(_CITE.sub("", sentence)):
+            clause_words = _words(clause)
+            if not clause_words:
+                continue        # nothing but stop words; no claim to check
+            # One content word is still a claim: "[1]: it will not crack"
+            # reduces to {crack} and is an outcome promise the passages do not
+            # support. Skipping short clauses is what let that one print.
+            if len(clause_words & passage_words) / len(clause_words) < 0.4:
+                failures.append(
+                    f"check 1: a clause does not overlap the passage it cites — "
+                    f"{clause[:70]!r}"
+                )
 
     # 2 — every number appears verbatim in a passage the sentence cites.
     for sentence in sentences:
@@ -175,7 +263,7 @@ def run_checks(
         )
         cited_norm = _normalise_number(cited_text)
         for token in _numbers(_CITE.sub("", sentence)):
-            if _normalise_number(token) not in cited_norm:
+            if not _figure_is_published(_normalise_number(token), cited_norm):
                 failures.append(
                     f"check 2: {token!r} is not in the passage it is cited to"
                 )
@@ -196,8 +284,22 @@ def run_checks(
             cited_index[m].document.product.lower()
             for m in marks if m in cited_index and cited_index[m].document.product
         }
+        # A passage may legitimately name another product. The Forte datasheet's
+        # Finishing Coats section says which finish coats go over Forte and how
+        # long to wait, naming Tradirend and Natural Finish outright — so a
+        # sentence about Tradirend citing the Forte sheet is correctly
+        # attributed, because the Forte sheet is what published it.
+        #
+        # Without this the check refused exactly the multi-document
+        # compatibility answers the brief asks for, which is a false refusal and
+        # the most expensive kind of mistake this system can make: the material
+        # said it, the citation was right, and the answer still did not print.
+        cited_text = " ".join(
+            cited_index[m].chunk.content for m in marks if m in cited_index)
         named = {p for p in products_in_hits
-                 if p and p not in cited_products and _names_product(sentence, p)}
+                 if p and p not in cited_products
+                 and _names_product(sentence, p)
+                 and not _names_product(cited_text, p)}
         if named:
             failures.append(
                 f"check 3: a figure is stated against {sorted(named)[0]!r} but cited "
@@ -205,21 +307,40 @@ def run_checks(
             )
 
     # 4 — qualifiers travel with their figure, inside the printed passage.
+    #
+    # "Inside the passage" was all this used to require, and the architecture
+    # promises more than that: the qualifier and its figure must travel
+    # *together*. A sheet reading "Maximum coverage is achieved on a well
+    # prepared background. Apply at 10 mm per coat." accepted the answer "apply
+    # at a maximum of 10 mm per coat", inventing a maximum thickness out of a
+    # sentence about coverage. The word was present; the claim was not.
     for sentence in sentences:
-        if re.search(r"\b(?:minimum|maximum|at least|up to|no more than|below|above)\b",
-                     sentence, re.I):
-            marks = [int(m) for m in _CITE.findall(sentence)]
-            cited_text = " ".join(
-                cited_index[m].chunk.content for m in marks if m in cited_index
-            ).lower()
-            qualifier = re.search(
-                r"\b(minimum|maximum|at least|up to|no more than|below|above)\b",
-                sentence, re.I)
-            if qualifier and qualifier.group(1).lower() not in cited_text:
-                failures.append(
-                    f"check 4: the qualifier {qualifier.group(1)!r} is not in the "
-                    "cited passage"
-                )
+        qualifier = _QUALIFIER.search(sentence)
+        if not qualifier:
+            continue
+        marks = [int(m) for m in _CITE.findall(sentence)]
+        cited_text = " ".join(
+            cited_index[m].chunk.content for m in marks if m in cited_index
+        ).lower()
+        word = qualifier.group(1).lower()
+        if word not in cited_text:
+            failures.append(
+                f"check 4: the qualifier {qualifier.group(1)!r} is not in the "
+                "cited passage"
+            )
+            continue
+        figure = _NUMBER.search(_CITE.sub("", sentence[qualifier.end():]))
+        digits = re.search(r"\d+(?:[.,]\d+)?", figure.group(0)) if figure else None
+        if not digits:
+            continue        # a qualifier with no figure after it qualifies nothing
+        near = any(abs(w.start() - f.start()) <= QUALIFIER_WINDOW
+                   for w in re.finditer(re.escape(word), cited_text)
+                   for f in re.finditer(re.escape(digits.group(0)), cited_text))
+        if not near:
+            failures.append(
+                f"check 4: {qualifier.group(1)!r} and {digits.group(0)!r} are both "
+                "in the cited passage but not together"
+            )
 
     # 5 — real names only.
     known = {n.lower() for n in names.get("products", [])}
@@ -230,14 +351,39 @@ def run_checks(
         low = candidate.lower()
         if low in known or low in passage_blob:
             continue
+        # The manufacturer's own name in front of a published product is not an
+        # invented product. The site writes it both ways itself — "Lime Green
+        # Solo" and "Lime Green Duro" are harvested, plain "Natural Finish" is
+        # too — so which form ends up in the list is an accident of how each
+        # page was written. Refusing "Lime Green Natural Finish" cost a correct,
+        # fully cited, two-document answer on evaluation situation S9, which is
+        # over-refusal rather than a caught invention. Only the prefix is
+        # forgiven: "Lime Green Supercoat" still fails, because "Supercoat" is
+        # not published.
+        if _without_brand(low) in known or _without_brand(low) in passage_blob:
+            continue
         if _looks_like_a_name(candidate):
             failures.append(f"check 5: {candidate!r} is not a name the site publishes")
 
-    # 6 — the asked-for term appears in a cited passage.
+    # 6 — the asked-for term appears in a passage the answer actually cites.
+    #
+    # It used to scan every retrieved passage, which is a weaker test than the
+    # one the architecture describes and than decision 9 argues for: an answer
+    # citing only [1] passed on a term that appeared only in uncited [2]. The
+    # gate exists to catch the near-miss — a confident retrieval on the right
+    # product and the wrong property — and evidence the answer did not rely on
+    # cannot discharge it.
     if asked_terms:
-        blob = " ".join(f"{h.chunk.section} {h.chunk.content}" for h in hits).lower()
+        cited = {m for s in sentences for m in
+                 (int(x) for x in _CITE.findall(s)) if m in cited_index}
+        # Falling back to every hit when nothing was cited is deliberate: an
+        # answer with no citations at all has already failed check 1, and
+        # reporting check 6 as well would blame the wrong thing.
+        considered = [cited_index[m] for m in cited] or hits
+        blob = " ".join(f"{h.chunk.section} {h.chunk.content}"
+                        for h in considered).lower()
         if not any(t.lower() in blob for t in asked_terms):
-            failures.append("check 6: the property asked about is not in any passage")
+            failures.append("check 6: the property asked about is not in a cited passage")
 
     return list(dict.fromkeys(failures))
 
@@ -247,9 +393,42 @@ _SENTENCE_START = re.compile(r"(?:^|[.!?]\s+)([A-Z][a-z]+)")
 
 
 def _capitalised_runs(text: str) -> list[str]:
-    """Candidate product, colour and merchant names in generated prose."""
-    starts = set(_SENTENCE_START.findall(text))
-    return [m for m in _CAP_RUN.findall(_CITE.sub("", text)) if m not in starts]
+    """Candidate product, colour and merchant names in generated prose.
+
+    A word opening a sentence is capitalised by grammar rather than by being a
+    name, so those were dropped wholesale to avoid flagging ordinary prose. That
+    exempted exactly the position a product name most often occupies — and the
+    system prompt tells the model to "answer directly", which makes a name-first
+    sentence the common shape. The result was that the same invention passed or
+    failed on word order alone:
+
+        "Supercoat is suitable for lath backgrounds [1]."       printed
+        "For lath backgrounds use Supercoat [1]."               refused
+
+    So a sentence-opening word is now dropped only when it is a single word that
+    could plausibly be grammar. A multi-word run opening a sentence ("Supercoat
+    Plus is…") is a name whatever its position, and a single word is still
+    filtered afterwards by `_looks_like_a_name` and the `_COMMON` list.
+    """
+    stripped = _CITE.sub("", text)
+    openings = {m.start(1) for m in _SENTENCE_START.finditer(stripped)}
+
+    candidates = []
+    for match in _CAP_RUN.finditer(stripped):
+        run = match.group(0)
+        if match.start() in openings:
+            # Only at a sentence opening, where capitalisation is grammar
+            # rather than evidence. Leading ordinary words are trimmed one at a
+            # time rather than the run being discarded whole, so "Apply Solo"
+            # becomes "Solo" instead of vanishing — and "Lime Green Solo" walks
+            # down to "Solo" too, because both "lime" and "green" are listed.
+            words = run.split()
+            while words and words[0].lower() in _COMMON:
+                words.pop(0)
+            run = " ".join(words)
+        if run:
+            candidates.append(run)
+    return candidates
 
 
 _COMMON = {
@@ -257,6 +436,17 @@ _COMMON = {
     "when", "where", "what", "if", "for", "use", "using", "apply", "mix",
     "water", "wall", "walls", "coat", "coats", "sources", "answer", "note",
 }
+
+
+# The manufacturer, as the site writes it. Not configuration: this is the one
+# brand whose corpus this is, and a second brand appearing here would be a
+# competitor, which the prompt forbids the model from mentioning at all.
+_BRAND = "lime green"
+
+
+def _without_brand(name: str) -> str:
+    """A published product with the maker's name in front is still that product."""
+    return name.removeprefix(_BRAND).strip() if name.startswith(_BRAND) else name
 
 
 def _looks_like_a_name(candidate: str) -> bool:
@@ -352,16 +542,37 @@ class AnswerEngine:
 
     def extract(self, decision: Decision) -> Answer:
         """Print the top passage whole, by code. No model, no paraphrase."""
-        top = decision.hits[0]
+        hits = decision.hits
+        if decision.sum_refused:
+            # The calculation edge asks for coverage, so print the passage that
+            # carries it rather than whichever passage ranked first. Retrieval
+            # ranks on the whole question, and "how many bags for 20 square
+            # metres of Duro" puts Duro's *mixing water* on top — so the printed
+            # evidence was the wrong half of the answer while the sentence below
+            # claimed it was the right one. Selection is on content, not on the
+            # heading: Duro publishes its coverage under a "Storage" heading.
+            hits = sorted(hits, key=lambda h: not _mentions_coverage(h.chunk.content))
+
+        top = hits[0]
         body = [f"From {top.document.citation_name}"
                 f"{', ' + top.chunk.section if top.chunk.section else ''} [1]:",
                 "", top.chunk.content]
         if decision.sum_refused:
-            body += ["", "I have printed the published coverage and pack size rather "
-                          "than multiplying them out. The figure that matters on site "
-                          "depends on the background and the thickness, so the "
-                          "arithmetic is worth doing against your own measurements."]
-        return self._finish(decision, "\n".join(body), decision.hits[:1])
+            # Say what was actually printed. Claiming to have shown coverage
+            # when the retrieved evidence does not contain any is the kind of
+            # unsupported sentence the six checks exist to stop, and it arrived
+            # here by a different door — written by code, so never checked.
+            if _mentions_coverage(top.chunk.content):
+                body += ["", "I have printed the published coverage and pack size rather "
+                              "than multiplying them out. The figure that matters on site "
+                              "depends on the background and the thickness, so the "
+                              "arithmetic is worth doing against your own measurements."]
+            else:
+                body += ["", "I will not multiply this out, and the indexed material does "
+                              "not state a coverage figure for it, so there is nothing "
+                              "published to do the arithmetic against. "
+                              + _contact_line(self.names)]
+        return self._finish(decision, "\n".join(body), hits[:1])
 
     def compose(self, decision: Decision, question: str) -> Answer:
         """The one path the model runs on."""
@@ -377,7 +588,16 @@ class AnswerEngine:
             assumptions=("\nStated assumptions: " + "; ".join(assumptions)
                          if assumptions else ""),
         )
-        text, seconds = ollama.generate(prompt, model=self.model, system=SYSTEM)
+        try:
+            text, seconds = ollama.generate(prompt, model=self.model,
+                                            system=SYSTEM)
+        except ollama.OllamaUnavailable as error:
+            obs.event("ollama_error", stage="generate", model=self.model,
+                      error=type(error).__name__, detail=str(error))
+            raise
+        obs.event("generation", model=self.model, seconds=round(seconds, 2),
+                  passages=len(hits), prompt_chars=len(prompt),
+                  answer_words=len(text.split()))
 
         asked = decision.slots.get("property_asked", "")
         terms = (self.retriever.slots.terms_for("property_asked", asked)
@@ -385,6 +605,10 @@ class AnswerEngine:
         failures = run_checks(text, hits, self.names, terms)
 
         if failures:
+            # The single most operationally important line in the system: it is
+            # how over-refusal is noticed, and which check is responsible.
+            obs.event("check_failed", checks=failures, model=self.model,
+                      passages=len(hits))
             answer = self.refuse(decision,
                                  "the generated answer did not pass its checks")
             answer.failed_checks = failures
@@ -480,6 +704,9 @@ class AnswerEngine:
                       diagnostics={"step": "manifest", "topic": "document_request"})
 
     def refuse(self, decision: Decision, why: str) -> Answer:
+        obs.event("refusal", why=why, step=decision.step,
+                  missing_term=decision.missing_term,
+                  top_score=decision.hits[0].score if decision.hits else 0.0)
         parts = []
         if decision.missing_term:
             parts.append(

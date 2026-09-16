@@ -133,6 +133,73 @@ class Excluded:
 
 
 @dataclass
+class DocumentUpdate:
+    """One document's new state, as an indexing run wants to apply it.
+
+    Grouped rather than passed as four parallel lists because they have to move
+    together: a version, the chunks cut from it, and the caveats tagged on it
+    are one unit of work, and applying two of the three is a corrupt index.
+    """
+
+    document: Document
+    version: DocumentVersion
+    chunks: list["Chunk"] = field(default_factory=list)
+    caveats: list["Caveat"] = field(default_factory=list)
+
+
+@dataclass
+class CrawlRun:
+    """What one pass over the site did, recorded rather than printed.
+
+    A console line saying "94 unchanged" disappears when the terminal closes.
+    The same fact in a row is evidence that a second crawl reprocessed nothing,
+    which is the claim the delta pipeline exists to support.
+    """
+
+    started_at: str
+    completed_at: str = ""
+    documents_checked: int = 0
+    documents_new: int = 0
+    documents_changed: int = 0
+    documents_unchanged: int = 0
+    documents_removed: int = 0
+    documents_failed: int = 0
+    snapshot_id: str = ""
+
+    @property
+    def reprocessed(self) -> int:
+        return self.documents_new + self.documents_changed
+
+
+@dataclass
+class AnswerLogEntry:
+    """One answered question, recorded so the answer stays explicable.
+
+    The audit chain runs documents → versions → chunks → snapshot, and this is
+    its last link. Without it the store can say what the index held on a date
+    and cannot say which part of it an answer actually used, which is the half
+    of "why did it say that?" that matters. The route, the snapshot id and the
+    chunk ids together are enough to reconstruct the evidence a reply was built
+    from, because generation is deterministic against them.
+
+    A refusal is worth logging for the same reason as an answer: `check_failed`
+    names the check that stopped it, so over-refusal is measurable rather than
+    anecdotal.
+
+    `asked_at` may be left empty, in which case the store timestamps it.
+    """
+
+    question: str
+    path_taken: str  # route | extract | compose | defer | refuse
+    audiences: tuple[str, ...] = ("public",)
+    snapshot_id: str = ""
+    chunk_ids: list[str] = field(default_factory=list)
+    generation_model: str = ""
+    check_failed: str = ""
+    asked_at: str = ""
+
+
+@dataclass
 class Retrieved:
     """A chunk with its score, as returned by retrieval."""
 

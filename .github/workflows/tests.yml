@@ -9,7 +9,7 @@
 # The PostgreSQL job is the exception worth having: the repository contract is
 # one behavioural suite, and running it against a real pgvector instance is the
 # only thing that turns "the two adapters are one system" from a claim into a
-# check. The build machine cannot do that; a Linux runner can.
+# check. The full-coverage job exercises both stores and fails on any missing branch.
 
 name: tests
 
@@ -69,7 +69,7 @@ jobs:
           PY
 
   contract-postgres:
-    name: repository contract (PostgreSQL + pgvector)
+    name: full library coverage (SQLite and PostgreSQL + pgvector)
     runs-on: ubuntu-latest
     services:
       db:
@@ -88,11 +88,26 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -r requirements.txt "psycopg[binary]" pytest
-      - name: The same contract, against a real pgvector instance
+      - run: pip install -r requirements.txt "psycopg[binary]==3.3.3" pytest coverage
+      - name: Full suite and 100 percent line and branch coverage
         env:
           ASSISTANT_POSTGRES_DSN: postgresql://assistant:assistant@localhost:5432/assistant
-        run: python -m pytest -q tests/test_repository_contract.py -v
+        run: |
+          python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
+          python -m coverage report --rcfile=.coveragerc --fail-under=100
+          python -m coverage json --rcfile=.coveragerc -o coverage.json
+          python - <<'PY'
+          import json
+          totals = json.load(open('coverage.json'))['totals']
+          assert totals['missing_lines'] == 0, totals
+          assert totals['missing_branches'] == 0, totals
+          print('100% lines and branches; crawler and both storage adapters included')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-library-coverage
+          path: coverage.json
 
   container:
     name: production container builds

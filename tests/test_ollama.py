@@ -16,6 +16,7 @@ different one is silent corruption, so it is refused loudly instead.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -326,3 +327,84 @@ def test_the_client_only_ever_talks_to_the_local_host():
     with ollama._client(5.0) as client:
         assert str(client.base_url).rstrip("/") == ollama.HOST
         assert client.timeout.read == 5.0
+
+
+# ------------------------------------------------------------------ latency
+
+
+def test_generation_asks_ollama_to_keep_the_model_resident(server):
+    """An evicted model costs about 7.4 seconds to read back off disk."""
+    state = server(lambda _p, _b: FakeResponse({"response": "ok [1]."}))
+    ollama.generate("prompt")
+
+    (_path, body), = state["calls"]
+    assert body["keep_alive"] == ollama.KEEP_ALIVE
+    assert ollama.KEEP_ALIVE, "an empty value would unload immediately"
+
+
+def test_the_answer_length_is_bounded(server):
+    """The architecture claims a cap of about 200 tokens; it has to be real."""
+    state = server(lambda _p, _b: FakeResponse({"response": "ok [1]."}))
+    ollama.generate("prompt")
+
+    (_path, body), = state["calls"]
+    assert body["options"]["num_predict"] == ollama.MAX_ANSWER_TOKENS
+    assert ollama.MAX_ANSWER_TOKENS == 256
+
+
+def test_a_caller_may_bound_the_answer_further(server):
+    """Warming wants one token, not two hundred and fifty six."""
+    state = server(lambda _p, _b: FakeResponse({"response": "ok"}))
+    ollama.generate("prompt", num_predict=1)
+
+    (_path, body), = state["calls"]
+    assert body["options"]["num_predict"] == 1
+
+
+def test_embedding_also_keeps_the_model_resident(server):
+    """A question embedded cold costs 3033 ms against 679 ms warm."""
+    state = server(lambda _p, body: FakeResponse(vectors_for(body["input"])))
+    ollama.embed_one("how much water does Solo need")
+
+    (_path, body), = state["calls"]
+    assert body["keep_alive"] == ollama.KEEP_ALIVE
+
+
+def test_the_keep_alive_window_can_be_turned_off():
+    """Holding 3 GB resident is the right trade on the build machine, not everywhere."""
+    assert ollama.KEEP_ALIVE == os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+
+
+def test_warming_loads_the_model_with_a_single_token(server):
+    """The first real question should not be the one that pays for the load."""
+    state = server(lambda _p, _b: FakeResponse({"response": "o"}))
+
+    assert ollama.warm() is True
+
+    (path, body), = state["calls"]
+    assert path == "/api/generate"
+    assert body["model"] == ollama.GENERATION_MODEL
+    assert body["options"]["num_predict"] == 1, "warming must not generate an answer"
+    assert body["keep_alive"] == ollama.KEEP_ALIVE
+
+
+def test_warming_warms_the_model_it_is_given(server):
+    state = server(lambda _p, _b: FakeResponse({"response": "o"}))
+    assert ollama.warm(model="qwen3:4b-instruct") is True
+    (_path, body), = state["calls"]
+    assert body["model"] == "qwen3:4b-instruct"
+
+
+def test_a_refused_warm_up_reports_failure_rather_than_raising(server):
+    """Warming is an optimisation, so it must never stop the program starting."""
+    def handler(_path, _body):
+        raise httpx.ConnectError("all connection attempts failed")
+
+    server(handler)
+    assert ollama.warm() is False
+
+
+def test_an_unparseable_warm_up_reply_is_also_survived(server):
+    """The other way generate fails must not escape either."""
+    server(lambda _p, _b: FakeResponse(unparseable=True))
+    assert ollama.warm() is False

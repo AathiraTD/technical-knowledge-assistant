@@ -20,12 +20,14 @@ honestly if anything it depends on has changed.
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 from pathlib import Path
 
 import numpy as np
 
-DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data" / "embeddings.db"
+DEFAULT_PATH = Path(os.environ.get("ASSISTANT_EMBEDDING_CACHE",
+                    Path(__file__).resolve().parents[1] / "data" / "embeddings.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS embedding_cache (
