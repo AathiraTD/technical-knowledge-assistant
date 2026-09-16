@@ -12,7 +12,8 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from assistant import engine, observability, session
+from assistant import observability, session
+from assistant.engine import Assistant
 from assistant.retrieve import Retriever
 from assistant.store import SQLiteKnowledgeRepository
 
@@ -33,6 +34,7 @@ class IntegrationTestCore5(unittest.TestCase):
                 raise RuntimeError("No active index. Run: python -m assistant.index --build")
             cls.snapshot_id = snapshot.snapshot_id
             cls.retriever = Retriever(cls.repo)
+            cls.assistant = Assistant(cls.repo)
         except Exception as e:
             raise RuntimeError(f"Repository initialization failed or no index: {e}")
 
@@ -81,12 +83,12 @@ class IntegrationTestCore5(unittest.TestCase):
         # Group by document
         docs = {}
         for chunk in chunks:
-            doc_id = chunk.document.id
-            docs[doc_id] = docs.get(doc_id, 0) + 1
+            doc_url = chunk.document.canonical_url
+            docs[doc_url] = docs.get(doc_url, 0) + 1
 
         # Each document should have at most 5 results (decision 12)
-        for doc_id, count in docs.items():
-            self.assertLessEqual(count, 5, f"Document {doc_id} has {count} results (should be ≤5)")
+        for doc_url, count in docs.items():
+            self.assertLessEqual(count, 5, f"Document {doc_url} has {count} results (should be ≤5)")
 
     # ====== COMPONENT 2: ROUTER ======
 
@@ -95,7 +97,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "xyzabc qwerty asdfgh zxcvbn"  # Gibberish, no match
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         self.assertEqual(answer.path, "refuse", f"Expected refuse, got {answer.path}")
         self.assertIn("not found", answer.refusal_reason.lower())
@@ -105,7 +107,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How much water does Solo need per bag?"
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         # Should answer (compose or extract path)
         self.assertIn(answer.path, ["compose", "extract"], f"Unexpected path: {answer.path}")
@@ -116,7 +118,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How many bags of Solo for 10 square metres?"
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         # Should extract (no sum given, so refuse the sum)
         self.assertIn(answer.path, ["extract", "refuse"])
@@ -126,7 +128,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "What plaster should I use inside?"  # No substrate
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         # Should ask back for substrate or refuse
         self.assertIn(answer.path, ["ask_back", "refuse"])
@@ -138,7 +140,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How much water does Solo need?"
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         if answer.path == "compose" and answer.answer:
             # Parse answer for [n] markers
@@ -156,7 +158,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "How much water does Solo need per bag?"
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         # If answer contains numbers, they should be from passages
         # (Check runs post-generation, so if answer is printed, check passed)
@@ -172,7 +174,7 @@ class IntegrationTestCore5(unittest.TestCase):
         question = "What is the atomic weight of Solo plaster?"
 
         with observability.correlation(self.correlation_id):
-            answer = engine.ask(self.repo, question, self.session_id, audience_set=["public"])
+            answer = self.assistant.ask(question, audiences=("public",), session_id=self.session_id)
 
         # Should refuse or admit it's not stated
         self.assertIn(answer.path, ["refuse", "extract"])
@@ -259,7 +261,7 @@ class IntegrationTestCore5(unittest.TestCase):
             try:
                 sess = self.session_store.open()
                 with observability.correlation(observability.new_id()):
-                    answer = engine.ask(self.repo, q, sess, audience_set=["public"])
+                    answer = self.assistant.ask(q, audiences=("public",), session_id=sess)
                 results[q] = answer
             except Exception as e:
                 errors.append(str(e))
@@ -279,7 +281,7 @@ class IntegrationTestCore5(unittest.TestCase):
         def ask_and_check(session_id, question):
             try:
                 with observability.correlation(observability.new_id()):
-                    engine.ask(self.repo, question, session_id, audience_set=["public"])
+                    self.assistant.ask(question, audiences=("public",), session_id=session_id)
                 return True
             except Exception as e:
                 return str(e)
