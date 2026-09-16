@@ -38,6 +38,7 @@ stub returning a finished slot dict would prove nothing about what may cross.
 from __future__ import annotations
 
 import io
+import socket
 import sys
 import threading
 import urllib.error
@@ -536,24 +537,57 @@ def test_an_uploaded_photograph_fills_a_slot_and_says_where_it_came_from(server)
 
 
 def test_an_oversized_body_is_refused_before_it_is_read(server):
-    """The declared length decides, so nothing large is ever buffered."""
-    body, content_type = multipart({"q": "hello"}, [("wall.png", PNG)])
-    with pytest.raises(urllib.error.HTTPError) as caught:
-        post(server, body, content_type,
-             headers={"Content-Length": str(ui.MAX_UPLOAD_BYTES + 1)})
-    assert caught.value.code == 413
+    """The declared length decides, so nothing large is ever buffered.
+
+    Spoken to the socket for the same reason as the test below it: the
+    refusal deliberately does *not* drain an oversized body — reading twelve
+    megabytes to say "too large" is the work the cap exists to avoid — so the
+    connection closes, and a client still writing sees a reset instead of the
+    status. Declaring the length and sending no body is the same request as
+    far as the guard is concerned, and it cannot race.
+    """
+    host, port = server.removeprefix("http://").split(":")
+    _, content_type = multipart({"q": "hello"}, [("wall.png", PNG)])
+    request = "\r\n".join((
+        "POST /ask HTTP/1.1",
+        f"Host: {host}:{port}",
+        f"Content-Type: {content_type}",
+        f"Content-Length: {ui.MAX_UPLOAD_BYTES + 1}",
+        "", "",
+    ))
+    with socket.create_connection((host, int(port)), timeout=30) as client:
+        client.sendall(request.encode("ascii"))
+        status = client.makefile("rb").readline().decode("latin-1")
+
+    assert "413" in status, status
 
 
 def test_a_body_with_no_length_is_refused(server):
-    """Reading until the connection closes is the unbounded read, so: no."""
-    body, content_type = multipart({"q": "hello"}, [])
-    request = urllib.request.Request(server + "/ask", data=body, method="POST")
-    request.add_header("Content-Type", content_type)
-    request.add_header("Transfer-Encoding", "chunked")
-    request.remove_header("Content-length")
-    with pytest.raises(urllib.error.HTTPError) as caught:
-        urllib.request.urlopen(request, timeout=30)
-    assert caught.value.code == 411
+    """Reading until the connection closes is the unbounded read, so: no.
+
+    Spoken to the socket rather than through `urllib`, and the reason is the
+    server's own correctness. A body of undeclared length cannot be drained —
+    draining it *is* the unbounded read — so the refusal closes the connection
+    instead. A client still writing when that happens sees a reset rather than
+    the status, which made this test fail about one run in six against a server
+    doing exactly the right thing. Sending the headers and no body removes the
+    race entirely: there is nothing left to write when the refusal arrives, so
+    a failure here is the guard going missing rather than the clock.
+    """
+    host, port = server.removeprefix("http://").split(":")
+    _, content_type = multipart({"q": "hello"}, [])
+    request = "\r\n".join((
+        "POST /ask HTTP/1.1",
+        f"Host: {host}:{port}",
+        f"Content-Type: {content_type}",
+        "Transfer-Encoding: chunked",
+        "", "",                      # the blank line that ends the headers
+    ))
+    with socket.create_connection((host, int(port)), timeout=30) as client:
+        client.sendall(request.encode("ascii"))
+        status = client.makefile("rb").readline().decode("latin-1")
+
+    assert "411" in status, status
 
 
 def test_a_body_that_is_not_multipart_is_refused(server):
