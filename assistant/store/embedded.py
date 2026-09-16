@@ -23,7 +23,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -40,9 +40,13 @@ from ..model import (
     Excluded,
     Retrieved,
     Snapshot,
+    TraceSpan,
 )
 from ..repository import (
     PRODUCT_BAND,
+    TRACE_PRUNE_STRIDE,
+    TRACE_RETENTION_DAYS,
+    TRACE_ROW_CAP,
     IndexMismatch,
     RetrievalRequest,
     product_matches,
@@ -113,6 +117,26 @@ class SQLiteKnowledgeRepository:
         if "source" not in logged:
             self.db.execute(
                 "ALTER TABLE answer_log ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'")
+        # `turn_traces` itself arrives with the schema script above, which runs
+        # on every open: a database created before the table simply gains it,
+        # because `CREATE TABLE IF NOT EXISTS` creates what is missing. What it
+        # does *not* do is reshape a table that already exists, which is why
+        # `source` is migrated by hand here exactly as `answer_log.source` is —
+        # a store written by an earlier iteration of this slice would otherwise
+        # fail on its next span insert.
+        traced = {r[1] for r in self.db.execute("PRAGMA table_info(turn_traces)")}
+        if traced and "source" not in traced:
+            self.db.execute(
+                "ALTER TABLE turn_traces ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'")
+        self.db.commit()
+        # Retention, per docs/conversation-observability-review.md §8.1. Held as
+        # instance attributes rather than read from the module constants at the
+        # point of use, so a test can prove the sweep actually prunes without
+        # writing two hundred batches and waiting fourteen days to reach it.
+        self.trace_retention_days = TRACE_RETENTION_DAYS
+        self.trace_row_cap = TRACE_ROW_CAP
+        self.trace_prune_stride = TRACE_PRUNE_STRIDE
+        self._trace_writes = 0
         self._matrix: np.ndarray | None = None
         self._rows: list[sqlite3.Row] = []
 
@@ -761,6 +785,118 @@ class SQLiteKnowledgeRepository:
                 check_failed=r["check_failed"], asked_at=r["asked_at"],
                 source=r["source"])
             for r in rows
+        ]
+
+    # ----------------------------------------------------------------- traces
+
+    def record_spans(self, spans: list[TraceSpan]) -> None:
+        """Write one turn's spans, on a connection of its own, and never raise.
+
+        The same second-connection arrangement as `log_answer`, for the same
+        reason: `read_snapshot()` opens a transaction on `self.db` and rolls it
+        back when the answer finishes, so rows inserted inside a snapshot read
+        would be discarded at exactly the moment they were wanted — silently,
+        because a rollback is not an error.
+
+        It differs from `log_answer` in one way that matters: it swallows. A
+        store that cannot write its audit row says so, because the audit trail
+        is a promise to somebody. A store that cannot write a timing has cost
+        the operator a debugging aid and the caller nothing, and failing an
+        answer over it would invert the priority the whole design rests on. The
+        failure is reported on the event stream rather than passed over in
+        silence, which is the bargain `CLAUDE.md` asks for.
+
+        The whole batch goes in one transaction. A half-written span tree is
+        worse than none: it reads as stages that did not happen.
+        """
+        if not spans:
+            return
+        try:
+            writer = sqlite3.connect(self.path)
+            try:
+                writer.executemany(
+                    """INSERT INTO turn_traces
+                       (session_id, turn_id, trace_id, span_id, parent_span_id,
+                        name, started_at, duration_ms, status, source, attributes)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    [(s.session_id, s.turn_id, s.trace_id, s.span_id,
+                      s.parent_span_id, s.name, s.started_at or _now(),
+                      int(s.duration_ms), s.status or "ok",
+                      s.source or "unknown",
+                      json.dumps(s.attributes or {}, default=str))
+                     for s in spans])
+                self._prune_traces(writer)
+                writer.commit()
+            finally:
+                writer.close()
+        except Exception as error:                     # noqa: BLE001
+            from .. import observability as obs
+            obs.event("store_error", operation="record_spans",
+                      error=type(error).__name__, detail=str(error))
+
+    def _prune_traces(self, writer) -> None:
+        """Window then cap, on the stride, inside the caller's transaction.
+
+        Amortised rather than run on every write. A `DELETE ... WHERE
+        started_at < ?` over an indexed column costs nothing when it matches
+        nothing, but it is still a write per answered question if it runs every
+        time, and the answering path is where this is least welcome.
+
+        The window is the stated policy and the cap is the backstop that makes
+        it safe against a burst the window cannot see. The cap deletes by id
+        rather than by timestamp because ids are monotonic here and timestamps
+        are only to the second, so a cutoff by time could delete a whole
+        second's worth of rows or none of it.
+        """
+        self._trace_writes += 1
+        if self._trace_writes % max(self.trace_prune_stride, 1):
+            return
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=self.trace_retention_days)
+                  ).isoformat(timespec="seconds")
+        writer.execute("DELETE FROM turn_traces WHERE started_at < ?", (cutoff,))
+        # `id <= (subselect)` deletes everything older than the newest `cap`
+        # rows. The offset is the cap itself and not one less: the subselect
+        # names the first row that must *go*, and `id <=` takes it with the
+        # rest. Offsetting by `cap - 1` names the oldest row worth keeping and
+        # deletes it, leaving `cap - 1` — which is what the cap test caught.
+        # With fewer rows than the cap the subselect is NULL, `id <= NULL` is
+        # NULL, and nothing matches, so the under-cap case needs no branch.
+        writer.execute(
+            """DELETE FROM turn_traces WHERE id <= (
+                   SELECT id FROM turn_traces ORDER BY id DESC LIMIT 1 OFFSET ?)""",
+            (max(self.trace_row_cap, 1),))
+
+    def traces(self, trace_id: str = "", session_id: str = "",
+               limit: int = 1000) -> list[TraceSpan]:
+        """Spans for one answer or one conversation, oldest first."""
+        where, params = [], []
+        if trace_id:
+            where.append("trace_id = ?")
+            params.append(trace_id)
+        if session_id:
+            where.append("session_id = ?")
+            params.append(session_id)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        # Newest-first inside the limit, then reversed, so an unfiltered call
+        # returns the most *recent* spans rather than the oldest ever written —
+        # a table bounded at two hundred thousand rows would otherwise answer a
+        # developer's bare `traces()` with whatever survived from last fortnight.
+        rows = self.db.execute(
+            f"""SELECT session_id, turn_id, trace_id, span_id, parent_span_id,
+                       name, started_at, duration_ms, status, source, attributes
+                  FROM turn_traces {clause}
+                 ORDER BY id DESC LIMIT ?""",
+            (*params, limit)).fetchall()
+        return [
+            TraceSpan(
+                session_id=r["session_id"], turn_id=r["turn_id"],
+                trace_id=r["trace_id"], span_id=r["span_id"],
+                parent_span_id=r["parent_span_id"], name=r["name"],
+                started_at=r["started_at"], duration_ms=r["duration_ms"],
+                status=r["status"], source=r["source"],
+                attributes=json.loads(r["attributes"]))
+            for r in reversed(rows)
         ]
 
     # ------------------------------------------------------------- reporting

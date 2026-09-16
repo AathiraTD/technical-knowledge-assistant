@@ -152,3 +152,69 @@ CREATE TABLE IF NOT EXISTS answer_log (
     check_failed        TEXT    NOT NULL DEFAULT '',
     source              TEXT    NOT NULL DEFAULT 'unknown'
 );
+
+-- ------------------------------------------------------------ turn_traces
+-- How one answer was produced, stage by stage: the span tree of
+-- docs/conversation-observability-review.md §2.3, one row per completed span.
+-- The sibling of answer_log and deliberately not merged with it. answer_log
+-- says what an answer used and retains the question text, which makes deleting
+-- from it a privacy decision nobody has taken; this says how the answer got
+-- there and how long each stage cost, holds no text at all, and its rows stop
+-- being useful long before they stop existing. Merging the two would put
+-- timings into an audit table and audit semantics into a debugging one.
+--
+-- The shape is OpenTelemetry's without the SDK: span_id, parent_span_id and
+-- trace_id are the triple that turns a flat event stream into a tree.
+--
+-- `attributes` holds counts, ids, scores and fingerprints. It must not hold
+-- question text, answer text or passage text; answer_log.question is the one
+-- deliberate retention point in this system and the trace does not duplicate
+-- it.
+--
+-- `session_id` is empty for a CLI caller, and that is a fact rather than a gap.
+-- The CLI carries no session and no slots between questions, so consecutive CLI
+-- turns are unrelated by construction; a synthetic id would group them into a
+-- "conversation" that shares nothing but a terminal.
+--
+-- `source` is the surface that asked — cli, web, evaluation or unknown — with
+-- no CHECK constraint on the values, for the reason answer_log.source has none:
+-- an unrecognised source must be recorded rather than rejected, because a
+-- rejected insert would be an observability write failing an answer.
+--
+-- `started_at` is TEXT here and TEXT in db/schema.postgres.sql too, which is a
+-- departure from answer_log.asked_at's TIMESTAMPTZ. The retention sweep
+-- compares it against a cutoff string and the value round-trips to the caller
+-- verbatim, so the two adapters have to agree on the bytes; the house
+-- timestamp is UTC ISO-8601 to the second, which sorts lexicographically.
+--
+-- Keep the comments out of the column list. SQLite reparses the stored DDL on
+-- ALTER TABLE ... DROP COLUMN, and a comment trailing the last column leaves it
+-- with incomplete input.
+CREATE TABLE IF NOT EXISTS turn_traces (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT    NOT NULL DEFAULT '',
+    turn_id         TEXT    NOT NULL,
+    trace_id        TEXT    NOT NULL,
+    span_id         TEXT    NOT NULL,
+    parent_span_id  TEXT    NOT NULL DEFAULT '',
+    name            TEXT    NOT NULL,
+    started_at      TEXT    NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'ok',
+    source          TEXT    NOT NULL DEFAULT 'unknown',
+    attributes      TEXT    NOT NULL DEFAULT '{}'
+);
+
+-- The two access paths: reconstruct one answer, and replay one conversation.
+CREATE INDEX IF NOT EXISTS turn_traces_trace ON turn_traces (trace_id);
+
+-- Partial, because every CLI row shares the empty session id and would
+-- otherwise give this index one enormous low-selectivity prefix that the only
+-- query it exists for — "replay one conversation" — never asks about.
+CREATE INDEX IF NOT EXISTS turn_traces_session
+    ON turn_traces (session_id, turn_id) WHERE session_id <> '';
+
+-- The prune's own access path. Retention is a fourteen-day window with a
+-- 200,000-row cap behind it, both enforced inside the adapter's span write; see
+-- assistant/repository.py for why on write rather than on a schedule.
+CREATE INDEX IF NOT EXISTS turn_traces_started_at ON turn_traces (started_at);

@@ -189,3 +189,49 @@ ALTER TABLE answer_log ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'un
 --      AND c.audience = ANY(:audiences)
 --    ORDER BY d.authority ASC, similarity DESC
 --    LIMIT :top_k;
+
+-- ------------------------------------------------------------ turn_traces
+-- How one answer was produced, stage by stage. The twin of this table in
+-- db/schema.sqlite.sql carries the rationale in full: it is the sibling of
+-- answer_log rather than part of it, it holds no question, answer or passage
+-- text, `session_id` is legitimately empty for a CLI caller, and `source`
+-- carries no CHECK because an unrecognised surface must be recorded rather
+-- than rejected — a rejected insert would be an observability write failing an
+-- answer.
+--
+-- `attributes` is JSONB here and JSON-in-TEXT there, the same split the
+-- two schemas already make for `notes` and `chunk_ids`. `started_at` is TEXT in
+-- both, unlike answer_log.asked_at: the retention sweep compares it to a cutoff
+-- string and it round-trips to the caller verbatim, so both adapters have to
+-- agree on the bytes.
+CREATE TABLE IF NOT EXISTS turn_traces (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id      TEXT    NOT NULL DEFAULT '',
+    turn_id         TEXT    NOT NULL,
+    trace_id        TEXT    NOT NULL,
+    span_id         TEXT    NOT NULL,
+    parent_span_id  TEXT    NOT NULL DEFAULT '',
+    name            TEXT    NOT NULL,
+    started_at      TEXT    NOT NULL,
+    duration_ms     BIGINT  NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'ok',
+    source          TEXT    NOT NULL DEFAULT 'unknown',
+    attributes      JSONB   NOT NULL DEFAULT '{}'::jsonb
+);
+
+-- Additive, so a database created before the column migrates rather than
+-- failing on its next insert, exactly as answer_log.source does.
+ALTER TABLE turn_traces ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'unknown';
+
+-- The two access paths: reconstruct one answer, and replay one conversation.
+CREATE INDEX IF NOT EXISTS turn_traces_trace ON turn_traces (trace_id);
+
+-- Partial, because every CLI row shares the empty session id and the query this
+-- index exists for never asks for those rows. Both dialects support this and
+-- the repository already relies on a partial index in both — see
+-- index_snapshots_one_active above.
+CREATE INDEX IF NOT EXISTS turn_traces_session
+    ON turn_traces (session_id, turn_id) WHERE session_id <> '';
+
+-- The prune's own access path; retention is enforced inside the span write.
+CREATE INDEX IF NOT EXISTS turn_traces_started_at ON turn_traces (started_at);

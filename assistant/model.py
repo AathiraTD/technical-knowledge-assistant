@@ -217,6 +217,62 @@ class AnswerLogEntry:
 
 
 @dataclass
+class TraceSpan:
+    """One stage of one answer: what it was, how long it took, and inside what.
+
+    The sibling of `AnswerLogEntry`, and deliberately not merged with it.
+    `answer_log` answers "what did this answer use" — it is the audit trail, it
+    retains the question text, and deleting from it is a privacy decision nobody
+    has taken. A span answers "how did it get there, and how long did each step
+    cost". Merging them would put timings into an audit table and audit
+    semantics into a debugging one, and would make the trace inherit a retention
+    policy chosen for something else.
+
+    The shape is OpenTelemetry's, without OpenTelemetry: `span_id`,
+    `parent_span_id` and `trace_id` are the triple that turns a flat stream of
+    events into a tree, and adopting the triple costs nothing while adopting the
+    SDK would cost six transitive packages in a project whose decision 4 rests
+    on five inspectable dependencies. Attribute *names* follow OTel's
+    conventions where one exists — `gen_ai.request.model`, `db.system` — so an
+    OTLP exporter later is a shim rather than a rename of every call site.
+
+    **`attributes` may not contain question text, answer text or passage text.**
+    That is the whole privacy posture of this system restated at a new table:
+    fingerprints, counts, ids, scores and durations only. `answer_log.question`
+    is the single deliberate retention point and the trace does not duplicate
+    it. The rule is enforced by a test rather than by scrubbing on the way in,
+    because a scrubber would quietly delete the evidence of the call site that
+    broke the rule.
+
+    `session_id` is empty for a CLI caller, and that is a fact rather than a gap
+    (review §8.3). The CLI's loop constructs no session and carries no slots
+    between questions, so consecutive CLI turns are unrelated by construction; a
+    synthetic per-invocation id would group them under one "conversation" and
+    make "replay this conversation" return a list of questions sharing nothing
+    but a terminal. Empty is the reversible choice — the day a session arrives
+    on the CLI, those turns start writing a real id and join the index without a
+    migration.
+
+    `source` is the surface that asked, with the same four values and the same
+    `unknown` default as `AnswerLogEntry.source`, and it exists here for the
+    same measured reason: every metric derived from these rows has to be able to
+    tell evaluation traffic from real traffic, or it measures the question set.
+    """
+
+    trace_id: str
+    span_id: str
+    name: str
+    started_at: str
+    duration_ms: int
+    turn_id: str = ""
+    parent_span_id: str = ""
+    session_id: str = ""
+    status: str = "ok"          # ok | error
+    source: str = "unknown"     # cli | web | evaluation | unknown
+    attributes: dict = field(default_factory=dict)
+
+
+@dataclass
 class Retrieved:
     """A chunk with its score, as returned by retrieval."""
 

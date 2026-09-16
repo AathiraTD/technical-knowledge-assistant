@@ -32,9 +32,12 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from ..repository import (
     PRODUCT_BAND,
+    TRACE_PRUNE_STRIDE,
+    TRACE_RETENTION_DAYS,
+    TRACE_ROW_CAP,
     IndexMismatch,
     PublicationBusy,
     RetrievalRequest,
@@ -53,6 +56,7 @@ from ..model import (
     Excluded,
     Retrieved,
     Snapshot,
+    TraceSpan,
 )
 
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.postgres.sql"
@@ -97,6 +101,17 @@ class PostgresKnowledgeRepository:
             with self.conn.cursor() as cur:
                 cur.execute(SCHEMA.read_text(encoding="utf-8"))
             self.conn.commit()
+        # Retention for turn_traces, per the review §8.1. Instance attributes
+        # rather than the module constants read at the point of use, so a test
+        # can prove the sweep prunes without writing two hundred batches and
+        # waiting a fortnight to reach it. The values are shared with the SQLite
+        # adapter through assistant/repository.py: a retention window that
+        # differed between the two would make "one system, two adapters" false
+        # about the one thing an operator would notice.
+        self.trace_retention_days = TRACE_RETENTION_DAYS
+        self.trace_row_cap = TRACE_ROW_CAP
+        self.trace_prune_stride = TRACE_PRUNE_STRIDE
+        self._trace_writes = 0
 
     def close(self) -> None:
         self.conn.close()
@@ -755,6 +770,104 @@ class PostgresKnowledgeRepository:
                 generation_model=r[6], check_failed=r[7], asked_at=str(r[0]),
                 source=r[8])
             for r in rows
+        ]
+
+    # ----------------------------------------------------------------- traces
+
+    def record_spans(self, spans: list[TraceSpan]) -> None:
+        """Write one turn's spans on a connection of its own, and never raise.
+
+        The same arrangement as `log_answer` and for the same reason:
+        `read_snapshot()` puts `self.conn` into `REPEATABLE READ READ ONLY` for
+        the life of an answer, so an insert there raises, aborts the transaction
+        and takes the answer's remaining reads down with it.
+
+        It differs from `log_answer` in swallowing. An audit row is a promise
+        and says so when it cannot be kept; a timing row is a debugging aid, and
+        failing an answer over one would invert the priority the design rests
+        on. The failure goes onto the event stream rather than into silence.
+
+        `autocommit=False` here, unlike `log_answer`: the batch and the prune
+        are one transaction, because a half-written span tree reads as stages
+        that did not happen.
+        """
+        if not spans:
+            return
+        import psycopg
+
+        try:
+            with psycopg.connect(self.dsn) as conn:
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        """INSERT INTO turn_traces
+                           (session_id, turn_id, trace_id, span_id, parent_span_id,
+                            name, started_at, duration_ms, status, source, attributes)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        [(sp.session_id, sp.turn_id, sp.trace_id, sp.span_id,
+                          sp.parent_span_id, sp.name, sp.started_at or _now(),
+                          int(sp.duration_ms), sp.status or "ok",
+                          sp.source or "unknown",
+                          json.dumps(sp.attributes or {}, default=str))
+                         for sp in spans])
+                    self._prune_traces(cur)
+                conn.commit()
+        except Exception as error:                     # noqa: BLE001
+            from .. import observability as obs
+            obs.event("store_error", operation="record_spans",
+                      error=type(error).__name__, detail=str(error))
+
+    def _prune_traces(self, cur) -> None:
+        """Window then cap, on the stride, inside the caller's transaction.
+
+        Byte-for-byte the SQLite adapter's policy in the other dialect. The cap
+        deletes by id rather than by timestamp because ids are monotonic and the
+        house timestamp is only to the second, so a time cutoff would either
+        take a whole second's rows or none of them.
+        """
+        self._trace_writes += 1
+        if self._trace_writes % max(self.trace_prune_stride, 1):
+            return
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=self.trace_retention_days)
+                  ).isoformat(timespec="seconds")
+        cur.execute("DELETE FROM turn_traces WHERE started_at < %s", (cutoff,))
+        cur.execute(
+            """DELETE FROM turn_traces WHERE id <= (
+                   SELECT id FROM turn_traces ORDER BY id DESC
+                   OFFSET %s LIMIT 1)""",
+            (max(self.trace_row_cap, 1),))
+
+    def traces(self, trace_id: str = "", session_id: str = "",
+               limit: int = 1000) -> list[TraceSpan]:
+        """Spans for one answer or one conversation, oldest first."""
+        where, params = [], []
+        if trace_id:
+            where.append("trace_id = %s")
+            params.append(trace_id)
+        if session_id:
+            where.append("session_id = %s")
+            params.append(session_id)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        # Newest-first inside the limit, then reversed: a bare `traces()` should
+        # answer with the most recent spans, not with whatever is oldest in a
+        # table bounded at two hundred thousand rows.
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT session_id, turn_id, trace_id, span_id, parent_span_id,
+                           name, started_at, duration_ms, status, source, attributes
+                      FROM turn_traces {clause}
+                     ORDER BY id DESC LIMIT %s""",
+                (*params, limit))
+            rows = cur.fetchall()
+        return [
+            TraceSpan(
+                session_id=r[0], turn_id=r[1], trace_id=r[2], span_id=r[3],
+                parent_span_id=r[4], name=r[5], started_at=r[6],
+                duration_ms=int(r[7]), status=r[8], source=r[9],
+                # JSONB comes back already decoded; the fallback is for a column
+                # migrated in from TEXT rather than created as JSONB.
+                attributes=r[10] if isinstance(r[10], dict) else json.loads(r[10]))
+            for r in reversed(rows)
         ]
 
     # ------------------------------------------------------------- reporting

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.model import (                                    # noqa: E402
     AnswerLogEntry, Caveat, Chunk, CrawlRun, Document, DocumentUpdate,
-    DocumentVersion, Excluded, Snapshot,
+    DocumentVersion, Excluded, Snapshot, TraceSpan,
 )
 from assistant.repository import (                               # noqa: E402
     KnowledgeRepository, RetrievalRequest,
@@ -1021,3 +1021,105 @@ def test_an_unrecorded_surface_says_so_rather_than_guessing(repo):
     one_answer(repo)
     repo.log_answer(AnswerLogEntry(question="Nobody said.", path_taken="refuse"))
     assert repo.answer_log()[0].source == "unknown"
+
+
+# ----------------------------------------------------------------- traces
+
+
+def trace_span(name: str, span_id: str, trace_id: str = "trace-1", **kwargs):
+    """One span, with everything but the interesting field defaulted."""
+    fields = dict(trace_id=trace_id, span_id=span_id, name=name,
+                  started_at="2026-01-02T09:00:00+00:00", duration_ms=7,
+                  turn_id="turn-1")
+    fields.update(kwargs)
+    return TraceSpan(**fields)
+
+
+def test_a_turn_s_span_tree_survives_the_round_trip(repo):
+    """Both adapters carry `turn_traces`, or "why this answer?" is SQLite-only.
+
+    The tree is the point: an id, a parent and a trace are what turn a flat
+    stream of stages into something that can be read back as one answer. An
+    adapter that stored the rows and lost the parent would look like it worked
+    and would reconstruct nothing.
+    """
+    repo.record_spans([
+        trace_span("answer", "s1", session_id="sess-1", source="web",
+                   attributes={"parts": 1, "refused": False}),
+        trace_span("part", "s2", parent_span_id="s1", session_id="sess-1",
+                   source="web", started_at="2026-01-02T09:00:01+00:00",
+                   attributes={"cached": False}),
+        trace_span("retrieval", "s3", parent_span_id="s2", session_id="sess-1",
+                   source="web", started_at="2026-01-02T09:00:02+00:00",
+                   attributes={"returned": 5, "top_score": 0.71,
+                               "db.system": "sqlite"}),
+    ])
+
+    got = repo.traces(trace_id="trace-1")
+    assert [s.name for s in got] == ["answer", "part", "retrieval"]
+    assert [s.parent_span_id for s in got] == ["", "s1", "s2"]
+    assert {s.session_id for s in got} == {"sess-1"}
+    assert {s.source for s in got} == {"web"}
+    assert {s.turn_id for s in got} == {"turn-1"}
+    assert got[0].status == "ok"
+    assert got[2].duration_ms == 7
+    # Attributes are a flat JSON object and must come back as one, including the
+    # float — a store that stringified the score would break every latency and
+    # top-score query the metrics derive from these rows.
+    assert got[2].attributes == {"returned": 5, "top_score": 0.71,
+                                 "db.system": "sqlite"}
+
+
+def test_the_two_trace_access_paths_both_work(repo):
+    """Reconstruct one answer, and replay one conversation. Nothing else.
+
+    These are the two indexed paths of the review §2.3, and they are what the
+    schema's two indexes exist for — the second of them partial, because a CLI
+    caller's session id is empty and the replay query never asks for those rows.
+    """
+    repo.record_spans([
+        trace_span("answer", "a1", trace_id="trace-a", session_id="sess-1"),
+        trace_span("answer", "b1", trace_id="trace-b", session_id="sess-1",
+                   turn_id="turn-2"),
+        trace_span("answer", "c1", trace_id="trace-c"),          # a CLI caller
+    ])
+
+    assert [s.span_id for s in repo.traces(trace_id="trace-b")] == ["b1"]
+    assert sorted(s.span_id for s in repo.traces(session_id="sess-1")) == ["a1", "b1"]
+    # The CLI row exists and is simply not part of any conversation.
+    assert {s.span_id for s in repo.traces()} == {"a1", "b1", "c1"}
+    assert [s.session_id for s in repo.traces(trace_id="trace-c")] == [""]
+
+
+def test_an_unrecorded_trace_source_says_so_rather_than_guessing(repo):
+    """`unknown`, for the same reason `answer_log.source` defaults to it.
+
+    A span written by a caller that did not name its surface cannot honestly be
+    counted as any of them, and every metric §2.7 derives from these rows has to
+    be able to tell evaluation traffic from real traffic or it measures the
+    question set.
+    """
+    repo.record_spans([trace_span("answer", "s1")])
+    assert repo.traces()[0].source == "unknown"
+
+
+def test_an_empty_span_batch_is_not_an_error(repo):
+    """A turn that produced nothing to record is a state, not a failure."""
+    repo.record_spans([])
+    assert repo.traces() == []
+
+
+def test_recording_spans_is_not_rolled_back_with_the_snapshot_it_describes(repo):
+    """The same independent-connection guarantee `log_answer` carries.
+
+    A read snapshot is rolled back in SQLite and `REPEATABLE READ READ ONLY` in
+    PostgreSQL, so a span inserted inside one would be discarded or would raise
+    and take the answer's remaining reads with it. The engine records after the
+    snapshot closes; this proves the adapter would survive it either way, which
+    is what makes the arrangement safe rather than merely conventional.
+    """
+    one_answer(repo)
+    with repo.read_snapshot():
+        repo.record_spans([trace_span("answer", "s1", attributes={"parts": 1})])
+
+    assert [s.span_id for s in repo.traces(trace_id="trace-1")] == ["s1"]

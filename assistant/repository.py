@@ -28,6 +28,7 @@ from .model import (
     Excluded,
     Retrieved,
     Snapshot,
+    TraceSpan,
 )
 
 
@@ -83,6 +84,24 @@ def product_matches(named: str, candidate: str) -> bool:
     if not n or not c:
         return False
     return n in c or c in n
+
+
+# Retention for `turn_traces`, as settled in
+# docs/conversation-observability-review.md §8.1. Here rather than in either
+# adapter, because a window that differed between the assessment path and the
+# deployment path would make "the two adapters are one system" false about the
+# one thing an operator would notice.
+#
+# Fourteen days is the policy: a trace is for debugging the answer somebody is
+# asking about this week. The row cap is the backstop — measured against the
+# audit table's own rate, a heavy development day is about two thousand span
+# rows, so 200,000 is roughly three months and binds only when something is
+# wrong. The stride keeps the delete off the answering path; both adapters
+# expose it as an instance attribute so a test can prove the sweep without
+# writing two hundred batches to reach it.
+TRACE_RETENTION_DAYS = 14
+TRACE_ROW_CAP = 200_000
+TRACE_PRUNE_STRIDE = 200
 
 
 @dataclass(frozen=True)
@@ -314,6 +333,78 @@ class KnowledgeRepository(Protocol):
         worth having: refusal rates and route mix are countable from these rows
         rather than estimated. Returns an empty list when nothing has been
         answered yet, which is a state rather than an error.
+        """
+        ...
+
+
+    # ---- traces -----------------------------------------------------------
+
+    def record_spans(self, spans: list[TraceSpan]) -> None:
+        """Persist one turn's spans, and prune the table while it is open.
+
+        The debugging half of the pair whose audit half is `log_answer`: that
+        one says what an answer used, this one says how it got there and what
+        each stage cost. The two stay separate tables because merging them would
+        put timings into an audit trail and audit semantics into a debugging
+        one, and because only one of them is allowed to be deleted from.
+
+        **It writes on its own connection, outside any read snapshot**, for
+        exactly the reason `log_answer` does: a read snapshot is rolled back in
+        SQLite and `REPEATABLE READ READ ONLY` in PostgreSQL, so an insert made
+        inside one is silently discarded or raises and takes the answer's
+        remaining reads with it. Do not move this onto the reading connection.
+
+        **It must not raise.** A failure here degrades observability and nothing
+        else — the call site has a perfectly good answer in hand, and losing it
+        to a tracing write would invert the priority the whole design rests on.
+        The adapters therefore swallow, and say so on the event stream rather
+        than silently, which is the same bargain `Assistant._log` makes.
+
+        **Retention is enforced here**, on write, rather than on a schedule.
+        Two bounds: `TRACE_RETENTION_DAYS` is the stated policy — a trace is for
+        debugging the answer somebody is asking about this week — and
+        `TRACE_ROW_CAP` is the backstop that makes the policy safe against a
+        burst the window cannot see, such as a load test or a retry loop inside
+        the fourteen days. A window alone does not bound a burst; a cap alone
+        redefines retention as "however long two hundred thousand rows happen to
+        last", which is not a number anyone can answer a colleague with.
+
+        Pruning where the table is written follows `SessionStore`, which sweeps
+        expired entries from `open()` rather than from a timer, and `AnswerCache`,
+        which evicts at the point of insertion. It is amortised over
+        `TRACE_PRUNE_STRIDE` writes so the delete stays off the answering path:
+        a `DELETE ... WHERE started_at < ?` over an indexed column costs nothing
+        when it matches nothing, but it is still a write per answer if it runs
+        every time.
+
+        Three costs, stated rather than hidden. A quiet system keeps rows past
+        the window until something writes again, exactly as an idle
+        `SessionStore` does — the bound is on growth, not on age. A burst can
+        overshoot the cap between strides. And after the window an `answer_log`
+        row outlives its trace, so "why this answer?" degrades to the older,
+        weaker "what did this answer use".
+
+        Deliberately not done: `answer_log` gains no prune. It retains question
+        text, so deleting from it is a data-retention decision with a privacy
+        argument attached that nobody has taken. Bounding one table and not the
+        other is the honest split, and it leaves `answer_log`'s own unbounded
+        growth as a stated open item rather than a solved one.
+        """
+        ...
+
+    def traces(self, trace_id: str = "", session_id: str = "",
+               limit: int = 1000) -> list[TraceSpan]:
+        """Spans for one answer or one conversation, oldest first.
+
+        Oldest first because the caller is reconstructing a tree and reading it
+        in the order the stages ran, which is the opposite of `answer_log`'s
+        newest-first: that one is a feed, this one is a recording.
+
+        The two filters are the two indexed access paths of §2.3 and nothing
+        else, which is the point — `trace_id` reconstructs one answer and
+        `session_id` replays one conversation. Both empty returns the most
+        recent spans, which is a developer convenience rather than an access
+        path; `limit` bounds it either way.
         """
         ...
 

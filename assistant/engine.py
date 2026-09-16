@@ -123,7 +123,7 @@ class Assistant:
 
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
             correlation_id: str = "", carried: dict | None = None,
-            images=None) -> Reply:
+            images=None, session_id: str = "", turn_id: str = "") -> Reply:
         """One message in, one composite reply out.
 
         `carried` is what the caller already knows that this question does not
@@ -165,26 +165,27 @@ class Assistant:
         would have passed had there been no photograph. Coverage drops, safety
         does not, and catching here would only hide the `error` the
         `Perception` carries for a hand-off to report.
+
+        `session_id` and `turn_id` are observability only, and both are
+        optional. They name the conversation this message belongs to and the
+        message itself, so the persisted trace can be replayed as a conversation
+        rather than as a pile of unrelated answers. A CLI caller passes neither
+        and its spans carry an empty session id, which is the truth about it:
+        the CLI constructs no session and carries nothing between questions, so
+        consecutive CLI turns are unrelated by construction and a synthetic id
+        would group them into a conversation that shares nothing but a terminal.
+
+        `turn_id` is separate from the trace id even though they are one-to-one
+        for this single-turn engine, because a re-asked pending question is the
+        same turn and a different trace, and collapsing them would make the
+        ask-back cycle unreadable in the trace.
         """
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
         observed: dict[str, str] = {}
-        if images:
-            resolution = vision.slots_from_images(images)
-            observed = dict(resolution.slots)
-            # Counts and slot names only. The privacy posture of this system is
-            # that no question text and no passage text reaches the log; a
-            # photograph is the caller's own property and is named nowhere at
-            # all, which is why the uploaded filename is not carried this far.
-            obs.event("perception", images=len(images),
-                      slots=sorted(observed), discarded=len(resolution.discarded),
-                      cannot_determine=len(resolution.cannot_determine_from_image))
-        carried = {**(carried or {}), **observed}
-        # Sparse: only the slots whose origin is not the default. Everything
-        # else reads as ``CARRIED``, which is what every caller without a
-        # photograph has always produced and must keep producing.
-        origins = {slot: Provenance.OBSERVED for slot in observed}
+        carried = dict(carried or {})
+        origins: dict[str, Provenance] = {}
 
         # One id for the whole message, including every part it splits into, so
         # the lines for a two-topic question can be read as one event. A caller
@@ -192,14 +193,78 @@ class Assistant:
         # passes it in rather than starting a second trace for the same work.
         with obs.correlation(correlation_id) as cid:
             reply.correlation_id = cid
-            with obs.timed("answer", audiences=list(audiences),
-                           question_words=len(question.split()),
-                           question=obs.fingerprint(question)) as summary:
-                self._ask(question, audiences, reply, cid, carried, origins)
-                summary["parts"] = len(reply.parts)
-                summary["paths"] = reply.paths
-                summary["refused"] = reply.refused
+            # The turn owns the span tree and collects it. Perception happens
+            # inside it rather than before it, so the photograph's cost is a
+            # stage of this answer rather than an untimed prelude to it.
+            with obs.turn(turn=turn_id, session=session_id,
+                          source=self.source) as spans:
+                with obs.span("answer", audiences=list(audiences),
+                              question_words=len(question.split()),
+                              question=obs.fingerprint(question)) as summary:
+                    if images:
+                        # Counts and slot names only. No question text, no
+                        # passage text, and the photograph is named nowhere at
+                        # all — which is why the uploaded filename is not
+                        # carried this far.
+                        #
+                        # `vision_model_call` and `resolve`, the two children
+                        # the review's tree hangs under this span, are not
+                        # emitted: they live inside `assistant/vision.py`, which
+                        # this slice does not own and which the review found
+                        # already correct. The span is honest about the stage it
+                        # can see and silent about the two it cannot.
+                        with obs.span("perception", images=len(images)) as p:
+                            resolution = vision.slots_from_images(images)
+                            observed = dict(resolution.slots)
+                            p["slots"] = sorted(observed)
+                            p["observations"] = len(resolution.attributes)
+                            p["confirmed"] = len(observed)
+                            p["discarded"] = len(resolution.discarded)
+                            p["cannot_determine"] = len(
+                                resolution.cannot_determine_from_image)
+                        carried.update(observed)
+                        # Sparse: only the slots whose origin is not the
+                        # default. Everything else reads as ``CARRIED``, which
+                        # is what every caller without a photograph has always
+                        # produced and must keep producing.
+                        origins.update({slot: Provenance.OBSERVED
+                                        for slot in observed})
+                    self._ask(question, audiences, reply, cid, carried, origins)
+                    summary["parts"] = len(reply.parts)
+                    summary["paths"] = reply.paths
+                    summary["refused"] = reply.refused
+                # Written after the root span has closed, so the tree persisted
+                # is the whole tree — and after `_ask` has left its read
+                # snapshot, for the reason `log_answer` writes from outside one.
+                self._record_spans(spans)
         return reply
+
+    def _record_spans(self, spans: list) -> None:
+        """Persist the turn's trace, and never let a trace cost an answer.
+
+        Three layers of not-failing, and each is there for a different reason.
+        The adapters swallow their own write errors, because a store that cannot
+        record a timing has cost the operator a debugging aid and the caller
+        nothing. This also tolerates a repository that has no `record_spans` at
+        all, because the engine is built against a Protocol and a test double
+        that predates this method must keep answering. And the call itself is
+        wrapped, because the one remaining way a trace could break an answer is
+        an adapter nobody has written yet.
+
+        It follows `self.log` rather than a switch of its own. A caller that has
+        turned off recording has turned off recording, and two flags would let
+        a surface leak spans from a run it thought it had silenced.
+        """
+        if not self.log or not spans:
+            return
+        recorder = getattr(self.repo, "record_spans", None)
+        if recorder is None:
+            return
+        try:
+            recorder(spans)
+        except Exception as error:                     # noqa: BLE001
+            obs.event("store_error", operation="record_spans",
+                      error=type(error).__name__, detail=str(error))
 
     def _ask(self, question: str, audiences: tuple[str, ...], reply: Reply,
              cid: str, carried: dict | None = None,
@@ -210,38 +275,50 @@ class Assistant:
             # with the passages rather than retaining the startup snapshot.
             self.engine.names = {key: snapshot.notes.get(key, default) for key, default in
                                  (("products", []), ("colours", []), ("merchants", []), ("contact", {}))}
-            for part in split_by_topic(question):
-                key = self._cache_key(part, audiences, snapshot, carried,
-                                      origins)
-                # `is not None`, not truthiness. AnswerCache defines __len__,
-                # so an empty cache is falsy and `if self.cache` was False on
-                # every call — the cache could never fill, because it was empty.
-                answer = self.cache.get(key) if self.cache is not None else None
-                obs.event("cache", hit=answer is not None,
-                          question=obs.fingerprint(part),
-                          snapshot_id=snapshot.snapshot_id)
-                if answer is None:
-                    answer = self._answer_part(part, audiences, carried,
-                                               origins)
-                    answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
-                    answer.diagnostics["embedding_model"] = snapshot.embedding_model
-                    answer.diagnostics["chunking_version"] = snapshot.chunking_version
-                    if self.cache is not None:
-                        self.cache.put(key, answer)
-                else:
-                    # Copy before annotating. The cache holds one Answer and
-                    # hands the same object to every caller, so writing this
-                    # request's correlation id onto it overwrites the last
-                    # reader's — two concurrent callers on the threading server
-                    # would each find the other's trace in their diagnostics.
-                    # The answer text was never at risk; the ability to trace it
-                    # was, which is exactly what the id is for.
-                    answer = replace(answer, diagnostics={**answer.diagnostics,
-                                                          "cached": True})
-                # Carried on the answer as well as in the log, so a diagnostics
-                # dump and a log line can be joined without the store.
-                answer.diagnostics["correlation_id"] = cid
-                reply.parts.append((part, answer))
+            with obs.span("split_by_topic") as split:
+                parts = split_by_topic(question)
+                split["parts"] = len(parts)
+            for part in parts:
+                # One span per topic, and every stage below it hangs off this
+                # one, so a two-topic question reads as two trees rather than
+                # as one interleaved list.
+                with obs.span("part", question=obs.fingerprint(part),
+                              snapshot_id=snapshot.snapshot_id) as part_span:
+                    key = self._cache_key(part, audiences, snapshot, carried,
+                                          origins)
+                    # `is not None`, not truthiness. AnswerCache defines __len__,
+                    # so an empty cache is falsy and `if self.cache` was False on
+                    # every call — the cache could never fill, because it was empty.
+                    with obs.span("cache_lookup") as lookup:
+                        answer = (self.cache.get(key)
+                                  if self.cache is not None else None)
+                        lookup["hit"] = answer is not None
+                    part_span["cached"] = answer is not None
+                    if answer is None:
+                        answer = self._answer_part(part, audiences, carried,
+                                                   origins)
+                        answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
+                        answer.diagnostics["embedding_model"] = snapshot.embedding_model
+                        answer.diagnostics["chunking_version"] = snapshot.chunking_version
+                        if self.cache is not None:
+                            self.cache.put(key, answer)
+                    else:
+                        # Copy before annotating. The cache holds one Answer and
+                        # hands the same object to every caller, so writing this
+                        # request's correlation id onto it overwrites the last
+                        # reader's — two concurrent callers on the threading server
+                        # would each find the other's trace in their diagnostics.
+                        # The answer text was never at risk; the ability to trace it
+                        # was, which is exactly what the id is for.
+                        answer = replace(answer, diagnostics={**answer.diagnostics,
+                                                              "cached": True})
+                    # Carried on the answer as well as in the log, so a diagnostics
+                    # dump and a log line can be joined without the store.
+                    answer.diagnostics["correlation_id"] = cid
+                    answer.diagnostics["trace_id"] = obs.trace_id()
+                    answer.diagnostics["turn_id"] = obs.turn_id()
+                    part_span["path"] = answer.path
+                    reply.parts.append((part, answer))
 
         # Logged outside the read snapshot, deliberately. SQLite's snapshot ends
         # in a rollback and the Postgres one is REPEATABLE READ READ ONLY, so an
@@ -413,7 +490,9 @@ class Assistant:
             # The policy gate is a routing decision like any other, and it is
             # the one that keeps the model away from prices and stock. It is
             # worth being able to count how often it fires.
-            obs.event("route", path=Path_.ROUTE.value, topic=topic, step="gate")
+            with obs.span("route", path=Path_.ROUTE.value, topic=topic,
+                          step="gate", reason="policy gate"):
+                pass
             if spec.get("from_manifest"):
                 return self.engine.documents_for(part, audiences)
             return self.engine.route(topic, spec)
@@ -434,7 +513,15 @@ class Assistant:
         #
         # These hits carry no similarity score, so they sort last and cannot
         # become the top hit that step 1 measures against the threshold.
-        if named and "calculation" in self.router.slots.detect(part):
+        with obs.span("slot_detection") as detection:
+            # Detected once and reused. `detect` is pure, so calling it twice
+            # would cost a second pass over the vocabulary to learn the same
+            # thing — and a span around a call whose result is thrown away
+            # would be a timing of something the answer does not depend on.
+            # Names only: a slot *value* is a phrase out of the question.
+            detected = self.router.slots.detect(part)
+            detection["slots"] = sorted(detected)
+        if named and "calculation" in detected:
             known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
             found = [h for h in self.retriever.find_property(
                         named, COVERAGE_TERMS, audiences=audiences)
@@ -454,8 +541,15 @@ class Assistant:
             obs.event("missed_evidence", added=len(missed), product=named,
                       reason="the question named something no passage contained")
 
-        decision = self.router.route(
-            part, hits, self.retriever.above_threshold(hits), audiences, carried)
+        with obs.span("route") as routing:
+            decision = self.router.route(
+                part, hits, self.retriever.above_threshold(hits), audiences,
+                carried)
+            routing["path"] = decision.path.value
+            routing["step"] = decision.step
+            routing["reason"] = decision.reason
+            routing["top_score"] = hits[0].score if hits else 0.0
+            routing["slots"] = sorted(decision.slots)
         # Annotated after the routing decision rather than passed into it,
         # because nothing in the router reads an origin and nothing in it
         # should: the path a question takes must not depend on whether a
@@ -472,12 +566,7 @@ class Assistant:
             slot: origin for slot, origin in (origins or {}).items()
             if decision.slots.get(slot) == (carried or {}).get(slot)
         }
-        obs.event("route", path=decision.path.value, step=decision.step,
-                  reason=decision.reason,
-                  top_score=hits[0].score if hits else 0.0,
-                  slots=sorted(decision.slots))
-
-        return {
+        produce = {
             # Every path gets the question, not just Compose. Without it the
             # other five cannot tell a slot the caller stated in this sentence
             # from one carried out of an earlier turn, so they fell back to
@@ -492,7 +581,18 @@ class Assistant:
             Path_.DIAGNOSIS: lambda: self.engine.diagnosis(decision, part),
             Path_.ASK_BACK: lambda: self.engine.ask_back(decision, part),
             Path_.REFUSE: lambda: self.engine.refuse(decision, decision.reason, part),
-        }[decision.path]()
+        }[decision.path]
+        # `render` covers turning the decision into the reply a person reads:
+        # the passage or the composed text, its sources, the caveats code
+        # appends and the disclosure a surface may fold away. Counts only — the
+        # sources are documents, not their text.
+        with obs.span("render", path=decision.path.value) as rendering:
+            answer = produce()
+            rendering["sources"] = len(answer.sources)
+            rendering["caveats"] = len(answer.caveats)
+            rendering["disclosure"] = bool(answer.disclosure)
+            rendering["refused"] = answer.refused
+        return answer
 
 
 # ------------------------------------------------------------------ rendering
