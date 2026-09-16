@@ -4,7 +4,8 @@ An asserted audience is defensible at a command line, where the person holding
 the shell already has the database file. It is not defensible over HTTP, where
 the assertion arrives in a query string: the web page read `?a=staff` straight
 into the retrieval call, so any visitor could promote themselves to staff and
-the audience filter — which is enforced properly in SQL, and tested — could be
+the audience filter — which is real, enforced inside the repository before
+anything is ranked, and tested — could be
 stepped around entirely by typing.
 
 The rule here is that a request may only ever **narrow** what the server was

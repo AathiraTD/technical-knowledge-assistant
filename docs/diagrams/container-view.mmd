@@ -62,7 +62,7 @@ C4Container
     Rel_L(serving, engine, "Queued, rate limited; extract-only under load")
     Rel_U(engine, answercache, "Reads and writes composite parts")
     Rel_D(eval, engine, "Drives situations and probes")
-    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered in the query, authority then similarity")
+    Rel_U(engine, store, "Retrieves via KnowledgeRepository: active versions only, audience-filtered inside the repository, authority then similarity")
     Rel_U(engine, config, "Reads routing and policy")
     Rel_U(engine, emb, "Embeds question")
     Rel_U(engine, gen, "Composes answer from retrieved passages")

@@ -222,7 +222,13 @@ def test_an_oversized_message_is_capped_before_anything_else_happens(
 
     reply = assistant.ask("What thickness does Solo go on at? " * 500)
 
-    assert len(reply.question.split()) == MAX_WORDS
+    # The literal, not the constant. `== MAX_WORDS` is the expression under
+    # test compared against itself: setting MAX_WORDS to 20 left this green,
+    # which mutation confirmed. `docs/architecture.md` says "capped at about
+    # 500 words", so 500 is the documented contract and the number worth
+    # pinning — a silent tightening would truncate real questions, and a
+    # silent loosening would reopen the denial-of-service path.
+    assert len(reply.question.split()) == 500 == MAX_WORDS
     assert reply.refused is True
 
 
@@ -256,11 +262,20 @@ def test_a_single_document_factual_question_prints_its_passage_without_a_model(
 
 def test_several_documents_reach_the_compose_path(two_document_assistant,
                                                   monkeypatch):
-    """The model runs on one path only, and this is the one."""
+    """The model runs on one path only, and this is the one.
+
+    The stub answers both halves of the question and cites both documents. It
+    used to answer only the water half while citing one passage, and passed
+    because check 6 then scanned every retrieved passage rather than the cited
+    ones — so an answer that never addressed coverage satisfied a gate about
+    coverage. With check 6 tightened to cited evidence, an incomplete answer is
+    correctly refused, and this test has to supply a complete one.
+    """
     monkeypatch.setattr(
         ollama, "generate",
         lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
-                           "sack [1].", 1.25))
+                           "sack [1]. Duro covers approximately 2.5 m2 per 25 kg "
+                           "bag at 11 mm [2].", 1.25))
 
     reply = two_document_assistant.ask("What water and coverage does Solo have")
     answer = reply.parts[0][1]

@@ -6,7 +6,7 @@ Built for the AEC Solution Architect (AI/LLM Developer) KTP take-home exercise, 
 
 ## How it works, in a paragraph
 
-A question is split by topic, gated against a routing table, and matched against slot vocabularies. What survives is embedded and retrieved from the knowledge store — active document versions only, filtered to the caller's audience in the query rather than by prompt. A deterministic router — not the model — then picks one of five paths: route to a fixed referral, print a passage verbatim, compose over several passages, quote a published hand-off, or refuse. The model runs on the compose path only, at temperature zero, over retrieved passages delimited as data. Six checks run before anything prints, and a failure sends the part to a refusal that still carries whatever the site does publish.
+A question is split by topic, gated against a routing table, and matched against slot vocabularies. What survives is embedded and retrieved from the knowledge store — active document versions only, filtered to the caller's audience in code rather than by prompt. A deterministic router — not the model — then picks one of five paths: route to a fixed referral, print a passage verbatim, compose over several passages, quote a published hand-off, or refuse. The model runs on the compose path only, at temperature zero, over retrieved passages delimited as data. Six checks run before anything prints, and a failure sends the part to a refusal that still carries whatever the site does publish.
 
 ## Status
 
@@ -25,16 +25,16 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | Indexer | built and verified | Container verification: 94 documents + 1 staff fixture, 552 passages, zero failures; unchanged second run reprocesses zero documents |
 | Delta ingestion | built and verified | A second crawl of an unchanged site reprocesses **nothing**: 1.4s against 23.8s. Changed documents supersede and keep their history; withdrawn ones are deactivated, not deleted. Four-run proof in `DECISIONS.md` entry 18 |
 | SQLite adapter | built and verified | The index builds, publishes atomically, and serves every answer in the transcript |
-| Retrieval | built and verified | Audience filtering in the query; authority banding; index-mismatch refusal |
+| Retrieval | built and verified | Audience filtering inside the repository, before anything is ranked — a `WHERE` clause in PostgreSQL, a Python row filter over the active chunks in SQLite; authority banding; index-mismatch refusal |
 | Router | built and verified | 11-topic policy gate, 8 slots, 8 ordered steps |
-| Six checks | built and verified | 16 unit tests, one per failure they exist to catch — `tests/test_checks.py` |
-| Answer engine | built and verified | Seven paths, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
+| Six checks | built and verified | 30 unit tests across the six, each aimed at a failure they exist to catch — `tests/test_checks.py` |
+| Answer engine | built and verified | Five paths plus the two composites the diagram names, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
 | CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
 | Evaluation harness | built and verified | **9/9 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. The two multi-source situations cover the brief's second test type. Transcript in `eval/results/transcript.txt` |
 | Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
-| PostgreSQL adapter | built and verified | Real pgvector contract, ingestion lifecycle, concurrent reader and configuration migration tests |
+| PostgreSQL adapter | built and verified | Repository contract, ingestion lifecycle, publication lock, concurrent reader and configuration migration, all against a real PostgreSQL 16 + pgvector in CI and in a container — [evidence](docs/knowledge-pipeline-verification.md). Verified against the contract, not deployed: the transcript is produced on SQLite, and the 43 PostgreSQL tests skip on a machine with no `ASSISTANT_POSTGRES_DSN` |
 | Container deployment | partial | Image builds and runs ingestion as non-root against PostgreSQL with model doubles; Compose validates and initializes the index before the UI. Full live-model deployment is not claimed |
-| Authentication | documented only | The audience set is asserted, not proved — the filter itself is real and tested |
+| Authentication | documented only | The audience set is asserted, not proved — the filter itself is real and tested. Over HTTP a request may only narrow the set the operator started the server with, never widen it; that is not authentication and is not described as such |
 | Vision | documented only | Refused by policy, not by capability — decision 16 |
 | Scheduled ingestion | built and verified | Conditional refresh, durable job deduplication, retries, crash recovery and dead-letter status; external scheduler supplies cadence |
 | Approved staff ingestion | built and verified | Reviewed JSON sources, shared chunking/caveats, version history and audience enforcement |
@@ -71,7 +71,7 @@ python -m assistant.index      # crawl is cached in the repo; builds the index o
                                # a second run reprocesses only what changed
 python -m assistant.cli        # ask a question
 python -m assistant.ui         # the same library behind a web page
-python -m eval.run             # seven situations, probe suite, threshold sweep
+python -m eval.run             # nine situations, probe suite, threshold sweep
 ```
 
 The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without network access. Only the index is rebuilt locally, because it is tied to the embedding model on your machine.
@@ -81,6 +81,29 @@ Last-Modified. Without `--refresh`, available bodies are reused but discovery
 still contacts the site. `python -m assistant.index` uses the cached source
 release. Set `ASSISTANT_POSTGRES_DSN` to select PostgreSQL for all entry points.
 See the [runbook](docs/knowledge-pipeline.md) for staff imports and scheduling.
+
+## What ships in this repository, and on what footing
+
+The crawled corpus ships with the code. `data/cache/` is 96 tracked files and
+about 29 MB — 37 Lime Green PDFs (34 technical datasheets and 3 Warmshell system
+guides) and the HTML of the pages that linked them, byte-for-byte as fetched —
+and `docs/brief.docx` is the exercise brief itself. That
+is a deliberate trade, and it is what makes the clean-clone run real: an assessor
+with no network and no crawl still gets the same 95 documents, the same 552
+passages and the same transcript, and can check any quoted figure against the
+original file rather than taking the index's word for it. Shipping only the built
+index would have removed the evidence and kept the claim.
+
+The footing has to be stated plainly, because it is not a licence. This is
+third-party material — Lime Green's published documents, and the brief itself —
+included so the exercise can be assessed offline, not redistributed under any
+grant. Copyright stays with its owners, this repository is private, and nothing
+in it confers a right to republish. There is deliberately no `LICENSE` file:
+adding one would imply a grant over content that is not ours to grant. Everything
+derived from the corpus inherits the same footing — the index, the embedding
+cache, and the harvested product, colour and merchant name lists. If this work is
+ever made public, the corpus comes out first and the crawl becomes a build step
+rather than a shipped artefact.
 
 ## Layout
 
@@ -93,7 +116,9 @@ assistant/
   crawl.py              sitemap crawl, content hashing, the version ledger
   model.py              the domain model — storage-agnostic by design
   repository.py         KnowledgeRepository: the boundary the engine depends on
-  store/embedded.py     the SQLite adapter behind it
+  store/embedded.py     the SQLite adapter behind it — the one that ships
+  store/postgres.py     the PostgreSQL + pgvector adapter, same contract
+  store/factory.py      which of the two a process gets, decided in one place
   extract.py            HTML and PDF to citable sections; harvest before stripping
   index.py              chunk, tag caveats, embed, publish a snapshot
   embedcache.py         content-addressed embeddings, so a rebuild is seconds
@@ -102,8 +127,11 @@ assistant/
   router.py             policy gate, slot detection, the eight ordered steps
   answer.py             extract and compose, the six checks, hand-off, rendering
   engine.py             the assembled assistant, split by topic
+  audience.py           a request may narrow the operator's audience set, never widen it
+  cache.py              exact-key answer cache, scoped by audience and snapshot
   cli.py                canonical interface
   ui.py                 a web page over the same library, standard library only
+  health.py             readiness: store, snapshot compatibility, model reachability
 
 config/
   sources.json          the corpus boundary as executable configuration
@@ -117,7 +145,7 @@ data/
   embeddings.db         the embedding cache, content-addressed by text and model
   index/                generated — the knowledge store and the ingestion report
 eval/
-  situations.json       seven situations with mechanical expectations
+  situations.json       nine situations with mechanical expectations
   probes.json           ten guardrail probes
   fixtures/             a synthetic staff-tagged document that must stay invisible
   run.py                the harness
@@ -143,6 +171,10 @@ SQLite always runs. PostgreSQL tests require a disposable pgvector database via
 `ASSISTANT_POSTGRES_DSN`; they skip visibly only when it is unset, and configured
 connection failures fail the suite. Install `psycopg[binary]==3.3.3` in a supported
 Linux environment for the full suite.
+
+On the Windows build machine, where no DSN is set, that is **648 passed and 43
+skipped** — the 43 being the PostgreSQL-gated tests, which CI runs against a real
+`pgvector/pgvector:pg16` service. A skip is printed, never swallowed.
 
 The target is **100% line and branch coverage** across the knowledge and answer
 libraries, including crawler, queue and both stores. CLI/UI presentation wrappers

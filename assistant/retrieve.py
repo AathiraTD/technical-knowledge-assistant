@@ -1,7 +1,8 @@
 """Retrieval: a question to passages the caller is allowed to see.
 
 Thin by design. The repository does the filtering and the ranking, because that
-is where the audience filter belongs — in the query, against rows, not in a
+is where the audience filter belongs — against rows inside the repository,
+not in a
 prompt. What is left here is the part that is genuinely about the question:
 expanding it with the handful of synonyms that close the vocabulary gap, and
 refusing to run at all when the index was built by a different model.

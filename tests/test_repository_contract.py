@@ -200,6 +200,61 @@ def test_authority_breaks_a_near_tie(repo):
         "the FAQ outranked the datasheet on a similarity rounding difference")
 
 
+def test_the_newer_of_two_equal_sheets_wins(repo):
+    """"Newest wins within a type" is documented policy with nothing testing it.
+
+    Decision 12 makes recency a tiebreaker *within* an authority class, and the
+    ranking sort is stable over a date-descending pass to achieve it. Deleting
+    that pass left the entire suite green, which means the rule was asserted in
+    three documents and enforced by nothing a test could see. Two datasheets of
+    equal authority and equal similarity, differing only in printed date: the
+    2025 one must come first.
+    """
+    # Named so that alphabetical order contradicts date order. The load query
+    # sorts by canonical_url, so "old"/"new" would have put the 2025 sheet first
+    # by accident and the test would have passed with the recency sort deleted —
+    # which is exactly what it did before these names were chosen.
+    old_sheet, new_sheet = "https://example/a-2015", "https://example/b-2025"
+    repo.publish(
+        [doc(old_sheet, "datasheet", 1), doc(new_sheet, "datasheet", 1)],
+        [ver(old_sheet), ver(new_sheet)],
+        [chunk(old_sheet, 0, "Solo needs 5 to 6 litres per sack.", A,
+               authority=1, dtype="datasheet", date="2015-08-01"),
+         chunk(new_sheet, 0, "Solo needs 5 to 6 litres per sack.", A,
+               authority=1, dtype="datasheet", date="2025-10-01")],
+        snap(chunks=2, docs=2),
+    )
+
+    hits = repo.retrieve(A, top_k=2)
+    assert hits[0].chunk.source_date == "2025-10-01", (
+        "the 2015 sheet outranked the 2025 one at equal authority and equal "
+        "similarity; recency is the documented tiebreaker")
+
+
+def test_recency_cannot_overturn_authority(repo):
+    """The other half of the rule, and the one that protects the datasheet.
+
+    Decision 12 is explicit that newer content does not automatically outrank a
+    more authoritative source. A FAQ edited this morning must still lose to a
+    datasheet printed in 2015, or the tiebreaker has quietly become the ranking.
+    """
+    sheet, faq = "https://example/sheet", "https://example/faq"
+    repo.publish(
+        [doc(sheet, "datasheet", 1), doc(faq, "faq", 5)],
+        [ver(sheet), ver(faq)],
+        [chunk(sheet, 0, "Solo needs 5 to 6 litres per sack.", NEAR_A,
+               authority=1, dtype="datasheet", date="2015-08-01"),
+         chunk(faq, 0, "Solo needs about 5 litres per sack.", A,
+               authority=5, dtype="faq", date="2026-09-01")],
+        snap(chunks=2, docs=2),
+    )
+
+    hits = repo.retrieve(A, top_k=2)
+    assert hits[0].chunk.document_type == "datasheet", (
+        "a newer FAQ outranked an older datasheet; recency is a tiebreaker "
+        "within an authority class, not across one")
+
+
 def test_per_document_cap(repo):
     """A multi-source question must see several documents, not one page five times."""
     one, two = "https://example/one", "https://example/two"

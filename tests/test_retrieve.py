@@ -178,3 +178,30 @@ def test_an_index_with_no_embedded_chunks_returns_nothing(monkeypatch):
     """A snapshot can exist with nothing searchable in it; that must not raise."""
     monkeypatch.setattr(ollama, "embed_one", lambda text, model=None: A)
     assert Retriever(build(chunks=False)).search("anything") == []
+
+
+def test_a_passage_exactly_on_the_threshold_is_admitted(monkeypatch):
+    """The boundary itself, which no other test touches.
+
+    `above_threshold` is `score >= threshold`. Changing it to `>` leaves the
+    whole suite green — confirmed by mutation — because every other case sits
+    far from the line. The distinction is not academic: the threshold is the
+    abstention rule, the sweep prints behaviour at the chosen value and at plus
+    and minus 0.1, and a silent flip of the comparison would move what the
+    sweep reports without moving the number it reports it against.
+    """
+    monkeypatch.setattr(ollama, "embed_one", lambda text, model=None: A)
+    hits = Retriever(build()).search("anything")
+    exactly = Retriever(build(), threshold=hits[0].score)
+
+    assert exactly.above_threshold(hits) is True, (
+        "a passage exactly on the threshold was refused; the rule is >=, "
+        "so the documented value is the lowest score that still answers")
+
+
+def test_a_passage_just_under_the_threshold_is_refused(monkeypatch):
+    monkeypatch.setattr(ollama, "embed_one", lambda text, model=None: A)
+    hits = Retriever(build()).search("anything")
+    just_over = Retriever(build(), threshold=hits[0].score + 1e-9)
+
+    assert just_over.above_threshold(hits) is False

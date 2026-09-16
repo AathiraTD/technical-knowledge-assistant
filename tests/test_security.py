@@ -132,7 +132,11 @@ def obedient(prompt: str, **_kwargs) -> tuple[str, float]:
     """
     sentences = []
     for block in prompt.split("Passages:", 1)[-1].split("\n\n"):
-        head, _, body = block.partition("\n")
+        # `.strip()` first: the passage list opens with a newline, so the first
+        # block began with one and its marker line landed in the wrong half of
+        # the partition. The stub then quoted every passage but the first, which
+        # looked like a passing multi-source answer and was not one.
+        head, _, body = block.strip().partition("\n")
         head, body = head.strip(), body.strip()
         if head.startswith("[") and "]" in head and body:
             marker = head[:head.index("]") + 1]

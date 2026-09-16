@@ -102,13 +102,33 @@ def held_lock():
 
 
 def waiters() -> int:
-    """How many connections are queued on the publication lock right now."""
+    """How many connections are queued on *our* publication lock right now.
+
+    Every clause after `locktype` is load-bearing, and each was shown to matter
+    by a waiter that the looser query counted wrongly:
+
+      `classid = 0`    a bigint key is stored as classid 0 with the key in
+                       objid; `pg_advisory_xact_lock(4303642605)` is a different
+                       lock that shares our low 32 bits and was counted.
+      `objsubid = 1`   distinguishes the one-argument bigint form from
+                       `pg_advisory_xact_lock(0, 8675309)`, which is a different
+                       lock again.
+      `database = …`   `pg_locks` is cluster-wide. Without this, a second suite
+                       running against another database on the same server makes
+                       this one report contention it did not cause — the same
+                       database-wide hazard the module docstring warns about,
+                       arriving through the observability query instead.
+    """
     import psycopg
 
     with psycopg.connect(DSN, autocommit=True) as watcher:
         return watcher.execute(
-            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
-            "AND objid = %s AND NOT granted", (LOCK,)).fetchone()[0]
+            "SELECT count(*) FROM pg_locks "
+            " WHERE locktype = 'advisory' AND classid = 0 AND objid = %s "
+            "   AND objsubid = 1 AND NOT granted "
+            "   AND database = (SELECT oid FROM pg_database "
+            "                    WHERE datname = current_database())",
+            (LOCK,)).fetchone()[0]
 
 
 def a_delta() -> tuple[list[DocumentUpdate], Snapshot]:
@@ -138,9 +158,19 @@ def test_a_publisher_waiting_on_a_held_lock_gives_up_with_a_diagnosis(
     from assistant.store import postgres
 
     # One second, not thirty: what is under test is that a bound exists and is
-    # enforced, not the value chosen for production. The bound is applied by the
-    # server through `lock_timeout`, so this timing does not depend on load.
+    # enforced, not the value chosen for production.
     monkeypatch.setattr(postgres, "PUBLISH_LOCK_TIMEOUT", 1)
+
+    # Assert the patch took, rather than inferring it from the clock. This is
+    # what an upper bound on the elapsed time was really for: if the monkeypatch
+    # silently failed, the wait would be the unpatched 30 s and a ceiling would
+    # notice. Checking the value directly notices the same thing and cannot be
+    # confused by a slow host, which a timing assertion provably can be — a
+    # paused container produced readings of 26 s and 51 s here, on a database
+    # that behaved perfectly. Timing it on the server's clock does not help:
+    # when the backend is frozen its `lock_timeout` timer freezes with it, so
+    # the wait really was that long.
+    assert postgres.PUBLISH_LOCK_TIMEOUT == 1, "the timeout patch did not apply"
 
     updates, snapshot = a_delta()
     with held_lock():
@@ -151,8 +181,13 @@ def test_a_publisher_waiting_on_a_held_lock_gives_up_with_a_diagnosis(
 
     assert "still holds the publication lock" in str(raised.value)
     assert "Nothing was changed" in str(raised.value)
-    # It waited rather than failing instantly, and gave up rather than hanging.
-    assert 0.5 < waited < 20, f"waited {waited:.2f}s"
+    # Only a lower bound, and only to prove it waited for the lock rather than
+    # failing on something else instantly. It is server-enforced and has never
+    # been observed below 1.001 s across more than a hundred runs. There is no
+    # upper bound, because giving up at all is what this test is about and the
+    # raised exception is the proof of it — an adapter that hung would never
+    # reach this line.
+    assert waited > 0.5, f"gave up after only {waited:.2f}s"
 
     # And nothing was published: the store is exactly as it was.
     assert store.snapshot() is None
@@ -207,9 +242,14 @@ def test_a_failure_that_is_not_the_timeout_is_raised_as_itself(store):
     from psycopg.conninfo import make_conninfo
     from assistant.store.postgres import PostgresKnowledgeRepository
 
+    # Spaces are stripped because libpq splits the `options` string on them: a
+    # `search_path` echoed back as "schema, public" would silently truncate the
+    # options that follow it, and `statement_timeout` would never be set — the
+    # test would then pass or fail for a reason unrelated to what it checks.
     search_path = store.conn.execute("SHOW search_path").fetchone()[0]
     impatient = PostgresKnowledgeRepository(make_conninfo(
-        DSN, options=f"-c search_path={search_path} -c statement_timeout=400ms"))
+        DSN, options=f"-c search_path={search_path.replace(' ', '')} "
+                     f"-c statement_timeout=400ms"))
 
     updates, snapshot = a_delta()
     try:

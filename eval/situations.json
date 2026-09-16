@@ -1,18 +1,22 @@
 {
-  "_comment": "Nine situations, one per thing the system claims to do, covering all three question types the brief names: a straightforward product question (S1), a question requiring information from multiple pieces of information (S8, S9) and a question the material deliberately cannot answer (S7, and the near-miss S2). Each names the path it must take and what must be true of the answer. A situation that merely 'looks good' proves nothing, so every expectation here is mechanical: a path, a source, a refusal state, a count of distinct source documents, or a string that must or must not appear.",
+  "_comment": "Nine situations, one per thing the system claims to do, covering all three question types the brief names: a straightforward product question (S1), a question requiring information from multiple pieces of information (S8, S9) and a question the material deliberately cannot answer (S7, and the near-miss S2). Each names the path it must take, the router step that must fire, and what must be true of the printed answer. Mechanical is not the same as capable of failing: an adversarial review found that must_cite was satisfied by a refusal (a refusal cites the passage it falls back on), that S1 never asserted the figure it exists to protect, that S6 would have passed on a printed bag count, and that S7's absence claim was prose the harness never read. Every expectation here is now written so the behaviour it describes is the only behaviour that passes it — a published figure word for word, a router step, a refusal that still cites, a count of the documents the answer's own markers point at, a regular expression that must not appear, or a term that must be absent from the evidence retrieval returns.",
   "situations": [
     {
       "id": "S1",
       "name": "The straightforward product question",
       "question": "How much water does Solo Onecoat need per bag?",
-      "why": "The brief's first recommended test. A published figure must come back verbatim with its source, and must not be paraphrased into drift.",
+      "why": "The brief's first recommended test. The Solo datasheet publishes 'Add between 5 and 6 litres of clean water per 25kg sack', and that figure must come back word for word with the datasheet itself cited. answer_contains_all is the expectation that matters and it was missing: the path, the refusal state and the citation can all be correct while the printed figure has drifted to '5 to 6 litres per bag', which is the one failure this situation exists to catch. The pack size is load-bearing too — the Roman Stucco sheet publishes the same water figure per 20kg sack, so '25kg' is what says the answer stayed with its product.",
       "expect": {
         "path_in": [
           "extract",
           "compose"
         ],
         "refused": false,
-        "source_contains": "solo",
+        "answer_contains_all": [
+          "between 5 and 6 litres",
+          "25kg sack"
+        ],
+        "source_contains": "solo-one-coat-lime-plaster-tds",
         "must_cite": true
       }
     },
@@ -20,110 +24,194 @@
       "id": "S2",
       "name": "The near-miss: right product, wrong property",
       "question": "What is the U-value of Solo Onecoat plaster?",
-      "why": "Decision 9. Retrieval will confidently return the Solo datasheet, which says nothing about U-values. A confident retrieval is not an answer.",
+      "why": "Decision 9. Retrieval will confidently return the Solo datasheet, which says nothing about U-values. A confident retrieval is not an answer. step_in is what makes this a test of the relevance gate rather than of the threshold: this question scores 0.739 in the sweep, well above 0.45, so a refusal at step 1 would be the right output arriving for the wrong reason and would mean the gate had stopped working. The refusal must still show the closest published passage with its source — that is must_cite_handoff, which replaces the must_cite a refusal used to satisfy by accident — and no thermal figure may print.",
       "expect": {
         "path_in": [
           "refuse"
         ],
+        "step_in": [
+          "4"
+        ],
         "refused": true,
-        "answer_contains": "does not state"
+        "answer_contains": "does not state",
+        "answer_must_not_match": [
+          "\\d+(?:[.,]\\d+)?\\s*w/m"
+        ],
+        "must_cite_handoff": true
       }
     },
     {
       "id": "S3",
       "name": "The policy question that must never reach retrieval",
       "question": "How much does a bag of Solo cost?",
-      "why": "Price is not published. Retrieval would find a passage mentioning bags and the model would be tempted to help.",
+      "why": "Price is not published. Retrieval would find a passage mentioning bags and the model would be tempted to help. no_sources and model_ran are the mechanical form of 'never reaches retrieval', which the situation asserted in its name and nowhere in its expectations: nothing retrieved, nothing cited, and the model never invoked. The referral also has to carry the place the answer actually lives, which is the stockist finder on the site.",
       "expect": {
         "path_in": [
           "route"
         ],
+        "step_in": [
+          "policy gate"
+        ],
         "refused": false,
+        "model_ran": false,
+        "no_sources": true,
         "answer_contains": "does not publish prices",
+        "answer_contains_all": [
+          "find-a-supplier"
+        ],
         "must_not_contain_digits_with_pound": true
       }
     },
     {
       "id": "S4",
-      "name": "The published deferral beats the computed answer",
+      "name": "The company's own decision beats a generated answer",
       "question": "Can you match the colour of my existing render?",
-      "why": "Decision 8, router step 2. The company has already decided this needs a person.",
+      "why": "The principle of decision 8 — where Lime Green has already decided a question needs a person, the assistant does not answer around it. The implementation for this question is the policy gate, not router step 2: colour matching is one of the routing table's topics, so it is caught before retrieval and the router never sees it. This field used to claim router step 2, which is the cited hand-off path for a deferral found inside a retrieved passage, and the expectation allowed that path as an alternative it could never take. Both are corrected here, and the gap is worth stating: no situation currently exercises the cited hand-off path. What is asserted is what happens — the fixed referral, no retrieval, no model, and a hand-off carrying the sample page and the crawled contact number rather than a generated one.",
       "expect": {
         "path_in": [
-          "route",
-          "cited hand-off"
+          "route"
         ],
-        "answer_contains": "sample"
+        "step_in": [
+          "policy gate"
+        ],
+        "refused": false,
+        "model_ran": false,
+        "no_sources": true,
+        "answer_contains": "sample",
+        "answer_contains_all": [
+          "order a physical sample",
+          "order-a-sample",
+          "0800 538 5746"
+        ]
       }
     },
     {
       "id": "S5",
       "name": "The load-bearing slot is uncued",
       "question": "Which plaster should I use?",
-      "why": "Decision 10. Substrate decides the product. Answering without it is guessing in a liability-sensitive domain.",
+      "why": "Decision 10. Substrate decides the product, so answering without it is guessing in a liability-sensitive domain and the only acceptable outcome is the ask-back at router step 5. The earlier expectation also allowed compose and refuse — two of the three outcomes this situation exists to distinguish between, which left it asserting almost nothing. The ask-back has to name the detail it needs, and must not name a product, because naming one is the guess.",
       "expect": {
         "path_in": [
-          "ask back",
-          "compose",
-          "refuse"
+          "ask back"
         ],
-        "answer_contains": "built of"
+        "step_in": [
+          "5"
+        ],
+        "refused": false,
+        "model_ran": false,
+        "answer_contains": "built of",
+        "answer_contains_all": [
+          "what is the wall built of",
+          "brick, stone, cob"
+        ],
+        "answer_must_not_match": [
+          "\\b(?:use|recommend|try|apply)\\s+(?:lime green\\s+)?(?:solo|duro|forte|ultra|tradirend|natural finish|fine stuff)\\b"
+        ]
       }
     },
     {
       "id": "S6",
       "name": "The quantity question where the sum is refused",
       "question": "How many bags of Duro do I need for 20 square metres?",
-      "why": "Decision: print the published coverage and pack size; do not multiply. The arithmetic depends on background and thickness.",
+      "why": "Decision: print the published coverage and pack size; do not multiply. The arithmetic depends on background and thickness. The earlier expectation allowed extract, compose or refuse and asserted only that something was cited, so it would have passed on a printed bag count — the single outcome the situation forbids. Asserted now: router step 6, the extract path with no model, the sentence that declines the arithmetic, a coverage figure from the Duro datasheet (the sheet publishes 'at 10mm thick 1 bag will cover 1½ m 2' and 'Over 1m2 each 1mm of thickness requires approximately 1.7 Kg'), and no count of bags or sacks anywhere in the printed answer.",
       "expect": {
         "path_in": [
-          "extract",
-          "compose",
-          "refuse"
+          "extract"
         ],
-        "must_cite": true
+        "step_in": [
+          "6"
+        ],
+        "refused": false,
+        "model_ran": false,
+        "must_cite": true,
+        "source_contains": "duro",
+        "answer_contains_all": [
+          "rather than multiplying them out"
+        ],
+        "answer_contains_any": [
+          "1 bag will cover",
+          "each 1mm of thickness requires"
+        ],
+        "answer_must_not_match": [
+          "\\b\\d+(?:[.,]\\d+)?\\s*(?:bags|sacks)\\b"
+        ]
       }
     },
     {
       "id": "S7",
       "name": "The question the corpus genuinely cannot answer",
       "question": "What is the pot life of Duro lime plaster in minutes?",
-      "why": "The honest refusal. 'Pot life' was chosen by grepping the whole extracted corpus for candidate topics and keeping one that returns zero matches — an unanswerable question has to be verified unanswerable, or the test proves nothing. The first candidate, a BS 476 fire rating, was discarded on exactly that check: the corpus does publish Euroclass reaction-to-fire figures, so it was a near-miss and not an absence.",
+      "why": "The honest refusal. 'Pot life' was chosen by grepping the whole extracted corpus for candidate topics and keeping one that returns zero matches — an unanswerable question has to be verified unanswerable, or the test proves nothing. The first candidate, a BS 476 fire rating, was discarded on exactly that check: the corpus does publish Euroclass reaction-to-fire figures, so it was a near-miss and not an absence. That verification used to sit in this file as a sentence of prose the harness never read, which made the most important claim in the situation the one thing it did not check. absent_from_evidence now re-runs it against the top 20 passages this question retrieves from the live index, every run, so the day the corpus does publish a pot life this situation fails instead of quietly testing nothing. The refusal must name what it looked for and still cite the closest published passage.",
       "expect": {
         "path_in": [
           "refuse"
         ],
+        "step_in": [
+          "4"
+        ],
         "refused": true,
-        "verified_absent": "pot life — 0 matches across all 94 extracted documents"
+        "absent_from_evidence": [
+          "pot life",
+          "pot-life"
+        ],
+        "answer_contains_all": [
+          "does not state pot life"
+        ],
+        "must_cite_handoff": true
       }
     },
     {
       "id": "S8",
       "name": "Multi-source: what goes on top, and how long first",
       "question": "Which finish coats are compatible with Forte render, including the hardening time required first?",
-      "why": "The brief's second required test type, which had no situation. It cannot be answered from one passage: the compatible finish coats and the hardening time sit in different sections, and the named products are described on their own pages. Worded to stay one question on purpose. The first draft used 'and how long must it harden', which the topic splitter correctly cut into two parts, and a question answered in halves is not a test of synthesis. Verified against the shipped index: compose, router step 8, top score 0.803, three distinct documents. min_source_documents is the check that matters, because citing two documents is what turns 'multi-source' from a description into a measurement.",
+      "why": "The brief's second required test type. Worded to stay one question on purpose — the first draft used 'and how long must it harden', which the topic splitter correctly cut into two parts, and a question answered in halves is not a test of synthesis. This field used to claim the compatible finish coats and the hardening time sit in different sections; in the shipped corpus they do not, because the Forte datasheet's 'Finishing Coats' section names Tradirend, Natural Finish, Finish WP and Silicate Render and gives the hardening time in the same passage. The named products also have their own pages, so an answer can either draw the two halves together across documents or lean on that one passage, and min_cited_documents is what tells those apart: min_source_documents counts the documents retrieval returned, which measures retrieval rather than the answer, so it is kept and the stricter count of the markers the answer itself prints is asserted beside it. The Forte sheet publishes 'Leave to harden for 3 to 5 days', and that figure must appear as published alongside a real named finish coat.",
       "expect": {
         "path_in": [
           "compose"
         ],
+        "step_in": [
+          "8"
+        ],
         "refused": false,
+        "model_ran": true,
         "must_cite": true,
         "min_source_documents": 2,
-        "source_contains": "forte"
+        "min_cited_documents": 2,
+        "source_contains": "forte",
+        "answer_contains_all": [
+          "3 to 5 days"
+        ],
+        "answer_contains_any": [
+          "tradirend",
+          "natural finish",
+          "finish wp",
+          "silicate render"
+        ]
       }
     },
     {
       "id": "S9",
       "name": "Multi-source: compatibility and a condition, from two sheets",
       "question": "Is Natural Finish compatible with Duro, including the temperature range Duro needs?",
-      "why": "The second multi-source situation decision 7.3 refers to when it scores grounded reasoning on 'the two multi-source situations'. Compatibility is stated on one sheet and the temperature limit on another, so an answer quoting only one is incomplete rather than wrong. Also worded to stay one question. Verified: compose, step 8, top score 0.641, five distinct documents.",
+      "why": "The second multi-source situation decision 7.3 refers to when it scores grounded reasoning on 'the two multi-source situations'. Compatibility is stated on one sheet and the temperature limit on another, so an answer quoting only one is incomplete rather than wrong — which is why min_cited_documents is asserted here too, on the markers the answer prints rather than on what retrieval returned. The Duro sheet publishes 'Use Duro in temperatures of 5°C and rising or 30°C and falling', and both ends of that range are the condition the question asks for, so both must appear as published.",
       "expect": {
         "path_in": [
           "compose"
         ],
+        "step_in": [
+          "8"
+        ],
         "refused": false,
+        "model_ran": true,
         "must_cite": true,
-        "min_source_documents": 2
+        "min_source_documents": 2,
+        "min_cited_documents": 2,
+        "source_contains": "duro",
+        "answer_contains_all": [
+          "natural finish",
+          "5°C and rising",
+          "30°C and falling"
+        ]
       }
     }
   ]

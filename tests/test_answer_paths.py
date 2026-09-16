@@ -381,3 +381,43 @@ def test_a_qualifier_cited_to_no_retrieved_passage_is_caught():
     failures = run_checks("Apply at a minimum thickness of 8 mm [9].",
                           [MIXING], NOTES, [])
     assert any(f.startswith("check 1") for f in failures)
+
+
+def test_the_calculation_edge_prints_the_coverage_passage_not_the_top_one():
+    """Extract printed whichever passage ranked first, and then said otherwise.
+
+    "How many bags of Duro for 20 square metres" ranks Duro's *mixing water*
+    above its coverage, because retrieval scores the whole question. Extract
+    printed that, then appended a code-written sentence claiming it had shown
+    "the published coverage and pack size". Unsupported prose reaching the page
+    is exactly what the six checks exist to stop — and this arrived by a door
+    they do not watch, because code wrote it rather than the model.
+    """
+    mixing = hit(SOLO_URL, "Mixing",
+                 "Add approximately 4.5 to 5 litres of water per bag. "
+                 "Mix for between 3 and 10 minutes.", "Duro")
+    coverage = hit(SOLO_URL, "Storage",
+                   "Store in a dry place. At 10mm thick 1 bag will cover 1 m 2.",
+                   "Duro")
+
+    answer = engine().extract(
+        decision(Path_.EXTRACT, [mixing, coverage], step="6", sum_refused=True))
+
+    assert "1 bag will cover" in answer.text, answer.text
+    assert "I have printed the published coverage" in answer.text
+
+
+def test_the_calculation_edge_says_so_when_no_coverage_was_published():
+    """Solo Filler has no datasheet at all; some products publish no coverage.
+
+    The sentence must describe what was printed. Claiming a coverage figure
+    that is not in the evidence is the same defect in the other direction.
+    """
+    mixing = hit(SOLO_URL, "Mixing",
+                 "Add approximately 4.5 to 5 litres of water per bag.", "Duro")
+
+    answer = engine().extract(
+        decision(Path_.EXTRACT, [mixing], step="6", sum_refused=True))
+
+    assert "does not state a coverage figure" in answer.text, answer.text
+    assert "I have printed the published coverage" not in answer.text
