@@ -81,6 +81,11 @@ PAGE = """<!doctype html>
   button {{ padding:12px 20px; border:0; border-radius:8px; background:var(--accent);
             color:#fff; font-size:15px; cursor:pointer; }}
   button:hover {{ background:#3d6749; }}
+  .working {{ background:var(--warnbg); border:1px solid var(--warn);
+              border-radius:10px; padding:14px 18px; margin-bottom:18px;
+              color:var(--warn); }}
+  .working p {{ margin:6px 0 0; font-size:13px; }}
+  button[disabled] {{ opacity:.6; cursor:progress; }}
   .opts {{ color:var(--muted); font-size:13px; margin-bottom:26px; }}
   .opts label {{ margin-right:14px; }}
   .card {{ background:var(--card); border:1px solid var(--line); border-radius:10px;
@@ -103,6 +108,11 @@ PAGE = """<!doctype html>
            color:var(--muted); background:#f4f6f4; border-radius:6px;
            padding:10px 12px; margin-top:14px; white-space:pre-wrap; }}
   .empty {{ color:var(--muted); font-size:14px; }}
+  details.passage {{ border:1px solid var(--line); border-radius:8px;
+                     padding:10px 14px; margin-top:14px; background:#fbfcfb; }}
+  details.passage summary {{ cursor:pointer; font-size:13px; color:var(--muted); }}
+  details.passage .quote {{ white-space:pre-wrap; font-size:14px; margin-top:10px;
+                            color:var(--ink); }}
   ol.hist {{ margin:0; padding-left:20px; font-size:14px; color:var(--muted); }}
   ol.hist li {{ margin-bottom:9px; }}
   ol.hist b {{ color:var(--ink); font-weight:600; }}
@@ -115,10 +125,16 @@ PAGE = """<!doctype html>
   <div class="meta">{meta}</div>
 </header>
 
-<form method="get" action="/">
+<form method="get" action="/" onsubmit="working()">
   <input type="text" name="q" value="{q}" placeholder="Ask about a product…" autofocus>
-  <button type="submit">Ask</button>
+  <button type="submit" id="ask">Ask</button>
 </form>
+<div class="working" id="working" hidden>
+  <strong>Thinking…</strong> <span id="elapsed">0s</span>
+  <p>A question the model has not seen before takes tens of seconds on a
+     processor with no graphics card — prompt reading is the cost, not typing
+     the answer. Asking the same question again returns immediately.</p>
+</div>
 <div class="opts">
   <label><input type="checkbox" name="v" form="" onchange="toggle('v',this)"
     {vchecked}> show how it was answered</label>
@@ -136,6 +152,23 @@ PAGE = """<!doctype html>
 function param(k,v){{const u=new URL(location);v?u.searchParams.set(k,v):u.searchParams.delete(k);location=u;}}
 function toggle(k,el){{param(k, el.checked?'1':'');}}
 function setAudience(v){{param('a',v);}}
+// The form is a plain GET, so the browser shows nothing at all until the
+// server answers — and on this hardware that is tens of seconds. Silence for
+// that long is indistinguishable from a broken button, which is exactly how it
+// was first reported. The counter is the point: it says the wait is real work
+// rather than a hang, and it degrades to an ordinary form if scripting is off.
+function working(){{
+  var box = document.getElementById('working');
+  var out = document.getElementById('elapsed');
+  var btn = document.getElementById('ask');
+  if (!box) return;
+  box.hidden = false;
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Asking…'; }}
+  var t0 = Date.now();
+  setInterval(function(){{
+    out.textContent = Math.round((Date.now() - t0) / 1000) + 's';
+  }}, 1000);
+}}
 </script>
 """
 
@@ -165,9 +198,24 @@ def render_html(reply, verbose: bool) -> str:
         head = (f'<div class="part">Part {i} — {_esc(part)}</div>' if multi else "")
         tag = ('<span class="tag refused">refused</span>' if answer.refused
                else f'<span class="tag">{_esc(answer.path)}</span>')
+        # `body`, not `text`: on a refusal the raw passage is the tail of the
+        # text, and leading a public visitor with 600 characters of datasheet is
+        # the complaint this disclosure answers. It is shown in full below,
+        # folded, so nothing the refusal carries is lost — only demoted.
         out = [f'<div class="card">{head}',
-               f'<div class="answer">{_esc(answer.text)}</div>{tag}']
+               f'<div class="answer">{_esc(answer.body)}</div>{tag}']
 
+        if answer.disclosure:
+            # Open on the diagnostics view, where the reader is auditing rather
+            # than asking, and closed for the visitor who only wanted a sentence.
+            out.append(f"<details class='passage'{' open' if verbose else ''}>"
+                       f"<summary>Show source passage</summary>"
+                       f"<div class='quote'>{_esc(answer.disclosure)}</div></details>")
+
+        # Assumed means assumed. A value the caller supplied is reported inside
+        # the answer text by `AnswerEngine._finish` as something they said, and
+        # deliberately not repeated here under a heading that would call it a
+        # guess — that mislabelling is the defect this block used to carry.
         if answer.assumptions:
             out.append("<h3>Assumed</h3><div class='empty'>"
                        + _esc("; ".join(answer.assumptions)) + "</div>")
@@ -292,7 +340,14 @@ class Handler(BaseHTTPRequestHandler):
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
                      "text": a.text, "sources": a.sources, "caveats": a.caveats,
-                     "diagnostics": a.diagnostics, "failed_checks": a.failed_checks}
+                     "diagnostics": a.diagnostics, "failed_checks": a.failed_checks,
+                     # Structured rather than prose, so a channel adapter can
+                     # render provenance its own way instead of parsing ours.
+                     "facts": [{"slot": f.slot, "value": f.value,
+                                "provenance": f.provenance.value}
+                               for f in a.facts],
+                     "assumptions": a.assumptions,
+                     "disclosure": a.disclosure}
                     for q, a in (reply.parts if reply else [])
                 ],
             }

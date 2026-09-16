@@ -134,6 +134,25 @@ def two_document_assistant(tmp_path, no_ollama):
         repo.close()
 
 
+def quoting(prompt: str, **_kwargs) -> tuple[str, float]:
+    """A model that does the one thing this system wants: quote and cite.
+
+    It reads the passages out of the prompt it was handed and returns the first
+    sentence of each under the marker it arrived with, so the six checks pass
+    and Compose actually prints. The leading `.strip()` matters: the passage
+    block opens with a newline, and without it the first passage is silently
+    dropped and the answer looks multi-source while citing one document.
+    """
+    sentences = []
+    for block in prompt.split("Passages:", 1)[-1].split("\n\n"):
+        head, _, body = block.strip().partition("\n")
+        head, body = head.strip(), body.strip()
+        if head.startswith("[") and "]" in head and body:
+            marker = head[:head.index("]") + 1]
+            sentences.append(f"{body.split('. ')[0].rstrip('.')} {marker}.")
+    return " ".join(sentences) or "Nothing was supplied.", 1.25
+
+
 def forbid_retrieval(monkeypatch, assistant):
     """Make any retrieval call fail the test rather than quietly succeed."""
     def boom(*_a, **_k):
@@ -271,11 +290,11 @@ def test_several_documents_reach_the_compose_path(two_document_assistant,
     coverage. With check 6 tightened to cited evidence, an incomplete answer is
     correctly refused, and this test has to supply a complete one.
     """
-    monkeypatch.setattr(
-        ollama, "generate",
-        lambda *_a, **_k: ("Mix Solo with 5-6 litres of clean water per 25 kg "
-                           "sack [1]. Duro covers approximately 2.5 m2 per 25 kg "
-                           "bag at 11 mm [2].", 1.25))
+    # Quote whatever passages arrive, under the markers they arrive with,
+    # rather than hard-coding [1] and [2]. Retrieval order is not a fact this
+    # test is about, and pinning it made the test fail the moment a named
+    # product started boosting its own passages — a reordering that is correct.
+    monkeypatch.setattr(ollama, "generate", quoting)
 
     reply = two_document_assistant.ask("What water and coverage does Solo have")
     answer = reply.parts[0][1]
@@ -599,3 +618,101 @@ def test_the_first_caller_of_a_cached_answer_is_not_marked_cached(assistant,
     assistant.ask("How much water does Solo need")
 
     assert "cached" not in first.parts[0][1].diagnostics
+
+
+# ------------------------------------------- the calculation edge's second look
+
+
+def test_a_quantity_question_fetches_the_coverage_passage_it_did_not_rank(
+        tmp_path, monkeypatch):
+    """Re-sorting the top five cannot surface a passage that was never in it.
+
+    "How many bags for twenty square metres" embeds as a question about
+    quantity, so the coverage figure it needs can rank outside the window
+    entirely — and the calculation path used to be handed those five and left
+    to make the best of them. It now asks a second time by metadata instead:
+    the product the question named, and the words coverage is printed under.
+
+    Those hits carry no similarity score, so they are appended after the ranked
+    ones and cannot reach the abstention threshold, which step 1 has already
+    decided.
+    """
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: unit(0))
+
+    repo = build_repo(tmp_path)
+    # Six passages near the question and the coverage passage far from it, so
+    # the top five fill with the near ones and coverage genuinely never ranks.
+    # That is the case being fixed: re-sorting five hits cannot surface a
+    # passage that was never among them.
+    near = [chunk(SOLO, i, f"Section {i}",
+                  f"Solo is applied in one coat. Note {i} about application.",
+                  "Solo", 0)
+            for i in range(6)]
+    repo.publish(
+        [document(SOLO, "Solo")], [version(SOLO)],
+        [*near,
+         chunk(SOLO, 9, "Coverage",
+               "Solo covers 1.5 m2 per 25 kg sack at 10 mm.", "Solo", 7)],
+        Snapshot(snapshot_id="snap-calc", created_at="2026-01-01T00:00:00Z",
+                 embedding_model=ollama.EMBED_MODEL,
+                 embedding_dimensions=ollama.EMBED_DIMENSIONS,
+                 chunking_version=CHUNKING_VERSION, document_count=1,
+                 chunk_count=7,
+                 notes={"products": ["Solo"], "colours": [], "merchants": [],
+                        "contact": CONTACT}))
+    try:
+        assistant = Assistant(repo, cache=False, log=False)
+        reply = assistant.ask("How many bags of Solo do I need for 20 square metres?")
+        answer = reply.parts[0][1]
+
+        assert answer.path == Path_.EXTRACT.value, answer.path
+        assert "1.5 m2" in answer.text, answer.text
+        assert "I have printed the published coverage" in answer.text
+    finally:
+        repo.close()
+
+
+def test_a_coverage_passage_already_retrieved_is_not_added_twice(tmp_path,
+                                                                 monkeypatch):
+    """The second look must not duplicate what similarity already found.
+
+    A duplicated passage would be cited twice, counted twice by the
+    per-document cap, and read as two sources agreeing when it is one source
+    repeated.
+    """
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: unit(0))
+
+    repo = build_repo(tmp_path)
+    repo.publish(
+        [document(SOLO, "Solo")], [version(SOLO)],
+        [chunk(SOLO, 0, "Coverage",
+               "Solo covers 1.5 m2 per 25 kg sack at 10 mm.", "Solo", 0)],
+        Snapshot(snapshot_id="snap-dup", created_at="2026-01-01T00:00:00Z",
+                 embedding_model=ollama.EMBED_MODEL,
+                 embedding_dimensions=ollama.EMBED_DIMENSIONS,
+                 chunking_version=CHUNKING_VERSION, document_count=1,
+                 chunk_count=1,
+                 notes={"products": ["Solo"], "colours": [], "merchants": [],
+                        "contact": CONTACT}))
+    try:
+        reply = Assistant(repo, cache=False, log=False).ask(
+            "How many bags of Solo do I need for 20 square metres?")
+        answer = reply.parts[0][1]
+
+        assert answer.text.count("1.5 m2") == 1, answer.text
+        assert len(answer.sources) == 1, answer.sources
+    finally:
+        repo.close()
+
+
+def test_a_quantity_question_naming_no_product_still_answers(tmp_path, monkeypatch):
+    """The second look needs a product name to ask by, and may simply not get one."""
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: unit(0))
+
+    repo = build_repo(tmp_path)
+    try:
+        reply = Assistant(repo, cache=False, log=False).ask(
+            "How many bags do I need for 20 square metres?")
+        assert reply.parts, "a quantity question with no product named produced nothing"
+    finally:
+        repo.close()

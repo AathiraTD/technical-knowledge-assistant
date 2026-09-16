@@ -29,6 +29,11 @@ from .router import Decision, Path_, Router, split_by_topic
 # and the unit that cannot produce a fragment.
 MAX_WORDS = 500
 
+# What a coverage figure is printed under, for the targeted second retrieval on
+# the calculation edge. Lexical rather than semantic on purpose: this runs when
+# similarity has already failed to surface the passage.
+COVERAGE_TERMS = ("coverage", "covers", "cover", "m2", "m²", "per bag", "per sack")
+
 
 def cap(question: str) -> str:
     """Trim an over-long message on a word boundary."""
@@ -147,6 +152,23 @@ class Assistant:
         if self.log:
             self._log(reply)
 
+    def _named_product(self, part: str) -> str:
+        """The product this question names, if it names one the corpus knows.
+
+        Matched against the harvested product list rather than guessed, so it
+        cannot invent a product — the same list check 5 uses to refuse invented
+        names. The longest match wins, because "Lime Green Solo Onecoat" and
+        "Solo" are both in the list and the specific one is the one meant.
+
+        Retrieval treats this as a bounded boost rather than a filter, so a
+        wrong detection reorders and never refuses: the worst case is the same
+        answer in a different order, not a silent loss.
+        """
+        lowered = part.lower()
+        named = [p for p in self.engine.names.get("products", [])
+                 if p and p.lower() in lowered]
+        return max(named, key=len) if named else ""
+
     def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot,
                    carried: dict | None = None):
         return AnswerCache.key(part, audiences, snapshot.snapshot_id,
@@ -194,7 +216,32 @@ class Assistant:
                 return self.engine.documents_for(part, audiences)
             return self.engine.route(topic, spec)
 
-        hits = self.retriever.search(part, audiences=audiences)
+        named = self._named_product(part)
+        hits = self.retriever.search(part, audiences=audiences, product=named)
+        # A quantity question embeds as a question about quantity, so the
+        # coverage figure it needs may not be in the top five at all — and a
+        # path that only re-sorts what it was given cannot recover from that.
+        # Ask a second time by metadata instead: the named product, and the
+        # words coverage is printed under.
+        #
+        # Before routing, not after. The relevance gate is step 4 and the
+        # calculation branch is step 6, so a coverage passage added afterwards
+        # arrives too late to stop "does not state bags for this product" —
+        # which is what the first version of this did, refusing a question it
+        # had the evidence to answer.
+        #
+        # These hits carry no similarity score, so they sort last and cannot
+        # become the top hit that step 1 measures against the threshold.
+        if named and "calculation" in self.router.slots.detect(part):
+            known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
+            found = [h for h in self.retriever.find_property(
+                        named, COVERAGE_TERMS, audiences=audiences)
+                     if (h.chunk.canonical_url, h.chunk.chunk_index) not in known]
+            if found:
+                hits = hits + found
+                obs.event("targeted_retrieval", product=named, added=len(found),
+                          reason="coverage for a quantity question")
+
         decision = self.router.route(
             part, hits, self.retriever.above_threshold(hits), audiences, carried)
         obs.event("route", path=decision.path.value, step=decision.step,

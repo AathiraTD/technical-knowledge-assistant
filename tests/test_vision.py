@@ -493,18 +493,25 @@ def test_an_oversized_image_is_refused_at_the_boundary(monkeypatch):
 
 
 def test_an_observed_value_matching_two_vocabulary_values_is_refused(monkeypatch):
-    """"old brick masonry" is both `brick` and `stone`, so it is neither.
+    """"old brick masonry" is both `brick` and `masonry`, so it is neither.
 
-    The router's own detector would score by term length and land on `stone`,
-    which is the wrong reading of "brick masonry". That is a reasonable service
-    when scoring a customer's own words and a bad one when scoring a model's
-    guess about a photograph into the slot that decides the product. An uncued
-    substrate becomes an ask-back; a confidently wrong one does not.
+    The router's own detector would score by term length and pick one of them,
+    which is a reasonable service when scoring a customer's own words and a bad
+    one when scoring a model's guess about a photograph into the slot that
+    decides the product. An uncued substrate becomes an ask-back; a confidently
+    wrong one does not.
+
+    The two candidate readings used to be `brick` and `stone`, because the
+    substrate vocabulary listed "masonry" as a synonym for stone. It no longer
+    does — a masonry wall may be brick, block, stone or mixed, and resolving it
+    to stone made the system more certain than the evidence allowed. So the
+    ambiguity is now between two readings that are both genuinely possible,
+    which is a better reason to refuse than the one this test first had.
     """
     fake_ollama(monkeypatch, response_text=body([obs(value="old brick masonry")]))
     resolution = resolve([observe(PIXEL)])
     assert resolution.slots == {}
-    assert "ambiguous between brick, stone" in resolution.discarded[0]
+    assert "ambiguous between brick, masonry" in resolution.discarded[0]
 
 
 def test_a_missing_file_degrades_rather_than_raising(tmp_path):

@@ -475,18 +475,40 @@ def test_a_routed_question_prints_the_referral_with_nothing_to_cite(server):
     assert "<ul class='caveats'>" not in body, "a routed answer printed a caveat list"
 
 
-def test_a_cued_substrate_is_printed_on_the_page_as_a_stated_assumption(server):
+def test_a_cued_substrate_is_printed_on_the_page_as_the_callers_own_words(server):
     """Decision 10: a cued load-bearing slot is used, and the page must say so.
 
-    An answer that silently assumed the wall is the costly error the whole
-    design exists to avoid, so the assumption has to be visible on the page and
-    not only in the diagnostics an ordinary visitor never opens.
+    An answer that silently used a substrate the caller never gave is the costly
+    error the whole design exists to avoid, so the value has to be visible on
+    the page and not only in the diagnostics an ordinary visitor never opens.
+
+    What changed is the label, not the visibility. The caller wrote "on brick",
+    so the page says the answer was given for brick *as they said it* - and does
+    not file it under a heading reading "Assumed", which is what it used to do
+    and which makes a system that listened look like one that guessed.
     """
     status, body = get(server, "/", q="How much water does Solo need on brick")
 
     assert status == 200
-    assert "<h3>Assumed</h3>" in body, body
-    assert "substrate: brick" in body
+    assert "brick (substrate), as you said" in body, body
+    assert "<h3>Assumed</h3>" not in body, "a value the caller gave was called a guess"
+
+
+def test_the_page_reports_a_genuine_assumption_under_a_heading_that_says_so(server):
+    """The other half: something nobody said still has to be flagged as assumed.
+
+    An uncued inside/outside is answered for both options, and that *is* an
+    assumption - so it keeps the heading the stated values lost.
+    """
+    status, body = get(server, "/ask", q="What is Solo used for on brick")
+    payload = json.loads(body)
+    part = payload["parts"][0]
+
+    assert status == 200
+    assert {"slot": "substrate", "value": "brick", "provenance": "stated"} in part["facts"]
+    assumed = [f for f in part["facts"] if f["provenance"] == "assumed"]
+    if assumed:                                    # per-option depends on the ask
+        assert part["assumptions"], part
 
 
 # ------------------------------------------------------- the diagnostics view
@@ -1048,3 +1070,63 @@ def test_the_answer_cache_does_not_serve_one_conversation_from_another(cached_ch
 
     reply = second.json(ASK)
     assert reply["parts"][0]["diagnostics"]["slots"]["substrate"] == "stone", reply
+
+
+# ------------------------------------------------- the refusal, as a page reads
+
+
+def test_a_refusal_leads_with_a_sentence_and_folds_the_passage_away(server):
+    """The reviewed complaint: a wall of datasheet where a sentence would do.
+
+    The refusal used to open with "the closest published passage is this" and
+    600 characters of raw chunk, which on a public page buries the one thing the
+    visitor needed - that this is not published, and who to ask. The passage is
+    still on the page, and still complete: it is inside a disclosure rather than
+    in front of the summary.
+    """
+    status, body = get(server, "/", q="What is the pot life of Solo in hours")
+
+    assert status == 200
+    assert "I could not find published Lime Green guidance" in body, body
+    assert "Show source passage" in body, "the evidence was dropped, not demoted"
+    # Prose first, evidence second - the whole of the change.
+    assert body.index("I could not find published") < body.index("Show source passage")
+    assert "0800 538 5746" in body, "a refusal without a way forward"
+
+
+def test_the_folded_passage_still_carries_the_published_words_and_its_source(server):
+    """A presentation change must not quietly become a reduction."""
+    status, body = get(server, "/", q="What is the pot life of Solo in hours")
+    inner = body.split("Show source passage", 1)[1]
+
+    assert status == 200
+    assert "Source passage" in inner
+    assert html.escape("5-6 litres of clean water per 25 kg sack",
+                       quote=True) in inner, inner[:600]
+    assert "<h3>Sources</h3>" in body, "the refusal cited nothing"
+    assert SOLO in body
+
+
+def test_the_diagnostics_view_opens_the_passage_it_would_otherwise_fold(server):
+    """A reader auditing a refusal should not have to click to see the evidence."""
+    _status, folded = get(server, "/", q="What is the pot life of Solo in hours")
+    _status, opened = get(server, "/", q="What is the pot life of Solo in hours",
+                          v="1")
+
+    assert "<details class='passage'>" in folded
+    assert "<details class='passage' open>" in opened
+
+
+def test_the_json_surface_carries_provenance_structured_rather_than_as_prose(server):
+    """A channel adapter should not have to parse our sentences back apart."""
+    status, body = get(server, "/ask", q="How much water does Solo need on brick")
+    part = json.loads(body)["parts"][0]
+
+    assert status == 200
+    assert part["facts"] == [{"slot": "substrate", "value": "brick",
+                              "provenance": "stated"}]
+    assert part["assumptions"] == []
+    assert part["disclosure"] == ""
+    # `text` on the JSON surface stays whole, disclosure included, because a
+    # consumer that wants the evidence should not have to ask for it twice.
+    assert "as you said" in part["text"]

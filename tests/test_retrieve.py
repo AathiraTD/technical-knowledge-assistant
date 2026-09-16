@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant.index import CHUNKING_VERSION
 from assistant import ollama                                  # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
+from assistant.repository import RetrievalRequest               # noqa: E402
 from assistant.repository import IndexMismatch                # noqa: E402
 from assistant.retrieve import (                              # noqa: E402
     DEFAULT_THRESHOLD,
@@ -205,3 +206,102 @@ def test_a_passage_just_under_the_threshold_is_refused(monkeypatch):
     just_over = Retriever(build(), threshold=hits[0].score + 1e-9)
 
     assert just_over.above_threshold(hits) is False
+
+
+# ------------------------------------------- the product the question named
+
+
+WARMSHELL = "https://example/warmshell"
+# The reviewer's case at the retriever rather than the adapter: WarmShell is
+# the closer vector to the question, and the question says "Ultra".
+WS_VECTOR = unit(1, 0, 0)
+ULTRA_VECTOR = unit(0.985, 0.174, 0)
+
+
+def build_two_products() -> SQLiteKnowledgeRepository:
+    repo = SQLiteKnowledgeRepository(Path(tempfile.mkdtemp()) / "two.db")
+    repo.publish(
+        [Document(canonical_url=URL, title="Ultra", document_type="datasheet",
+                  authority=1, product="Ultra"),
+         Document(canonical_url=WARMSHELL, title="WarmShell",
+                  document_type="system_guide", authority=2,
+                  product="WarmShell")],
+        [DocumentVersion(canonical_url=URL, version=1, content_hash="h",
+                         source_path="p", is_active=True),
+         DocumentVersion(canonical_url=WARMSHELL, version=1, content_hash="h2",
+                         source_path="p2", is_active=True)],
+        [Chunk(canonical_url=URL, version=1, chunk_index=0, section="Coverage",
+               content="Ultra covers 16 to 20 square metres per 25kg sack.",
+               product="Ultra", document_type="datasheet", authority=1,
+               embedding=ULTRA_VECTOR),
+         Chunk(canonical_url=WARMSHELL, version=1, chunk_index=0,
+               section="Internal walls",
+               content="WarmShell insulates an old internal wall.",
+               product="WarmShell", document_type="system_guide", authority=2,
+               embedding=WS_VECTOR)],
+        Snapshot(snapshot_id="s2", created_at="2026-01-01T00:00:00Z",
+                 embedding_model=ollama.EMBED_MODEL,
+                 embedding_dimensions=DIMS,
+                 chunking_version=CHUNKING_VERSION, document_count=2,
+                 chunk_count=2),
+    )
+    return repo
+
+
+def test_a_question_naming_ultra_is_not_answered_from_warmshell(monkeypatch):
+    """Semantic adjacency is not consent to answer about a different product."""
+    monkeypatch.setattr(ollama, "embed_one", lambda text, model=None: WS_VECTOR)
+    r = Retriever(build_two_products())
+
+    unnamed = r.search("insulating an old internal wall", top_k=2)
+    assert unnamed[0].chunk.product == "WarmShell"
+
+    named = r.search("insulating an old internal wall with Lime Green Ultra",
+                     top_k=2, product="Ultra")
+    assert named[0].chunk.product == "Ultra"
+    assert named[1].chunk.product == "WarmShell", (
+        "the named product filtered the neighbour out instead of demoting it")
+    assert named[0].score < named[1].score, (
+        "the score reported is the boosted one, not the real cosine")
+
+
+def test_the_named_product_reaches_the_repository_as_a_request(monkeypatch):
+    """The engine expresses what it wants; it does not learn any SQL to do it."""
+    monkeypatch.setattr(ollama, "embed_one", lambda text, model=None: A)
+    repo = build()
+    seen = {}
+    original = repo.retrieve_for
+
+    def spy(request):
+        seen["request"] = request
+        return original(request)
+
+    repo.retrieve_for = spy
+    Retriever(repo).search("how much water", audiences=("trade",), top_k=4,
+                           per_document_cap=2, product="Solo")
+    request = seen["request"]
+    assert isinstance(request, RetrievalRequest)
+    assert request.product == "Solo"
+    assert request.audiences == ("trade",)
+    assert request.top_k == 4 and request.per_document_cap == 2
+
+
+# ------------------------------------------ the targeted second retrieval
+
+
+def test_a_targeted_lookup_finds_coverage_without_embedding_anything(monkeypatch):
+    """The calculation path's recovery, and it must not need the model at all."""
+    def refuse(*args, **kwargs):
+        raise AssertionError("a targeted lookup embedded something")
+
+    monkeypatch.setattr(ollama, "embed_one", refuse)
+    r = Retriever(build_two_products())
+    hits = r.find_property("Ultra", ("coverage",))
+    assert len(hits) == 1
+    assert "16 to 20" in hits[0].chunk.content
+    assert hits[0].score == 0.0
+
+
+def test_a_targeted_lookup_finds_nothing_for_an_unpublished_property():
+    r = Retriever(build_two_products())
+    assert r.find_property("Ultra", ("pot life",)) == []

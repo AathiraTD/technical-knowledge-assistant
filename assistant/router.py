@@ -73,16 +73,62 @@ _SPLIT = re.compile(
 
 
 def split_by_topic(question: str) -> list[str]:
-    """Two questions in one message are two questions.
+    """Two *jobs* in one message are two questions. Two sentences are not.
 
-    A message that asks a price and a coverage is not one question with one
-    answer: the price part must reach the policy gate and the coverage part
-    must reach retrieval. Answering the pair as a unit sends one of them down
-    the wrong path.
+    This used to cut after every full stop, which is the single most damaging
+    thing the pipeline did to a real enquiry. Someone writing
+
+        "My external lime render is showing patchy colour after drying.
+         What could be causing it?"
+
+    had the second half separated from every fact that made it answerable —
+    external, lime render, patchy colour, drying — and "What could be causing
+    it?" retrieved against nothing. The same cut destroyed a question about a
+    brick wall and Ultra's thickness, and one about exposure and render
+    preparation. The message was never ambiguous; the splitter made it so.
+
+    So the rule is now the opposite one: **keep the message together unless
+    there is positive evidence of two independent jobs**. Under-splitting is
+    much the safer error here. A single part carrying both halves still gets
+    routed, retrieved for and checked; a part stripped of its context gets
+    neither good retrieval nor an honest refusal, because the system cannot
+    even tell what was asked.
+
+    Positive evidence means the two halves want different *paths*, not merely
+    different words — a price and a coverage, where one must reach the policy
+    gate and the other must reach retrieval. Answering that pair as a unit
+    sends one of them down the wrong path, which is the case the splitter was
+    written for and the only one it now fires on.
+
+    The cost is real and worth stating: a message genuinely containing two
+    retrieval questions is now answered as one, which may favour whichever half
+    retrieves more strongly. That is a worse answer. The alternative was a
+    confidently irrelevant one, or a refusal that could not say what it had
+    been asked.
     """
-    parts = [p.strip(" ,") for p in _SPLIT.split(question) if p and p.strip(" ,")]
-    parts = [p for p in parts if len(p.split()) >= 3]
-    return parts or [question.strip()]
+    candidates = [p.strip(" ,;") for p in _SPLIT.split(question)
+                  if p and p.strip(" ,;")]
+    candidates = [p for p in candidates if len(p.split()) >= 3]
+    if len(candidates) < 2:
+        return candidates or [question.strip()]
+
+    # Split only where the halves belong to different paths. A policy topic
+    # beside a technical question is the case that matters: the policy half
+    # must never reach retrieval, and the technical half must never be answered
+    # from a referral. Everything else stays whole.
+    gate = PolicyGate()
+    gated = [bool(gate.match(p)) for p in candidates]
+    if len(set(gated)) > 1:
+        return candidates
+
+    # Two policy topics are also two jobs — a price and a delivery question get
+    # different referrals, and merging them would print one and drop the other.
+    if all(gated):
+        topics = {gate.match(p)[0] for p in candidates}
+        if len(topics) > 1:
+            return candidates
+
+    return [question.strip()]
 
 
 # ---------------------------------------------------------------- policy gate
@@ -128,17 +174,46 @@ class SlotDetector:
         for slot, spec in self.spec.items():
             if slot.startswith("_"):
                 continue
-            best_value, best_score = "", 0
+            scored = []
             for value, terms in spec["values"].items():
                 score = sum(
                     len(t) for t in terms
                     if re.search(rf"\b{re.escape(t)}\b", lowered)
                 )
-                if score > best_score:
-                    best_value, best_score = value, score
-            if best_value:
-                found[slot] = best_value
+                if score:
+                    scored.append((score, value))
+            if not scored:
+                continue
+            scored.sort(reverse=True)
+            found[slot] = scored[0][1]
         return found
+
+    def detect_properties(self, question: str) -> list[str]:
+        """Every property the question asks about, best-scoring first.
+
+        Separate from `detect` rather than a list inside it, because `slots` is
+        a slot-to-single-value mapping that the whole system reads: the session
+        carries it between turns, the renderer prints it, vision writes into it
+        and the caveat scorer joins its values into a string. Putting a list in
+        there broke the last of those immediately and would have had the session
+        carrying a list of properties forward into an unrelated later question.
+
+        The multiple values matter because one question routinely asks for two
+        things — "how thick should the render be, and what preparation does the
+        background need" — and keeping only the winner threw half the enquiry
+        away, in that case the half with a whole knowledge-base article behind
+        it.
+        """
+        lowered = question.lower()
+        spec = self.spec.get("property_asked", {}).get("values", {})
+        scored = []
+        for value, terms in spec.items():
+            score = sum(len(t) for t in terms
+                        if re.search(rf"\b{re.escape(t)}\b", lowered))
+            if score:
+                scored.append((score, value))
+        scored.sort(reverse=True)
+        return [value for _score, value in scored]
 
     def load_bearing(self) -> list[str]:
         return [s for s, spec in self.spec.items()
@@ -209,9 +284,27 @@ class Router:
         the phrase and its head noun are both absent from every passage, which
         means the corpus genuinely does not discuss what was asked.
         """
+        # A quantity question is a question about coverage, whatever words it
+        # uses to ask. Without this the gate took the caller's own noun — "how
+        # many bags" gives "bags" — and refused the Solo sheet for saying
+        # "sack", which is the same thing and has a synonym entry to prove it.
+        # The gate is meant to catch the near-miss, not the vocabulary gap.
+        if "calculation" in slots and not slots.get("property_asked"):
+            return "coverage", self.slots.terms_for("property_asked", "coverage")
+
         value = slots.get("property_asked", "")
         if value:
-            return value, self.slots.terms_for("property_asked", value)
+            # Every property the question asked for, not only the best-scoring
+            # one. The gate is satisfied by any of them appearing, which is the
+            # right reading of a two-property question: answer the half the
+            # corpus publishes and let check 6 and the citation checks police
+            # what actually prints, rather than refusing the whole enquiry
+            # because the other half is not stated anywhere.
+            asked = self.slots.detect_properties(question) or [value]
+            terms: list[str] = []
+            for prop in asked:
+                terms += self.slots.terms_for("property_asked", prop)
+            return value, list(dict.fromkeys(terms))
 
         phrase = self.asked_phrase(question)
         if not phrase:
