@@ -1,0 +1,14 @@
+{
+  "case_id": "d960c3b8-374c-46ef-bd87-3028c0bf84c4",
+  "question": "what do I use on brick",
+  "image_hashes": [],
+  "retrieved_chunk_ids": [
+    "https://example/solo#v1-0"
+  ],
+  "refusal_reason": "diagnosis_handed_off",
+  "timestamp": "2026-09-16T16:52:55.680140+00:00",
+  "tags": [],
+  "expert_diagnosis": null,
+  "advisor_id": null,
+  "confidence_level": null
+}
