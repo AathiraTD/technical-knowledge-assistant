@@ -137,7 +137,8 @@ class Assistant:
 
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
             correlation_id: str = "", carried: dict | None = None,
-            images=None, session_id: str = "", turn_id: str = "") -> Reply:
+            images=None, session_id: str = "", turn_id: str = "",
+            context: str = "") -> Reply:
         """One message in, one composite reply out.
 
         `carried` is what the caller already knows that this question does not
@@ -146,6 +147,12 @@ class Assistant:
         session owns that, and hands it in. Keeping the memory outside the
         engine is what lets the CLI stay single-turn and stateless while the web
         page is neither.
+
+        `context` is prior conversation history (optional) for multi-turn
+        reasoning. When provided, it is prepended to the question before
+        generation, so the model can see earlier turns and make coherent
+        follow-ups. Format: "Earlier in this conversation, you answered: [Q1].
+        You answered: [A1]. Then the user asked: [Q2]..."
 
         `images` are photographs attached to *this* turn — file paths or raw
         bytes, whatever `assistant/vision.py` reads. They are perceived here
@@ -194,6 +201,11 @@ class Assistant:
         same turn and a different trace, and collapsing them would make the
         ask-back cycle unreadable in the trace.
         """
+        # Merge context (prior conversation) with the current question for
+        # multi-turn reasoning. Context is prepended so the model can see
+        # earlier turns and make coherent follow-ups.
+        if context:
+            question = context + "\n\n" + question
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 

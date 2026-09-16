@@ -961,6 +961,36 @@ class Handler(BaseHTTPRequestHandler):
             images = images[:allowed]
         return fields, images, notes
 
+    def _build_context(self, session_id: str, limit: int = 2) -> str:
+        """Build multi-turn context from prior turns for the model to see.
+
+        Returns a string like:
+        "Earlier in this conversation, you asked: [Q1]. You answered: [A1].
+        Then the user asked: [Q2]..."
+
+        Args:
+            session_id: the session to get history from
+            limit: how many prior turns to include (default 2, keep recent)
+
+        Returns:
+            context string (empty if no prior turns)
+        """
+        turns = self.sessions.turns(session_id)
+        if len(turns) < limit:
+            # Not enough history to build context
+            return ""
+
+        # Get the last `limit` turns
+        prior = turns[-limit:]
+        parts = ["Earlier in this conversation,"]
+        for i, (q, a) in enumerate(prior, 1):
+            parts.append(f"you asked: {q}")
+            parts.append(f"You answered: {a}. Then the user")
+        # Remove the trailing "Then the user" from the last turn
+        if parts[-1].endswith(". Then the user"):
+            parts[-1] = parts[-1][: -len(". Then the user")]
+        return "\n".join(parts)
+
     def _respond(self, path: str, question: str, verbose: bool, audience: str,
                  images: list, notes: list, session_open: bool = False) -> None:
         audiences = resolve(audience, self.audiences)
@@ -989,12 +1019,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/ask":
             try:
+                # Build multi-turn context from prior turns for grounded reasoning
+                context = self._build_context(self.session_id)
                 # If we auto-answered a pending question, use that reply.
                 # Otherwise, ask the current question.
                 reply = (auto_answered if auto_answered else
                          self.assistant.ask(asked, audiences=audiences,
                                             correlation_id=self.correlation_id,
-                                            carried=carried, images=images)
+                                            carried=carried, images=images,
+                                            context=context)
                          if question else None)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 # The HTML branch has always handled this; the JSON branch did
@@ -1040,12 +1073,15 @@ class Handler(BaseHTTPRequestHandler):
         audience_display = audiences[0] if audiences else "public"
         if question:
             try:
+                # Build multi-turn context from prior turns for grounded reasoning
+                context = self._build_context(self.session_id)
                 # If we auto-answered a pending question, use that reply.
                 # Otherwise, ask the current question.
                 reply = (auto_answered if auto_answered else
                          self.assistant.ask(asked, audiences=audiences,
                                             correlation_id=self.correlation_id,
-                                            carried=carried, images=images))
+                                            carried=carried, images=images,
+                                            context=context))
                 self._remember(question, reply, auto_answered=bool(auto_answered))
                 initial_content = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
