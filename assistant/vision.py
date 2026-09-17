@@ -59,7 +59,7 @@ from pathlib import Path
 
 import httpx
 
-from .ollama import HOST, KEEP_ALIVE, GENERATION_MODEL
+from .ollama import HOST, KEEP_ALIVE, GENERATION_MODEL, NUM_CTX
 from .router import SlotDetector
 
 # --------------------------------------------------- what may be reported
@@ -149,11 +149,16 @@ VISION_MODEL = os.environ.get("VISION_MODEL", GENERATION_MODEL)
 # **Must equal `assistant.ollama.generate`'s `num_ctx`.** Not "be large
 # enough" — equal. Two different context sizes for the same model are two
 # resident instances, and the failure that produces is described in full beside
-# the request body in `observe`. Kept as a literal rather than imported so this
-# module keeps its own HTTP client and no dependency on `ollama.py`; the pair
-# is asserted in the vision tests instead, which is the thing that will
-# actually catch a future drift.
-VISION_NUM_CTX = int(os.environ.get("VISION_NUM_CTX", "8192"))
+# the request body in `observe`.
+#
+# So it is now the same constant rather than a second copy of the number.
+# It was previously read from its own `VISION_NUM_CTX` environment variable
+# while the text path kept a literal, which left the invariant true only by
+# default: one `export` moved this size and not the other, and the hang came
+# back. `OLLAMA_NUM_CTX` moves both or neither. The module still owns its own
+# HTTP client; it already imported the host, keep-alive and model tag from
+# `ollama.py`, so this adds no dependency that was not there.
+VISION_NUM_CTX = NUM_CTX
 
 # --------------------------------------------------- the demonstration flag
 #

@@ -37,6 +37,16 @@ EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "1024"))
 
 GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "qwen3.5:4b")
 
+# The context window every call to this model asks for, generation and vision
+# alike. One variable, deliberately: Ollama keys a resident instance on the
+# context size, so two different sizes for one model are two instances, and a
+# request for the second size against the first blocks indefinitely rather
+# than erring or resizing. `assistant/vision.py` reads this same constant --
+# it used to carry its own `VISION_NUM_CTX` environment variable beside a
+# comment saying the two must be *equal*, which meant the hang was one
+# `export` away from returning.
+NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+
 # How long Ollama holds the model in memory after a call. Send nothing and the
 # server applies its own default, which is five minutes: measured by asking
 # /api/ps when the deadline was set. Any gap longer than that and the next
@@ -199,7 +209,7 @@ def generate(
     model: str = GENERATION_MODEL,
     system: str = "",
     timeout: float = 300,
-    num_ctx: int = 8192,
+    num_ctx: int = NUM_CTX,
     seed: int = 0,
     num_predict: int = MAX_ANSWER_TOKENS,
     schema: dict | None = None,
