@@ -50,6 +50,8 @@ Status is reported with a fixed vocabulary, so an intention is never mistaken fo
 | What the system is — diagrams, component reference, corpus inventory | [`docs/architecture.md`](docs/architecture.md) |
 | The analysis it came from — segments, jobs, question types, data, guardrails | [`docs/working-record.docx`](docs/working-record.docx) |
 | The exercise itself | [`docs/brief.docx`](docs/brief.docx) |
+| How to start it, check it, read a trace, and recover it | [`docs/demo-runbook.md`](docs/demo-runbook.md) |
+| How to deploy it in containers | [`docs/deployment.md`](docs/deployment.md) |
 
 ## Requirements
 
@@ -73,6 +75,22 @@ python -m assistant.cli        # ask a question
 python -m assistant.ui         # the same library behind a web page
 python -m eval.run             # nine situations, probe suite, threshold sweep
 ```
+
+On Windows, one command does all of that and stops at the first thing that is
+missing with the command that fixes it, rather than failing later as a traceback:
+
+```powershell
+.\scripts\start-demo.ps1 -CheckOnly    # verifies everything, starts nothing
+.\scripts\start-demo.ps1               # the same checks, then the page
+```
+
+Whether it could actually answer a question — which is a different question from
+whether the process is running — is `python -m assistant.health`, and over HTTP
+`/ready`, which returns 503 rather than 200 when it could not. `/health` stays
+liveness-only. How one answer was produced is `python -m assistant.trace <id>`,
+where the id is the `X-Correlation-Id` the page returns. The
+[demo runbook](docs/demo-runbook.md) covers all of it, plus measured latency and
+what to do when something fails in front of an audience.
 
 The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without network access. Only the index is rebuilt locally, because it is tied to the embedding model on your machine.
 
