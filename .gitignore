@@ -71,3 +71,6 @@ logs/
 # Editor state
 .vscode/
 .idea/
+
+eval/results/gold-transcript.txt
+eval/results/gold.json
