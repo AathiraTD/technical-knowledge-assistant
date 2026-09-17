@@ -321,6 +321,28 @@ PAGE = """<!doctype html>
     color:var(--warn); font-size:11px; margin:0; padding:0;
   }}
 
+  /* The photograph, as the page reports it back. */
+  .attached {{
+    margin-top:6px; font-size:11px; opacity:.85;
+  }}
+  ul.perception {{
+    list-style:none; margin:8px 0 0; padding:0;
+    font-size:13px; line-height:1.9;
+  }}
+  ul.perception li {{ margin:0; }}
+  .pill {{
+    display:inline-block; min-width:74px; text-align:center;
+    border:1px solid currentColor; border-radius:999px;
+    font-size:10px; letter-spacing:.04em; text-transform:uppercase;
+    padding:1px 7px; margin-right:8px; vertical-align:1px;
+  }}
+  .withheld {{ color:var(--muted); font-size:12px; font-style:italic; }}
+  .perception-none {{
+    margin-top:8px; font-size:13px; color:var(--muted);
+  }}
+  .cannot {{ margin-top:10px; font-size:12px; color:var(--muted); }}
+  .cannot ul {{ margin:4px 0 0; padding-left:18px; }}
+
   #file-input {{ display:none; }}
 
   footer {{
@@ -411,8 +433,11 @@ function sendMessage() {{
   const files = Array.from(document.getElementById('file-input').files);
   const hasImages = files.length > 0;
 
-  // Add user message to chat
-  addMessage('user', question);
+  // Add user message to chat, naming the attachment. A photograph the person
+  // can no longer see -- the file input is cleared on the next line -- is a
+  // photograph they cannot tell was sent, and "did it get my picture?" is the
+  // first thing anybody asks of an upload.
+  addMessage('user', question, files.map(f => f.name));
   input.value = '';
   input.focus();
   document.getElementById('file-input').value = '';
@@ -450,7 +475,7 @@ function sendMessage() {{
   }}
 }}
 
-function addMessage(role, text) {{
+function addMessage(role, text, attachments) {{
   const container = document.getElementById('chat-messages');
   if (container.querySelector('.landing')) {{
     container.innerHTML = '';
@@ -458,9 +483,85 @@ function addMessage(role, text) {{
   }}
   const msgEl = document.createElement('div');
   msgEl.className = 'message ' + role;
-  msgEl.innerHTML = '<div class="message-bubble">' + escapeHtml(text) + '</div>';
+  let html = '<div class="message-bubble">' + escapeHtml(text);
+  if (attachments && attachments.length > 0) {{
+    html += '<div class="attached">&#128206; ' +
+            attachments.map(escapeHtml).join(', ') + '</div>';
+  }}
+  msgEl.innerHTML = html + '</div>';
   container.appendChild(msgEl);
   container.scrollTop = container.scrollHeight;
+}}
+
+// One row per reading, each carrying its own certainty word and, where the
+// system declined to act on it, the reason. The value and the hedge are
+// rendered together and never separately: a row showing "brick" without
+// "likely, but not certain" beside it would turn a reading into a fact, which
+// is the whole failure the perception stage is arranged to avoid.
+const CERTAINTY_STYLE = {{
+  'OBSERVED':         ['#166534', '#f0fdf4', 'seen'],
+  'LIKELY':           ['#92400e', '#fffdf5', 'likely'],
+  'UNCERTAIN':        ['#9f1239', '#fff8fa', 'uncertain'],
+  'CANNOT_DETERMINE': ['#334155', '#f8fafc', 'cannot tell']
+}};
+
+function renderPerception(perception, container) {{
+  if (!perception) return;
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+
+  // Switched off is a supported state, not an error, and it gets its own
+  // sentence rather than an empty "From the photograph" heading -- which would
+  // read as "looked and saw nothing" when nothing looked.
+  if (perception.enabled === false) {{
+    el.innerHTML = '<div class="message-bubble"><strong>Photograph not read' +
+                   '</strong><div class="perception-none">' +
+                   escapeHtml((perception.summary || []).join(' ')) +
+                   '</div></div>';
+    container.appendChild(el);
+    return;
+  }}
+
+  let html = '<div class="message-bubble"><strong>From the photograph</strong>';
+
+  const rows = (perception.observations || []);
+  if (rows.length === 0) {{
+    html += '<div class="perception-none">Nothing could be read from the ' +
+            'image with enough confidence to report.</div>';
+  }} else {{
+    html += '<ul class="perception">';
+    rows.forEach(o => {{
+      const style = CERTAINTY_STYLE[o.certainty] || CERTAINTY_STYLE['UNCERTAIN'];
+      const shown = (o.certainty === 'CANNOT_DETERMINE' ||
+                     o.certainty === 'UNCERTAIN')
+        ? escapeHtml(o.attribute.replace(/_/g, ' '))
+        : escapeHtml(o.attribute.replace(/_/g, ' ')) + ': <b>' +
+          escapeHtml(String(o.value).replace(/_/g, ' ')) + '</b>';
+      html += '<li><span class="pill" style="color:' + style[0] +
+              ';background:' + style[1] + '">' + style[2] + '</span> ' + shown;
+      if (o.withheld) {{
+        html += '<span class="withheld"> &mdash; ' +
+                escapeHtml(o.withheld) + '</span>';
+      }}
+      html += '</li>';
+    }});
+    html += '</ul>';
+  }}
+
+  const cannot = perception.cannot_determine_from_image || [];
+  if (cannot.length > 0) {{
+    html += '<div class="cannot"><strong>Not determinable from the photograph' +
+            '</strong><ul>' +
+            cannot.slice(0, 6).map(c => '<li>' + escapeHtml(c) + '</li>').join('') +
+            '</ul></div>';
+  }}
+  if (perception.truncated) {{
+    html += '<div class="withheld">The model\\u2019s answer was cut short, so ' +
+            'what it did say is shown but was not acted on.</div>';
+  }}
+  html += '</div>';
+  el.innerHTML = html;
+  container.appendChild(el);
 }}
 
 function handleResponse(data) {{
@@ -468,6 +569,9 @@ function handleResponse(data) {{
     addMessage('assistant', 'No response received.');
     return;
   }}
+
+  // Before the answer, because it is what the answer was built on.
+  renderPerception(data.perception, document.getElementById('chat-messages'));
 
   const part = data.parts[0];
   const answer = part;
@@ -667,6 +771,21 @@ def render_landing() -> str:
         'else published in their technical material.</p>'
         '</div>'
     )
+
+
+def render_upload_notes(notes) -> str:
+    """What happened to the caller's attachment, as its own block.
+
+    Escaped like everything else on this page. A note names a filename the
+    caller chose, and a filename is caller-controlled text arriving on a
+    surface that renders HTML -- the one place an upload can reach the page
+    without going anywhere near a model.
+    """
+    if not notes:
+        return ""
+    items = "".join(f"<li>{_esc(note)}</li>" for note in notes)
+    return ("<div class='message assistant'><div class='message-bubble'>"
+            f"<ul class='upload-notes'>{items}</ul></div></div>")
 
 
 def render_html(reply, verbose: bool) -> str:
@@ -1076,6 +1195,14 @@ class Handler(BaseHTTPRequestHandler):
                 "session_slots": self.sessions.carried(self.session_id),
                 "images_read": len(images),
                 "upload_notes": notes,
+                # What the photographs actually showed, each reading with its
+                # own certainty. Lifted to the top level rather than left in
+                # per-part diagnostics because it is a fact about the *request*
+                # -- one upload, however many topics the message carried -- and
+                # because a page that had to dig it out of diagnostics would be
+                # reading an audit field as an interface.
+                "perception": (reply.parts[0][1].diagnostics.get("perception")
+                               if reply and reply.parts else None),
                 "correlation_id": self.correlation_id,
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
@@ -1113,6 +1240,19 @@ class Handler(BaseHTTPRequestHandler):
                                    f"</div></div>")
         else:
             initial_content = render_landing()
+
+        # What happened to the attachment, on the surface a person is looking
+        # at. The JSON branch has carried these all along and this one dropped
+        # them when the page became a chat client, so a POST to `/` with a file
+        # that was not an image answered the question and said nothing about
+        # the file -- which reads as "the assistant ignored my photo" rather
+        # than as the refusal it actually was.
+        #
+        # Above the answer rather than inside it: what happened to an upload is
+        # a fact about the request, not about the published material, and
+        # putting it in the answer would put an unsourced sentence on a page
+        # where every other sentence carries a citation.
+        initial_content = render_upload_notes(notes) + initial_content
 
         page = PAGE.format(
             initial_content=initial_content,
