@@ -37,10 +37,16 @@ from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 DIMS = 1024
 SOLO = "https://example.invalid/solo"
 DURO = "https://example.invalid/duro"
+# A second *Solo* document, for the fixture that needs two documents about one
+# product. `tests/test_recommendation_guard.py` imports `build_repo` and needs
+# the Duro one, so both shapes exist rather than one replacing the other.
+SOLO_PAGE = "https://example.invalid/solo-page"
 
 SOLO_TEXT = ("Mix Solo with 5-6 litres of clean water per 25 kg sack and stir "
              "for three minutes.")
 DURO_TEXT = "Duro covers approximately 2.5 m2 per 25 kg bag at 11 mm thickness."
+SOLO_COVERAGE = ("Solo covers approximately 2.5 m2 per 25 kg bag at 11 mm "
+                 "thickness.")
 
 CONTACT = {"phone": "0800 538 5746", "hours": "Mon - Fri 9:00am - 5:00pm"}
 
@@ -77,7 +83,8 @@ def chunk(url: str, index: int, section: str, content: str, product: str,
                  authority=1, source_date="2024-07-01", embedding=unit(axis))
 
 
-def build_repo(tmp_path, two_documents: bool = False) -> SQLiteKnowledgeRepository:
+def build_repo(tmp_path, two_documents: bool = False,
+               second_product: str = "Duro") -> SQLiteKnowledgeRepository:
     """A store holding one or two datasheets, with an active snapshot."""
     documents = [document(SOLO, "Solo")]
     versions = [version(SOLO)]
@@ -87,9 +94,18 @@ def build_repo(tmp_path, two_documents: bool = False) -> SQLiteKnowledgeReposito
                       "Mixing")]
 
     if two_documents:
-        documents.append(document(DURO, "Duro"))
-        versions.append(version(DURO))
-        chunks.append(chunk(DURO, 0, "Coverage", DURO_TEXT, "Duro", 1))
+        # Which product the second document belongs to is a choice the caller
+        # makes, because the two callers need opposite things. The guard tests
+        # ask about Duro and need Duro evidence to exist. This file's compose
+        # test asks for Solo's water *and* coverage, and a corpus whose only
+        # coverage passage is Duro's makes that answerable only by substituting
+        # one product's figure for another's -- which check 7 refuses, rightly.
+        url, name, text = ((SOLO_PAGE, "Solo", SOLO_COVERAGE)
+                           if second_product == "Solo"
+                           else (DURO, "Duro", DURO_TEXT))
+        documents.append(document(url, name))
+        versions.append(version(url))
+        chunks.append(chunk(url, 0, "Coverage", text, name, 1))
 
     snapshot = Snapshot(
         snapshot_id="snap-test", created_at="2026-01-01T00:00:00Z",
@@ -127,7 +143,7 @@ def assistant(tmp_path, no_ollama):
 
 @pytest.fixture
 def two_document_assistant(tmp_path, no_ollama):
-    repo = build_repo(tmp_path, two_documents=True)
+    repo = build_repo(tmp_path, two_documents=True, second_product="Solo")
     try:
         yield Assistant(repo)
     finally:
