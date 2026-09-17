@@ -457,6 +457,12 @@ def _sees(monkeypatch, slot: str, value: str):
         image="IMG_001", model="test-vision")
     monkeypatch.setattr(vision, "observe",
                         lambda _image, image_id="", **_k: perception)
+    # Every caller of this helper is asserting the *enabled* path: the stub
+    # replaces the model, not the decision to use one, and no provider is
+    # injected, so the request goes through the default one that
+    # `ASSISTANT_VISION_DEMO` gates. Switched off the turn would take decision
+    # 16's hand-off instead, which `tests/test_vision_flag.py` covers.
+    monkeypatch.setenv(vision.VISION_DEMO_FLAG, "1")
 
 
 def test_a_slot_stated_once_prints_as_carried_later_not_as_stated(conversation):

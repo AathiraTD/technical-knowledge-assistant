@@ -474,6 +474,11 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(ollama, "generate", quoting)
     monkeypatch.setattr(vision, "observe",
                         lambda *_a, **_k: perception("substrate", "stone"))
+    # These tests are about the *enabled* path: no provider is injected, so the
+    # request goes through the default one, and `ASSISTANT_VISION_DEMO` decides
+    # whether that exists. Switched off the turn would take decision 16's
+    # hand-off instead, which `tests/test_vision_flag.py` covers.
+    monkeypatch.setenv(vision.VISION_DEMO_FLAG, "1")
 
     build_repo(tmp_path, two_documents=True).close()
     repo = open_repository(str(tmp_path / "index" / "knowledge.db"), dsn="",

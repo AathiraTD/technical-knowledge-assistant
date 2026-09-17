@@ -122,6 +122,37 @@
         ]
       }
     },
+    "objective": {
+      "_comment": "The job being done, which decides WHICH facts a recommendation requires (assistant/candidates.py REQUIREMENTS). Deliberately only the two objectives whose words are unambiguously a job. 'render' and 'plaster' are product categories at least as often as they are jobs -- 'what plaster should I use' names a kind of product -- and detecting those here would add an ask-back to questions the system answers today. They stay with the model, which may still supply them.",
+      "values": {
+        "insulation": [
+          "insulate",
+          "insulating",
+          "insulation",
+          "insulated",
+          "thermal upgrade",
+          "thermally upgrade",
+          "improve its thermal",
+          "reduce heat loss",
+          "warmer",
+          "keep the heat in",
+          "internal wall insulation",
+          "iwi",
+          "ewi"
+        ],
+        "repair": [
+          "repair",
+          "repairing",
+          "patch up",
+          "patching up",
+          "make good",
+          "making good",
+          "reinstate",
+          "reinstating",
+          "fix the damage"
+        ]
+      }
+    },
     "symptom": {
       "load_bearing": false,
       "values": {
