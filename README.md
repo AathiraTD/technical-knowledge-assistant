@@ -1,219 +1,584 @@
-# Lime Green Technical Assistant
+# Lime Green Technical Knowledge Assistant
 
-A local-LLM technical knowledge assistant over Lime Green's published material. It retrieves passages from the company's own datasheets, guides and FAQ, cites every source by document name, and refuses — with a hand-off to the technical team — when the published material does not answer the question.
+A local-LLM technical knowledge assistant over Lime Green Products' published material. It retrieves passages from approved Lime Green datasheets, guides and FAQ content, preserves provenance and version context, cites its evidence, and refuses or hands off when the published material is insufficient to support an answer.
+
+The submitted demo runs locally with SQLite, LangGraph in-memory conversational state, and Ollama-served local models. No hosted model API key is required for answering.
 
 Built for the AEC Solution Architect (AI/LLM Developer) KTP take-home exercise, Birmingham City University with Lime Green Products.
 
-## How it works, in a paragraph
+> \*\*New here?\*\* Start with \[Running it](#running-it), then \[How to demo](#how-to-demo). \[Limitations and production seams](#limitations-and-production-seams) states what is not production-complete.
 
-A question is split by topic, gated against a routing table, and matched against slot vocabularies. What survives is embedded and retrieved from the knowledge store — active document versions only, filtered to the caller's audience in code rather than by prompt. A deterministic router — not the model — then picks one of five paths: route to a fixed referral, print a passage verbatim, compose over several passages, quote a published hand-off, or refuse. The model runs on the compose path only, at temperature zero, over retrieved passages delimited as data. Six checks run before anything prints, and a failure sends the part to a refusal that still carries whatever the site does publish.
+\---
 
-## Status
+## What it demonstrates
 
-The knowledge ingestion lifecycle is implemented. The architecture and decision
-records distinguish working components from the remaining production roadmap.
-See [the pipeline runbook](docs/knowledge-pipeline.md) and
-[verification evidence](docs/knowledge-pipeline-verification.md).
+|Capability|What is implemented|
+|-|-|
+|**RAG over approved sources**|The assistant indexes the approved Lime Green corpus rather than indiscriminately crawling arbitrary web content.|
+|**Semantic retrieval**|Queries are embedded with `qwen3-embedding:0.6b`; semantic similarity search is combined with product, audience, active-version, authority and de-duplication constraints.|
+|**Versioned knowledge**|Source identity, active document version, snapshot and chunking metadata are retained. Older versions can remain for provenance while only the active version participates in retrieval.|
+|**Stateful conversation**|LangGraph is the orchestration/state layer. Facts carry across turns, corrections supersede earlier values, ask-back can interrupt and resume, and case/topic boundaries prevent stale context leaking into a new wall/case.|
+|**Evidence sufficiency**|Retrieved text is not automatically treated as sufficient. Product/property evidence is checked before recommendation or composition.|
+|**Image input**|Optional multimodal perception converts wall photographs into typed observations with explicit uncertainty. Visual observations do not directly authorize a product recommendation.|
+|**Product recommendation containment**|A product may be recommended only if it survives candidate assessment against approved evidence; final recommendation containment is independent of intent classification.|
+|**Deterministic safety routing**|Safety, health, compliance, price and other governed topics can terminate before retrieval/generation. Paraphrase and word-order regressions are covered by tests.|
+|**Deterministic calculations and checks**|Published numeric values are bound to the correct product/evidence and calculations are performed outside the LLM where appropriate.|
+|**Observability**|Each answer receives a correlation id and stage-level trace information that can be inspected with `python -m assistant.trace`.|
+|**Evaluation**|Unit/integration tests, structured conversation evaluation, adversarial guardrail tests, browser smoke/E2E journeys and multimodal false-positive evaluation are included.|
+|**Reproducible startup**|Preflight/readiness checks and a production Docker image are included. The live demo remains intentionally lightweight.|
 
-Status is reported with a fixed vocabulary, so an intention is never mistaken for an implementation: **built and verified**, **built but weakly tested**, **partial**, **documented only**, **known limitation**.
+\---
 
-| Area | Status | Evidence |
-|---|---|---|
-| Decisions | built and verified | 19 recorded with alternatives, costs and verification boundaries — `DECISIONS.md` |
-| Crawler | built and verified | 94 documents, 0 errors; a re-run reports 94 unchanged |
-| Extraction | built and verified | 37 PDFs probed; two heading detectors; per-document quality in the ingestion report |
-| Indexer | built and verified | Container verification: 94 documents + 1 staff fixture, 552 passages, zero failures; unchanged second run reprocesses zero documents |
-| Delta ingestion | built and verified | A second crawl of an unchanged site reprocesses **nothing**: 1.4s against 23.8s. Changed documents supersede and keep their history; withdrawn ones are deactivated, not deleted. Four-run proof in `DECISIONS.md` entry 18 |
-| SQLite adapter | built and verified | The index builds, publishes atomically, and serves every answer in the transcript |
-| Retrieval | built and verified | Audience filtering inside the repository, before anything is ranked — a `WHERE` clause in PostgreSQL, a Python row filter over the active chunks in SQLite; authority banding; index-mismatch refusal |
-| Router | built and verified | 11-topic policy gate, 8 slots, 8 ordered steps |
-| Six checks | built and verified | 30 unit tests across the six, each aimed at a failure they exist to catch — `tests/test_checks.py` |
-| Answer engine | built and verified | Five paths plus the two composites the diagram names, 100% branch coverage, and a full evaluation transcript in `eval/results/` |
-| CLI and web page | built and verified | Both over one library; the harness drives the library. `python -m assistant.health` reports ready |
-| Evaluation harness | built and verified | **8/9 situations, 10/10 probes**, audience filter passing in both directions, threshold sweep. S8 fails deliberately and is left failing: its expectation now requires the answer's own citations to reference two documents, and the question turns out to be answerable from one passage, so the situation is not the multi-source test it claims to be. Transcript in `eval/results/transcript.txt` |
-| Embedding model | **development default** | `qwen3-embedding:0.6b`. `eval/embedding_choice.py` is the benchmark that closes decision 6 |
-| PostgreSQL adapter | built and verified | Repository contract, ingestion lifecycle, publication lock, concurrent reader and configuration migration, all against a real PostgreSQL 16 + pgvector in CI and in a container — [evidence](docs/knowledge-pipeline-verification.md). Verified against the contract, not deployed: the transcript is produced on SQLite, and the 43 PostgreSQL tests skip on a machine with no `ASSISTANT_POSTGRES_DSN` |
-| Container deployment | partial | Image builds and runs ingestion as non-root against PostgreSQL with model doubles; Compose validates and initializes the index before the UI. Full live-model deployment is not claimed |
-| Authentication | documented only | The audience set is asserted, not proved — the filter itself is real and tested. Over HTTP a request may only narrow the set the operator started the server with, never widen it; that is not authentication and is not described as such |
-| Vision | documented only | Refused by policy, not by capability — decision 16 |
-| Scheduled ingestion | built and verified | Conditional refresh, durable job deduplication, retries, crash recovery and dead-letter status; external scheduler supplies cadence |
-| Approved staff ingestion | built and verified | Reviewed JSON sources, shared chunking/caveats, version history and audience enforcement |
-| Answer cache | built and verified | Exact-key, audience- and snapshot-scoped; a repeated question drops from 40.78 s to 0.017 s. The template-keyed form decision 14 designs is still roadmap |
-| Generation queue, rate limiting | documented only | Separate from the implemented ingestion queue. Concurrent serving is built and tested; queueing and degradation under load are not |
-| Test coverage | built and verified | 100% line and branch target includes crawler, extraction, indexing, jobs, model clients and both stores; [current measurements](docs/knowledge-pipeline-verification.md) |
+## How it works
 
-## Read this first
+The assistant is a **governed agentic workflow**, not an unconstrained autonomous agent.
 
-| If you want | Read |
-|---|---|
-| Why it is built this way — every decision, alternative and cost | [`DECISIONS.md`](DECISIONS.md) |
-| What the system is — diagrams, component reference, corpus inventory | [`docs/architecture.md`](docs/architecture.md) |
-| The analysis it came from — segments, jobs, question types, data, guardrails | [`docs/working-record.docx`](docs/working-record.docx) |
-| The exercise itself | [`docs/brief.docx`](docs/brief.docx) |
-| How to start it, check it, read a trace, and recover it | [`docs/demo-runbook.md`](docs/demo-runbook.md) |
-| How to deploy it in containers | [`docs/deployment.md`](docs/deployment.md) |
+```text
+user question / image
+        |
+        v
+deterministic policy gate
+        |
+        v
+structured understanding
+        |
+        v
+conversation + case state
+        |
+        +---- missing critical fact ----> ask back / resume
+        |
+        v
+semantic retrieval over approved evidence
+        |
+        v
+evidence-sufficiency / candidate assessment
+        |
+        +---- insufficient -------------> refuse / conditional answer / hand-off
+        |
+        v
+extract / deterministic calculation / grounded composition
+        |
+        v
+final checks + recommendation containment
+        |
+        v
+cited answer + trace
+```
+
+The LLM is used where model intelligence is useful — structured language understanding and grounded natural-language composition. Deterministic/domain-controlled components retain authority over policy routing, product identity, source/version constraints, calculations, evidence sufficiency, recommendation eligibility, citations and refusal behaviour.
+
+The image path follows the same principle:
+
+```text
+photograph
+   |
+   v
+typed observations + uncertainty
+   |
+   v
+trusted conversation state
+   |
+   v
+missing-information gate
+   |
+   v
+official evidence retrieval
+   |
+   v
+candidate/evidence assessment
+   |
+   v
+supported recommendation or hand-off
+```
+
+A VLM observation is not automatically a fact, and a model-proposed product is not automatically an eligible product.
+
+\---
 
 ## Requirements
 
-- Python 3.11 or later
-- [Ollama](https://ollama.com/download) installed and running locally, with two models pulled:
-  ```
-  ollama pull qwen3.5:4b            # 3.4 GB — generation, 256K context
-  ollama pull qwen3-embedding:0.6b  # 639 MB — embeddings
-  ```
-  About 4 GB in total; allow time on a slow connection. `qwen3:4b-instruct` (2.5 GB) is the documented fallback if `qwen3.5` turns out to emit reasoning blocks — see `DECISIONS.md` entry 7. Tags were verified against the Ollama library on 15 September 2026. They are fixed in `config/`, recorded in the index header, and the engine refuses to run against a mismatch rather than returning confident nonsense.
+* Python 3.11 or later
+* [Ollama](https://ollama.com/download) installed and running locally
+* Models:
+
+```bash
+ollama pull qwen3.5:4b
+ollama pull qwen3-embedding:0.6b
+```
+
+`qwen3.5:4b` is used for local generation/structured model tasks and, when the vision demo is enabled, for multimodal perception on the current demo machine.
+
+`qwen3-embedding:0.6b` is used for query/passage embeddings. The embedding model identity and dimensionality are tied to the knowledge snapshot so an incompatible index is rejected rather than silently queried.
+
+\---
 
 ## Running it
 
-From a clean clone:
-
-```
-pip install -r requirements.txt
-python -m assistant.index      # crawl is cached in the repo; builds the index offline
-                               # a second run reprocesses only what changed
-python -m assistant.cli        # ask a question
-python -m assistant.ui         # the same library behind a web page
-python -m eval.run             # nine situations, probe suite, threshold sweep
-```
-
-On Windows, one command does all of that and stops at the first thing that is
-missing with the command that fixes it, rather than failing later as a traceback:
+### Recommended Windows demo startup
 
 ```powershell
-.\scripts\start-demo.ps1 -CheckOnly    # verifies everything, starts nothing
-.\scripts\start-demo.ps1               # the same checks, then the page
+.\\scripts\\start-demo.ps1 -CheckOnly
+.\\scripts\\start-demo.ps1
 ```
 
-Whether it could actually answer a question — which is a different question from
-whether the process is running — is `python -m assistant.health`, and over HTTP
-`/ready`, which returns 503 rather than 200 when it could not. `/health` stays
-liveness-only. How one answer was produced is `python -m assistant.trace <id>`,
-where the id is the `X-Correlation-Id` the page returns. The
-[demo runbook](docs/demo-runbook.md) covers all of it, plus measured latency and
-what to do when something fails in front of an audience.
+`-CheckOnly` verifies the environment and starts nothing. The normal command performs the same checks and then starts the web page.
 
-The crawled pages and PDFs ship in `data/cache/`, so the indexer runs without network access. Only the index is rebuilt locally, because it is tied to the embedding model on your machine.
+The preflight/readiness path checks, in dependency order:
 
-`python -m assistant.crawl --refresh` revalidates sources using ETag and
-Last-Modified. Without `--refresh`, available bodies are reused but discovery
-still contacts the site. `python -m assistant.index` uses the cached source
-release. Set `ASSISTANT_POSTGRES_DSN` to select PostgreSQL for all entry points.
-See the [runbook](docs/knowledge-pipeline.md) for staff imports and scheduling.
+* Python/runtime dependencies
+* Ollama reachability
+* required model tags
+* knowledge index availability
+* snapshot/model compatibility
 
-## What ships in this repository, and on what footing
+### Manual startup
 
-The crawled corpus ships with the code. `data/cache/` is 96 tracked files and
-about 29 MB — 37 Lime Green PDFs (34 technical datasheets and 3 Warmshell system
-guides) and the HTML of the pages that linked them, byte-for-byte as fetched —
-and `docs/brief.docx` is the exercise brief itself. That
-is a deliberate trade, and it is what makes the clean-clone run real: an assessor
-with no network and no crawl still gets the same 95 documents, the same 552
-passages and the same transcript, and can check any quoted figure against the
-original file rather than taking the index's word for it. Shipping only the built
-index would have removed the evidence and kept the claim.
+```bash
+pip install -r requirements.txt
+python -m assistant.index
+python -m assistant.ui
+```
 
-The footing has to be stated plainly, because it is not a licence. This is
-third-party material — Lime Green's published documents, and the brief itself —
-included so the exercise can be assessed offline. Copyright stays with its
-owners and nothing here confers a right to republish. There is deliberately no
-`LICENSE` file: adding one would imply a grant over content that is not ours to
-grant. Everything derived from the corpus inherits the same footing — the index,
-the embedding cache, and the harvested product, colour and merchant name lists.
+Other useful entry points:
 
-**This repository is public**, which was a deliberate choice by its author and
-is worth naming rather than leaving to be discovered. Every document here is
-already published by Lime Green on their own website and freely downloadable
-from it; what this repository adds is a mirror, and a mirror is a distribution
-decision even when the source is open. Lime Green have not been asked. If they
-would rather it were not here, the corpus comes out and the crawl becomes a
-build step — the pipeline already supports that, since `python -m assistant.index`
-rebuilds from the site and the delta ingestion exists precisely so a rebuild is
-cheap. The honest summary is that the offline clean-clone run was judged worth
-more than the tidiness of not mirroring, with the trade stated rather than
-hidden.
+```bash
+python -m assistant.health
+python -m assistant.cli -q "How much water does Solo Onecoat need per bag?"
+python -m assistant.trace
+python -m assistant.trace <correlation-id>
+python -m eval.run
+```
+
+### Readiness
+
+`/health` is liveness-only.
+
+`/ready` reports whether the running process can actually serve answers and returns `200` when ready or `503` when a required dependency has become unavailable after startup.
+
+The CLI readiness report includes the knowledge store, active snapshot, embedding model, generation model and Ollama state. Sensitive connection details are not exposed by the unauthenticated HTTP readiness endpoint.
+
+\---
+
+## Vision demo
+
+Image support is implemented but **disabled by default** in the live demo because local CPU-only perception is slow.
+
+Enable it with:
+
+```powershell
+$env:ASSISTANT\_VISION\_DEMO="1"
+```
+
+or:
+
+```bash
+export ASSISTANT\_VISION\_DEMO=1
+```
+
+Accepted truthy values are `1`, `true`, `yes`, `on`, and `enabled` (case-insensitive).
+
+When disabled, image upload remains a supported state: the system returns a truthful hand-off rather than pretending perception occurred.
+
+When enabled:
+
+* the image is bounded/sniffed before inference,
+* the VLM returns typed observations,
+* `location` and `exposure` are not inferred from a wall photograph,
+* a substrate claim is gated when a covering finish is visible,
+* user-stated facts outrank conflicting visual observations,
+* image observations still have to pass the same evidence-sufficiency and recommendation rules as text.
+
+### Important demo limitation
+
+Real local VLM inference on the current machine has been measured in the roughly **156–198 second** range for successful examples, with worse degradation under memory pressure. One evaluation image exceeded a 600-second timeout under load.
+
+For the interview/demo, pre-run the representative image scenario or use `tools/vision\_demo.py` / the recorded trace rather than depending on live perception in the room.
+
+The multimodal evaluation is designed around **dangerous false positives**, not just generic visual accuracy: a photograph may support an observation such as visible staining, but it must not turn that into an unsupported diagnosis such as rising damp, structural safety, regulatory compliance or hidden-substrate certainty.
+
+\---
+
+## How to demo
+
+A compact sequence:
+
+1. **Published technical fact**
+
+   * `How much water does Solo Onecoat need per bag?`
+   * Shows grounded evidence and citation.
+2. **Unsupported property**
+
+   * `What is the U-value of Solo Onecoat plaster?`
+   * Shows evidence-sufficiency refusal rather than an invented figure.
+3. **Ask-back / resume**
+
+   * `Which plaster should I use?`
+   * Reply with the missing substrate when asked.
+   * Shows real interrupt/resume and trusted state.
+4. **Multi-turn product continuity**
+
+   * `I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?`
+   * Then: `How much would I need for 30 m² at 25 mm?`
+   * Shows product/context carry and product-bound evidence.
+5. **False premise correction**
+
+   * `Ultra covers 0.8 m² per bag at 25 mm, right?`
+   * The system should correct against the published 0.6 m² figure rather than agree.
+6. **Diagnosis-style question**
+
+   * `My external lime render is showing patchy colour after drying. What could be causing it?`
+   * Shows evidence-backed possibilities without claiming a definitive diagnosis.
+7. **Deterministic safety routing**
+
+   * `I got lime plaster in my eye, what should I do?`
+   * The deterministic policy route should complete without retrieval/generation.
+8. **Image-assisted case**
+
+   * Enable `ASSISTANT\_VISION\_DEMO=1` only when you intentionally want live perception, or use the prepared image demo/trace.
+   * Ask what can be reliably observed, what remains uncertain, and what published guidance is relevant.
+
+The full rehearsal/failure playbook is in `docs/DEMO-SCRIPT.md`.
+
+### Warm the server process
+
+The answer cache is in-process. Warming via the CLI does **not** warm the web server.
+
+Before the interview, start the web server and ask the questions you plan to demonstrate through that running server. For cache-sensitive examples, use a fresh chat where appropriate because conversation state is part of the cache key.
+
+\---
+
+## Architecture
+
+### Retrieval
+
+Vector/semantic search does **not** require a dedicated vector database in the submitted demo.
+
+The demo path uses the local repository/storage adapter and local embedding similarity. Retrieval then applies domain constraints such as:
+
+* active document version
+* audience
+* product identity
+* requested property
+* source authority
+* per-document diversity/de-duplication
+
+The repository boundary allows a production deployment to use PostgreSQL + pgvector without changing the answer/domain logic.
+
+### Storage
+
+`KnowledgeRepository` is the storage/retrieval boundary.
+
+Current demo:
+
+```text
+SQLite
++ local semantic retrieval
++ LangGraph InMemorySaver
++ Ollama
+```
+
+Production-shaped seam:
+
+```text
+PostgreSQL
++ optional pgvector
++ durable shared conversation checkpointing
++ replicated API/model-serving tiers
+```
+
+PostgreSQL is useful even apart from vectors for transactional document/version metadata, audit/provenance, shared state and production concurrency.
+
+The PostgreSQL repository adapter is contract-tested, but the submitted demo does **not** rely on PostgreSQL.
+
+### Ollama
+
+Ollama is the local model server.
+
+Conceptually:
+
+```text
+assistant
+   |
+   | HTTP
+   v
+Ollama
+   +-- qwen3.5:4b
+   +-- qwen3-embedding:0.6b
+```
+
+This keeps model lifecycle/serving outside the Python application and provides one local interface for generation, structured model output, embeddings and optional vision.
+
+\---
+
+## Safety and hallucination controls
+
+The design does not assume that prompt engineering can eliminate hallucination.
+
+Controls include:
+
+* approved-source corpus boundary
+* versioned evidence
+* product-aware retrieval
+* audience filtering before ranking
+* evidence-sufficiency gate
+* candidate assessment before recommendation
+* recommendation containment independent of intent classification
+* deterministic calculations
+* numeric/product binding checks
+* caveat/qualifier checks
+* citation/evidence checks
+* deterministic policy routes
+* explicit ask-back for missing decision-critical facts
+* refusal/handoff on insufficient evidence
+* user-stated facts outranking VLM/model guesses
+* adversarial and regression tests
+* per-turn observability
+
+A generated answer is not treated as trusted merely because the model produced it.
+
+\---
+
+## Privacy and responsible use
+
+The demo is designed to operate locally:
+
+* local knowledge store
+* local embeddings
+* local Ollama models
+* no hosted model API required for answering
+* hosted LangSmith tracing is explicitly disabled, including hostile environment-variable cases
+
+Operational tracing intentionally avoids recording full question/answer/passage text in the stage spans. Correlation ids, routes, timings and model identifiers provide observability without exposing chain-of-thought.
+
+Image uncertainty is represented rather than hidden. The system does not claim that a wall photograph alone can establish:
+
+* exact cause of damp
+* structural safety
+* Building Regulations compliance
+* exact mortar chemistry
+* hidden substrate
+* final compatibility
+
+Those are ask-back / qualification / technical hand-off cases.
+
+\---
+
+## Testing and evidence
+
+### Focused regression evidence
+
+Before integration:
+
+* Core focused regression: **346 passed**
+* Vision focused regression: **562 passed, 7 skipped, 0 failed**
+* Browser smoke subset: **11 passed** and was stable across repeated runs
+
+### Browser journeys
+
+The E2E suite covers:
+
+* basic RAG and citations
+* multi-turn context
+* image upload
+* ask-back/resume
+* deterministic safety hand-off
+* New Chat reset
+* reload behaviour
+* trace/correlation-id flow
+
+The full browser suite is intentionally much slower because local Ollama inference is serialised and vision can take minutes on the current machine.
+
+### Policy-gate regression
+
+Core specifically fixed the cross-branch policy phrasing failures for:
+
+* structural-safety paraphrases
+* eye/health word-order variation
+* Part L/compliance word-order variation
+
+Measured fixed routes completed in **22–48 ms**, with zero retrieved sources and no model invocation.
+
+### Final integrated numbers
+
+Run and record the final integrated results after this merge:
+
+```bash
+python -m pytest -q tests/
+python -m pytest tests/e2e -m smoke -q
+python -m eval.run --gold-only
+```
+
+Branch-level counts above are pre-integration evidence and should not be presented as the final post-merge count.
+
+\---
+
+## Performance findings
+
+A small concurrency benchmark was used to identify the bottleneck rather than claim production capacity.
+
+Representative findings on the local machine:
+
+* deterministic policy fast path: \~0.31 s class
+* cached repeat: \~0.51 s class
+* single uncached generated answer: \~28.5 s in the measured benchmark, with substantially higher latency under load
+* semantic/vector store search itself: \~36 ms in the measured trace
+* under concurrent requests, query embedding also slows because it queues behind generation on the same Ollama instance
+* zero observed request drops in the small 1/3/5-request benchmark; requests queue
+
+The primary bottleneck is **local model serving**, not SQLite similarity search.
+
+A production scale-out would separate/replicate model-serving concerns, add queueing/rate limiting, externalise shared state, and load-test against explicit SLOs before making concurrency claims.
+
+\---
+
+## Docker / deployment
+
+Docker is used for reproducibility and runtime isolation, not because the system needs a vector database.
+
+The production image was verified to:
+
+* build successfully after fixing `.dockerignore`/`COPY` incompatibilities,
+* run as non-root uid `10001`,
+* contain the expected application files,
+* import the application inside the image,
+* keep hosted tracing disabled even when hostile tracing environment variables are present.
+
+A full live-model `docker compose up` was **not** completed in the platform verification, so this README does not claim that it was.
+
+Useful verification command:
+
+```powershell
+.\\scripts\\verify-docker-deployment.ps1 -PipIndexUrl "https://packagefeedproxy.microsoft.io/pypi/simple/"
+```
+
+The `deploy/` stack is the production-oriented container path.
+
+\---
+
+## Limitations and production seams
+
+|Area|Status|Position|
+|-|-|-|
+|Authentication|**documented only**|Audience filtering is real, but the HTTP audience is asserted/narrowed, not authenticated. A production deployment needs SSO/account-backed claims.|
+|PostgreSQL|**contract-verified, not the demo runtime**|The adapter exists and is tested; the submitted demo uses SQLite.|
+|LangGraph durability|**known limitation**|Demo conversation state uses `InMemorySaver`; it does not survive restart or share state across app replicas. The current LangGraph/Postgres-checkpointer dependency versions are incompatible, and the code fails explicitly rather than pretending durability exists.|
+|Vision latency|**known limitation**|Image inference works but is too slow/unpredictable on this CPU-only demo machine for a time-critical live demonstration.|
+|Generation scalability|**documented seam**|One Ollama instance serialises expensive work. No production queue, rate limiting or load shedding is claimed.|
+|Compatibility knowledge|**known limitation**|No product/substrate compatibility matrix is invented where Lime Green has not published one. Unknown stays unknown.|
+|Embedding choice|**development default**|`qwen3-embedding:0.6b` is in use and snapshot-bound, but a formal embedding-model benchmark has not selected it as globally optimal.|
+|Qualitative synthesis|**bounded, not infallible**|Deterministic checks reduce unsupported output; they do not prove that every qualitative sentence is universally correct.|
+|Visible transcript reload|**known UI limitation**|Server-side conversation state can remain while browser-rendered transcript history is not reconstructed after reload.|
+
+\---
+
+## Repository hygiene before making the repository public
+
+Before final public submission:
+
+1. **Remove or redact `docs/brief.docx`** if it still contains BCU staff email addresses / author metadata.
+2. Remove tracked synthetic `data/failure\_library/...` artifacts if they are not intended to ship.
+3. Remove or sanitise generated presentation metadata that identifies `OpenAI` as `dc:creator` if those files are retained.
+4. Remove unreferenced walkthrough PNGs if they are not needed.
+5. Treat `deploy/` as the authoritative Docker path and avoid pointing assessors to the stale root stack.
+6. Do not publish secrets, machine-specific paths, generated test logs or browser reports.
+
+\---
+
+## Read this first
+
+|If you want|Read|
+|-|-|
+|Why it is built this way|`DECISIONS.md`|
+|Architecture/component reference|`docs/architecture.md`|
+|How to demonstrate it|`docs/DEMO-SCRIPT.md`|
+|Demo startup/recovery|`docs/demo-runbook.md`|
+|Knowledge-pipeline operation|`docs/knowledge-pipeline.md`|
+|Container deployment|`docs/deployment.md`|
+
+\---
 
 ## Layout
 
-```
-README.md               what it is, how to run it
-DECISIONS.md            why it is this way — 19 decisions
-requirements.txt        five pinned dependencies
+```text
+README.md
+DECISIONS.md
+CLAUDE.md
 
 assistant/
-  crawl.py              sitemap crawl, content hashing, the version ledger
-  model.py              the domain model — storage-agnostic by design
-  repository.py         KnowledgeRepository: the boundary the engine depends on
-  store/embedded.py     the SQLite adapter behind it — the one that ships
-  store/postgres.py     the PostgreSQL + pgvector adapter, same contract
-  store/factory.py      which of the two a process gets, decided in one place
-  extract.py            HTML and PDF to citable sections; harvest before stripping
-  index.py              chunk, tag caveats, embed, publish a snapshot
-  embedcache.py         content-addressed embeddings, so a rebuild is seconds
-  ollama.py             two HTTP endpoints, retried; no client library
-  retrieve.py           question embedding, synonyms, index-mismatch refusal
-  router.py             policy gate, slot detection, the eight ordered steps
-  answer.py             extract and compose, the six checks, hand-off, rendering
-  engine.py             the assembled assistant, split by topic
-  audience.py           a request may narrow the operator's audience set, never widen it
-  cache.py              exact-key answer cache, scoped by audience and snapshot
-  cli.py                canonical interface
-  ui.py                 a web page over the same library, standard library only
-  health.py             readiness: store, snapshot compatibility, model reachability
+  audience.py
+  answer.py
+  cache.py
+  candidates.py
+  cli.py
+  engine.py
+  graph.py
+  health.py
+  model.py
+  repository.py
+  retrieve.py
+  router.py
+  trace.py
+  ui.py
+  understanding.py
+  vision.py
+  store/
+    embedded.py
+    postgres.py
 
 config/
-  sources.json          the corpus boundary as executable configuration
-  routing.json          the policy gate: eleven topics that never reach retrieval
-  vocabularies.json     slot vocabularies, synonyms, deferral markers
+  routing.json
+  vocabularies.json
+  sources.json
+
 db/
-  schema.sqlite.sql     the assessment adapter — stdlib, ships, offline
-  schema.postgres.sql   the deployment adapter — PostgreSQL + pgvector
+  schema.sqlite.sql
+  schema.postgres.sql
+
 data/
-  cache/                original HTML and PDFs as fetched, shipped so it runs offline
-  embeddings.db         the embedding cache, content-addressed by text and model
-  index/                generated — the knowledge store and the ingestion report
+  cache/
+  embeddings.db
+  index/
+
 eval/
-  situations.json       nine situations with mechanical expectations
-  probes.json           ten guardrail probes
-  fixtures/             a synthetic staff-tagged document that must stay invisible
-  run.py                the harness
-  embedding_choice.py   the measurement behind decision 6
+  gold.json
+  situations.json
+  probes.json
+  conversations.json
+  vision\_eval.py
+  fixtures/
+
 tests/
-  test_checks.py        the six checks, against the failures they exist to catch
+  e2e/
+
+tools/
+  make\_image\_fixtures.py
+  vision\_demo.py
+
+scripts/
+  preflight.py
+  start-demo.ps1
+  benchmark.py
+  verify-docker-deployment.ps1
+
+deploy/
+  Dockerfile
+  docker-compose.yml
+
 docs/
-  architecture.md       diagrams, component reference, corpus inventory
-  diagrams/             Mermaid sources for the three diagrams
+  architecture.md
+  DEMO-SCRIPT.md
+  demo-runbook.md
+  deployment.md
+  knowledge-pipeline.md
 ```
 
-## Tests
-
-```
-pip install pytest coverage
-python -m pytest -q tests/                 # no Ollama, no index, no network
-python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
-python -m coverage report --rcfile=.coveragerc
-```
-
-Tests replace the website transport and model calls with deterministic doubles.
-SQLite always runs. PostgreSQL tests require a disposable pgvector database via
-`ASSISTANT_POSTGRES_DSN`; they skip visibly only when it is unset, and configured
-connection failures fail the suite. Install `psycopg[binary]==3.3.3` in a supported
-Linux environment for the full suite.
-
-On the Windows build machine, where no DSN is set, that is **648 passed and 43
-skipped** — the 43 being the PostgreSQL-gated tests, which CI runs against a real
-`pgvector/pgvector:pg16` service. A skip is printed, never swallowed.
-
-The target is **100% line and branch coverage** across the knowledge and answer
-libraries, including crawler, queue and both stores. CLI/UI presentation wrappers
-are outside that measurement. CI runs the full suite against both stores and
-checks that `missing_lines` and `missing_branches` are zero. Coverage is evidence
-of exercised paths, not a guarantee that technical answers are always correct.
-
-[Verification evidence](docs/knowledge-pipeline-verification.md) records the
-measured result and the limits of the container/model checks.
+\---
 
 ## Notes for an assessor
 
-- The corpus is Lime Green's published material only, crawled once by sitemap and cached in the repo. The boundary — what is in, what is out, and why — is in `DECISIONS.md` entry 1 and inventoried in `docs/architecture.md`.
-- Every answer names its sources by document name. A figure that cannot be found word-for-word in a cited passage does not print.
-- The assistant refuses rather than guesses, and a refusal still carries what the site publishes plus the technical team's published contact line. Refusals are a designed outcome, not a failure.
+* The assistant is intentionally **not** a generic chatbot. It is a governed evidence-backed technical assistant.
+* Semantic retrieval helps locate evidence; retrieval confidence alone does not authorise an answer.
+* Refusal and hand-off are designed outcomes, not failures.
+* The submitted demo is intentionally lightweight and local; production seams are stated explicitly rather than presented as completed deployment work.
+* The important reliability claim is not that the system can never be wrong. It is that important failure modes are represented, tested, observable, and designed to fail closed where evidence is insufficient.
+

@@ -27,16 +27,27 @@ class IntegrationTestCore5(unittest.TestCase):
         # Use SQLite for tests (Phase 1 verified)
         cls.repo = SQLiteKnowledgeRepository()
 
-        # Verify connection and schema
+        # A built index is a precondition, not a thing under test. Raising here
+        # turned a clean clone's first `python -m pytest -q tests/` into
+        # seventeen errors that read like a broken system and were a missing
+        # build step -- while every other suite in this repository runs against
+        # deterministic doubles and needs nothing. A skip says which command to
+        # run; an error does not, and the README promises that command works.
+        #
+        # Skip, never swallow: this is the same convention the PostgreSQL-gated
+        # tests use when ASSISTANT_POSTGRES_DSN is unset, and a skip is printed.
         try:
             snapshot = cls.repo.snapshot()
-            if not snapshot:
-                raise RuntimeError("No active index. Run: python -m assistant.index --build")
-            cls.snapshot_id = snapshot.snapshot_id
-            cls.retriever = Retriever(cls.repo)
-            cls.assistant = Assistant(cls.repo)
-        except Exception as e:
-            raise RuntimeError(f"Repository initialization failed or no index: {e}")
+        except Exception as exc:                            # noqa: BLE001
+            raise unittest.SkipTest(
+                f"no usable knowledge store ({exc}); "
+                "build one with: python -m assistant.index") from exc
+        if not snapshot:
+            raise unittest.SkipTest(
+                "no active index; build one with: python -m assistant.index")
+        cls.snapshot_id = snapshot.snapshot_id
+        cls.retriever = Retriever(cls.repo)
+        cls.assistant = Assistant(cls.repo)
 
         cls.session_store = session.SessionStore()
 

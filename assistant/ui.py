@@ -343,6 +343,24 @@ PAGE = """<!doctype html>
   .cannot {{ margin-top:10px; font-size:12px; color:var(--muted); }}
   .cannot ul {{ margin:4px 0 0; padding-left:18px; }}
 
+  .message.assistant .message-bubble.upload-note {{
+    background:var(--warnbg); color:var(--warn);
+    border:1px solid var(--warn);
+  }}
+  .message.assistant .message-bubble.error-bubble {{
+    background:var(--warnbg); color:var(--warn);
+    border:1px solid var(--warn);
+  }}
+  .error-id {{
+    margin-top:6px; font-size:11px; opacity:0.8;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }}
+  .sent-attachments {{ margin-top:6px; font-size:12px; opacity:0.85; }}
+  .attached-file {{ list-style:none; font-size:12px; color:var(--accent); }}
+  .attach-btn.has-files {{
+    border-color:var(--accent); color:var(--accent); font-weight:700;
+  }}
+
   #file-input {{ display:none; }}
 
   footer {{
@@ -404,6 +422,7 @@ PAGE = """<!doctype html>
 
 <footer>
   <div>Responses are grounded in Lime Green published material</div>
+  <div class="audience-display" id="index-meta">{meta}</div>
   <div class="audience-display" id="footer-audience">{footer_audience}</div>
 </footer>
 
@@ -418,6 +437,43 @@ function newChat() {{
 
 function triggerFileInput() {{
   document.getElementById('file-input').click();
+}}
+
+// What is attached, shown before it is sent.
+function showAttached() {{
+  const files = Array.from(document.getElementById('file-input').files);
+  const list = document.getElementById('upload-notes');
+  list.innerHTML = '';
+  document.querySelector('.attach-btn').classList.toggle('has-files', files.length > 0);
+  files.forEach(file => {{
+    const li = document.createElement('li');
+    li.className = 'attached-file';
+    li.textContent = '📎 ' + file.name;
+    list.appendChild(li);
+  }});
+}}
+
+function clearAttached() {{
+  document.getElementById('upload-notes').innerHTML = '';
+  document.querySelector('.attach-btn').classList.remove('has-files');
+}}
+
+function showThinking(hasImages) {{
+  const container = document.getElementById('chat-messages');
+  if (container.querySelector('.landing')) {{ container.innerHTML = ''; }}
+  const el = document.createElement('div');
+  el.className = 'thinking';
+  el.id = 'thinking';
+  el.textContent = hasImages
+    ? 'Reading the photograph and searching Lime Green sources'
+    : 'Searching Lime Green sources';
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function hideThinking() {{
+  const el = document.getElementById('thinking');
+  if (el) el.remove();
 }}
 
 function sendMessage() {{
@@ -441,10 +497,12 @@ function sendMessage() {{
   input.value = '';
   input.focus();
   document.getElementById('file-input').value = '';
+  clearAttached();
 
   // Send to server
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
+  showThinking(hasImages);
 
   if (hasImages) {{
     // Use FormData for image upload
@@ -460,8 +518,8 @@ function sendMessage() {{
     }})
     .then(r => r.json())
     .then(data => handleResponse(data))
-    .catch(err => addMessage('assistant', 'Error: ' + err.message))
-    .finally(() => btn.disabled = false);
+    .catch(err => showError(err.message))
+    .finally(() => {{ hideThinking(); btn.disabled = false; }});
   }} else {{
     // Use GET for text-only
     const q = encodeURIComponent(question);
@@ -470,8 +528,8 @@ function sendMessage() {{
     }})
     .then(r => r.json())
     .then(data => handleResponse(data))
-    .catch(err => addMessage('assistant', 'Error: ' + err.message))
-    .finally(() => btn.disabled = false);
+    .catch(err => showError(err.message))
+    .finally(() => {{ hideThinking(); btn.disabled = false; }});
   }}
 }}
 
@@ -483,13 +541,27 @@ function addMessage(role, text, attachments) {{
   }}
   const msgEl = document.createElement('div');
   msgEl.className = 'message ' + role;
-  let html = '<div class="message-bubble">' + escapeHtml(text);
+  let inner = escapeHtml(text);
   if (attachments && attachments.length > 0) {{
-    html += '<div class="attached">&#128206; ' +
-            attachments.map(escapeHtml).join(', ') + '</div>';
+    inner += '<div class="sent-attachments">📎 ' +
+             attachments.map(escapeHtml).join(', ') + '</div>';
   }}
-  msgEl.innerHTML = html + '</div>';
+  msgEl.innerHTML = '<div class="message-bubble">' + inner + '</div>';
   container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function showError(message, correlationId) {{
+  const container = document.getElementById('chat-messages');
+  if (container.querySelector('.landing')) {{ container.innerHTML = ''; }}
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  let inner = '<div class="message-bubble error-bubble">' + escapeHtml(message);
+  if (correlationId) {{
+    inner += '<div class="error-id">reference ' + escapeHtml(correlationId) + '</div>';
+  }}
+  el.innerHTML = inner + '</div>';
+  container.appendChild(el);
   container.scrollTop = container.scrollHeight;
 }}
 
@@ -565,8 +637,12 @@ function renderPerception(perception, container) {{
 }}
 
 function handleResponse(data) {{
+  if (data.error) {{
+    showError(data.error, data.correlation_id);
+    return;
+  }}
   if (!data.parts || data.parts.length === 0) {{
-    addMessage('assistant', 'No response received.');
+    showError('No answer came back for that question.', data.correlation_id);
     return;
   }}
 
@@ -595,7 +671,7 @@ function renderAnswer(answer, uploadNotes) {{
     uploadNotes.forEach(note => {{
       const noteEl = document.createElement('div');
       noteEl.className = 'message assistant';
-      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      noteEl.innerHTML = '<div class="message-bubble upload-note">' + escapeHtml(note) + '</div>';
       container.appendChild(noteEl);
     }});
   }}
@@ -670,7 +746,7 @@ function renderRefusal(answer, uploadNotes) {{
     uploadNotes.forEach(note => {{
       const noteEl = document.createElement('div');
       noteEl.className = 'message assistant';
-      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      noteEl.innerHTML = '<div class="message-bubble upload-note">' + escapeHtml(note) + '</div>';
       container.appendChild(noteEl);
     }});
   }}
@@ -746,6 +822,8 @@ function escapeHtml(text) {{
   }};
   return text.replace(/[&<>"']/g, m => map[m]);
 }}
+
+document.getElementById('file-input').addEventListener('change', showAttached);
 
 // Enter key to send
 document.getElementById('question-input').addEventListener('keydown', (e) => {{
@@ -1271,6 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
         page = PAGE.format(
             initial_content=initial_content,
             audience_display=audience_display,
+            meta=_esc(self.meta),
             footer_audience=f"audience: {audience_display}")
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
