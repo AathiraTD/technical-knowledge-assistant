@@ -212,9 +212,13 @@ A five-passage compose on a question the model has not seen costs **35–90 s** 
 
 Full run on Windows with no `ASSISTANT_POSTGRES_DSN`: see the table below. **Known failures are listed rather than hidden**, because a suite whose failures are undocumented is not evidence.
 
+Measured 17 September 2026, Python 3.13 on Windows ARM64, Ollama running, index built:
+
+**`19 failed, 1390 passed, 77 skipped, 3 xfailed in 691.71s`**
+
 | Group | Count | Status |
 |---|---|---|
-| `tests/` overall | 1368 passed, 77 skipped | The 77 skips are PostgreSQL-gated and Docker-gated; a skip is printed, never swallowed |
+| `tests/` overall | 1390 passed, 77 skipped, 3 xfailed, **19 failed, 0 errors** | Was 1368 passed with 17 failures *and 17 errors*. The 77 skips are PostgreSQL-gated and Docker-gated; a skip is printed, never swallowed |
 | `tests/e2e/` surface | **8 passed** (7m25s) | Cookie, session, upload boundary, rendered citation, audience, correlation id → trace |
 | `tests/e2e/` demo journeys | **11 smoke passed** | Journeys A–H in `tests/e2e/test_demo_journeys.py`. `-m smoke` is the fast pre-flight subset (no generation); the rest are marked `slow` and compose or perceive |
 | `tests/test_ui_server.py` | **10 known failures** | These assert the *previous* plain-text UI, replaced by the chat interface. The behaviour they describe changed; the tests did not. Diagnosed, not rewritten — see [Known issues](#known-issues-in-this-branch) |
