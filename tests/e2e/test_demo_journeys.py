@@ -63,13 +63,29 @@ from .conftest import (
 # model call even when the question itself never reaches retrieval. On a
 # processor with no graphics card that is minutes; the default Playwright
 # timeout of thirty seconds fails the test while the server is still working.
-PERCEPTION_TIMEOUT = 300_000
-COMPOSE_TIMEOUT = 420_000
+#
+# **These are sized for a loaded machine, not a quiet one, and that distinction
+# was measured.** The first version used the timings taken against an idle
+# server -- 60 s for a routed question, 180 s for a retrieval -- and the smoke
+# subset passed on them consistently. The full suite did not: five tests timed
+# out, two of which pass every time in smoke. Nothing was broken. Twenty-seven
+# browser tests back to back keep Ollama saturated, models get evicted and
+# reloaded between cases, and a question that answers in 20 s on a quiet box
+# takes several times that behind a 300-second perception call.
+#
+# A timeout is only useful if exceeding it means something is actually wrong, so
+# these are set well above the worst observed case rather than just above the
+# typical one. They cost nothing when the system is healthy -- a passing test
+# never waits for its timeout -- and the alternative is a suite that fails at
+# random and teaches everyone to re-run it.
+PERCEPTION_TIMEOUT = 600_000
+COMPOSE_TIMEOUT = 600_000
 # Retrieval without generation: the question is embedded and the store is
 # searched, so this pays for the embedding model but not for the generation one.
-RETRIEVAL_TIMEOUT = 180_000
-# The policy gate answers from the routing table with neither.
-ROUTED_TIMEOUT = 60_000
+RETRIEVAL_TIMEOUT = 300_000
+# The policy gate answers from the routing table with neither. Still generous:
+# the first request after a model eviction pays for the reload.
+ROUTED_TIMEOUT = 120_000
 
 
 # --------------------------------------------------------------------- A. RAG
