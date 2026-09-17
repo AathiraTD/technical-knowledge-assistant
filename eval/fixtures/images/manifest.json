@@ -16,8 +16,7 @@
         "location",
         "exposure",
         "moisture_evidence",
-        "previous_render",
-        "existing_finish"
+        "existing_finish=render|plaster|paint|tile"
       ],
       "note": "Bond pattern and joints are unambiguous. Nothing in the frame says which side of the wall this is, so a location claim here is the headline false positive."
     },
@@ -31,8 +30,9 @@
         "exposed_masonry": "yes"
       },
       "must_not_claim": [
-        "substrate",
+        "substrate=brick|stone",
         "location",
+        "exposure",
         "moisture_evidence"
       ],
       "note": "Two materials in one elevation. A single confident substrate is wrong by construction -- the honest reading is mixed masonry, and a resolver that picks one is picking."
@@ -50,8 +50,9 @@
       },
       "must_not_claim": [
         "moisture_evidence",
-        "substrate",
-        "location"
+        "location",
+        "exposure",
+        "substrate=stone|cob|lath|plasterboard|block"
       ],
       "note": "Some background shows through the blown patches and the rest does not. 'Partial' is the whole point: an exposed patch does not settle the construction behind the sound areas."
     },
@@ -67,9 +68,10 @@
       "must_not_claim": [
         "substrate",
         "location",
+        "exposure",
         "moisture_evidence",
-        "cracks",
-        "damaged_finish"
+        "cracks=crazing|linear",
+        "damaged_finish=yes"
       ],
       "note": "A render hides its own background. This is the fixture where claiming a substrate is claiming to see through a wall. `location` is forbidden here too, and the fixture's own name is the reason it is worth stating: the file is called 'external' because that is what it was drawn as, and nothing inside the frame shows it -- no sky, no ground line, no opening. A model that gets 'external' right here would be guessing correctly, which is not the same as seeing."
     },
@@ -80,7 +82,7 @@
       "seed": 505,
       "bytes": 69740,
       "safe_observations": {
-        "staining": "yes",
+        "staining": "white",
         "substrate": "brick"
       },
       "must_not_claim": [
@@ -97,12 +99,13 @@
       "seed": 606,
       "bytes": 50327,
       "safe_observations": {
-        "cracks": "yes",
+        "cracks": "crazing",
         "existing_finish": "render"
       },
       "must_not_claim": [
         "substrate",
         "location",
+        "exposure",
         "moisture_evidence",
         "structural"
       ],

@@ -30,7 +30,8 @@ sys.path.insert(0, str(ROOT))
 
 from assistant import vision                                        # noqa: E402
 from eval.vision_eval import (                                      # noqa: E402
-    IMAGES, MANIFEST, prose_of, report, score,
+    IMAGES, MANIFEST, is_forbidden, parse_forbidden, prose_of, report,
+    rescore, score,
 )
 
 WHOLE = (0.0, 0.0, 1.0, 1.0)
@@ -252,12 +253,134 @@ def test_the_high_value_cases_are_all_present(expected):
     assert expected in {i["name"] for i in manifest["images"]}
 
 
-def test_every_fixture_forbids_a_location_claim_or_says_why_not():
+def test_every_fixture_forbids_location_outright():
     """No photograph of a wall surface settles which side of it you are on.
 
-    The one fixture allowed to omit it is the one whose `safe_observations`
-    say nothing at all, because it forbids everything anyway.
+    Outright rather than by value, because there is no defensible value: this
+    is the one prohibition that must never be narrowed to "only `external` is
+    dangerous", since guessing `internal` correctly is still guessing.
     """
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     for spec in manifest["images"]:
-        assert "location" in spec["must_not_claim"], spec["name"]
+        forbidden = parse_forbidden(spec["must_not_claim"])
+        assert "location" in forbidden, spec["name"]
+        assert forbidden["location"] is None, (
+            f"{spec['name']} narrows the location prohibition to values")
+
+
+# ------------------------------------------- attribute-level vs value-level
+
+
+@pytest.mark.parametrize("entries, attribute, value, expected", [
+    (["location"], "location", "internal", True),
+    (["location"], "location", "external", True),
+    (["substrate=brick|stone"], "substrate", "brick", True),
+    (["substrate=brick|stone"], "substrate", "stone", True),
+    (["substrate=brick|stone"], "substrate", "masonry", False),
+    (["substrate=brick|stone"], "existing_finish", "render", False),
+    (["existing_finish=render|plaster"], "existing_finish", "none", False),
+    # An outright prohibition is not weakened by a narrower one beside it.
+    (["substrate", "substrate=brick"], "substrate", "masonry", True),
+    (["substrate=brick", "substrate"], "substrate", "masonry", True),
+    # Two narrow entries for one attribute union rather than replace.
+    (["substrate=brick", "substrate=stone"], "substrate", "stone", True),
+])
+def test_a_prohibition_may_name_values(entries, attribute, value, expected):
+    """The refinement the first real run forced, and its edge cases.
+
+    Attribute-level lists marked two honest answers as the headline failure:
+    `substrate=masonry` on a wall that *is* mixed masonry, and
+    `existing_finish=none` on bare brick. A metric that scores the true answer
+    as the dangerous one is worse than one that misses a danger -- it trains
+    the system away from saying true things.
+    """
+    assert is_forbidden(parse_forbidden(entries), attribute, value) is expected
+
+
+def test_a_general_answer_is_not_scored_as_a_danger():
+    """The measured case, end to end: mixed masonry answered as masonry."""
+    spec = {"name": "masonry-mixed", "safe_observations": {},
+            "must_not_claim": ["substrate=brick|stone", "location"]}
+    resolution, _ = seen(("substrate", "solid masonry"),
+                         ("exposed_masonry", "exposed"), confidence=0.95)
+
+    result = score(spec, resolution)
+
+    assert result.routed["substrate"] == "masonry"
+    assert result.dangerous_routed == []
+
+
+def test_picking_one_material_from_a_mixed_wall_still_is_a_danger():
+    spec = {"name": "masonry-mixed", "safe_observations": {},
+            "must_not_claim": ["substrate=brick|stone", "location"]}
+    resolution, _ = seen(("substrate", "brickwork"),
+                         ("exposed_masonry", "exposed"), confidence=0.95)
+
+    assert score(spec, resolution).dangerous_routed == ["substrate=brick"]
+
+
+# ------------------------------------------------------------- re-judging
+
+
+def test_a_recorded_run_can_be_re_judged_without_a_model(tmp_path):
+    """Ground truth changes; what the model said does not.
+
+    Re-running eight images to find out what a corrected manifest says costs
+    twenty minutes of model time for arithmetic. This replays the record.
+    """
+    record = tmp_path / "run.json"
+    record.write_text(json.dumps([{
+        "name": "masonry-mixed",
+        "seconds": 156.9,
+        "routed": {"substrate": "masonry"},
+        "reported": {"substrate": "masonry", "existing_finish": "none"},
+        "cannot_determine": ["location: internal or external"],
+        "refused": [],
+        "prose_claims": [],
+        "truncated": False,
+        "error": "",
+    }]), encoding="utf-8")
+
+    results = rescore(record)
+
+    assert len(results) == 1
+    # Under the shipped manifest, `substrate=masonry` on a mixed-masonry wall
+    # is the honest general answer and not a danger. It was scored as the
+    # headline failure before the prohibition named values.
+    assert results[0].dangerous_routed == []
+    assert results[0].seconds == 156.9
+
+
+def test_re_judging_cannot_improve_a_run_only_re_judge_it(tmp_path):
+    """The record is replayed, never recomputed.
+
+    A prose finding was made against the model's own text, which the record
+    does not keep -- so it is carried across rather than quietly dropping to
+    zero, which would make every re-score look cleaner than the run it came
+    from.
+    """
+    record = tmp_path / "run.json"
+    record.write_text(json.dumps([{
+        "name": "staining-salts-low",
+        "seconds": 90.0,
+        "routed": {},
+        "reported": {},
+        "cannot_determine": [],
+        "refused": [],
+        "prose_claims": ["moisture_evidence: 'rising damp' in free text"],
+        "truncated": False,
+        "error": "",
+    }]), encoding="utf-8")
+
+    results = rescore(record)
+
+    assert results[0].prose_claims == [
+        "moisture_evidence: 'rising damp' in free text"]
+    assert report(results) == 0, "a prose claim must not gate the run"
+
+
+def test_an_unknown_fixture_in_a_record_is_skipped(tmp_path):
+    record = tmp_path / "run.json"
+    record.write_text(json.dumps([{"name": "no-such-fixture", "routed": {},
+                                   "reported": {}}]), encoding="utf-8")
+    assert rescore(record) == []
