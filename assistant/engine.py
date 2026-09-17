@@ -47,6 +47,12 @@ _BRAND = "lime green"
 # ordinary vocabulary, not the thing the question was about.
 DISTINCTIVE_CAP = 6
 
+# How many passages the relevance gate's second chance may add. Small on
+# purpose: this fires when the gate is about to refuse, so it is recovering a
+# specific published fact, not widening the evidence base. Three is the same
+# bound the targeted coverage lookup uses.
+GATE_SECOND_CHANCE = 3
+
 # How many recovered passages may join the ranked ones. Small on purpose: this
 # is a repair for a specific miss, not a second retrieval, and the five ranked
 # passages are still what the answer is mostly built from.
@@ -934,6 +940,49 @@ class Assistant:
             hits = hits + missed
             obs.event("missed_evidence", added=len(missed), product=named,
                       reason="the question named something no passage contained")
+
+        # The relevance gate's own second chance, which `Router.unsupported_
+        # terms` has always existed to offer and which nothing has ever called.
+        # Its docstring says the case exactly: "semantic retrieval having failed
+        # to surface the term is exactly the moment a lexical lookup is worth
+        # doing: the corpus may well publish the answer in a passage the
+        # embedding did not rank."
+        #
+        # Measured, on a question a customer asks constantly. "What is the
+        # coverage of Solo Onecoat?" refused at step 4, and the Solo datasheet
+        # publishes "Each bag will cover approximately 1.5m2 at 10mm thick, or
+        # 3m2 at 5mm thick" -- in a section headed "Storage / Coverage" whose
+        # text is mostly about storage, so a bare coverage question embeds away
+        # from it and it ranked tenth. Neither existing second pass recovers it:
+        # the coverage lookup above fires only on calculation words, which this
+        # question has none of, and `_missed_evidence` drops "coverage" as
+        # insufficiently distinctive, which it is -- every datasheet has a
+        # coverage section. Both are right about their own rule and the answer
+        # still went missing between them.
+        #
+        # Scoped to the product the question named, and skipped entirely when it
+        # named none: an unscoped lexical sweep for "coverage" returns every
+        # datasheet's coverage section, which is the cross-product contamination
+        # this system spends a check catching. A question with no product and no
+        # retrieved evidence for its term is a question the gate should refuse.
+        #
+        # This buys coverage and spends no safety. The gate still refuses when
+        # the lookup finds nothing, which is what keeps the near-miss refusals
+        # refusing: nothing in the corpus states a U-value for Solo, so nothing
+        # comes back and step 4 fires exactly as before.
+        unsupported = self.router.unsupported_terms(part, hits, carried)
+        if unsupported and named:
+            known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
+            recovered = [
+                h for h in self.retriever.find_property(
+                    named, tuple(unsupported), audiences=audiences,
+                    limit=GATE_SECOND_CHANCE)
+                if (h.chunk.canonical_url, h.chunk.chunk_index) not in known]
+            if recovered:
+                hits = hits + recovered
+                obs.event("gate_second_chance", added=len(recovered),
+                          product=named, terms=len(unsupported),
+                          reason="the asked-for term was in no retrieved passage")
 
         with obs.span("route") as routing:
             decision = self.router.route(

@@ -375,3 +375,268 @@ def test_the_two_orchestration_paths_refuse_the_same_way(near_miss_assistant):
     assert (bool([s for _q, a in direct.parts for s in a.sources])
             == bool([s for _q, a in graphed.parts for s in a.sources])), (
         "one path cited its hand-off passage and the other did not")
+
+
+# ------------------------- 5. the same datasheet, indexed under two names
+
+from assistant.retrieve import OVERFETCH, _distinct            # noqa: E402
+
+# The shape the real corpus has, because the site publishes two product pages
+# for one product -- /products/duro and /products/duro-plaster, /products/ultra
+# and /products/ultra-render -- and each links the same datasheet under a
+# different filename. The crawl is faithful, so the index holds both with
+# identical content hashes under two different product names. Thirty-six of 552
+# passages live in a duplicated document, and they belong to the two products a
+# demonstration is most likely to ask about.
+APPLICATION = ("Use Duro in temperatures of 5C and rising or 30C and falling. "
+               "Apply in coats of around 10 to 15mm, or thicker if dubbing out.")
+
+
+def test_an_identical_passage_under_a_second_product_name_is_dropped():
+    """Measured: a fifth of the evidence was a passage the model already had.
+
+    Asked "what temperature range can Duro be applied in", the five retrieved
+    passages came back as Duro's Application section at rank 1 and the *same*
+    Application section, from the duplicate document, at rank 5. That is what
+    `per_document_cap` exists to prevent -- one document crowding out the
+    others -- defeated by the document appearing twice under two names.
+    """
+    hits = [
+        passage(APPLICATION, product="Duro Lime Render Base Coat",
+                section="Application", url="https://example/duro-tds",
+                score=0.752),
+        passage("Add approximately 4.5 to 5 litres of water per bag.",
+                product="Duro Lime Render Base Coat", section="Mixing",
+                url="https://example/duro-tds", score=0.658),
+        passage(APPLICATION, product="Lime plaster", section="Application",
+                url="https://example/duro-tds-1", score=0.640),
+    ]
+    kept = _distinct(hits)
+    assert [h.chunk.canonical_url for h in kept] == [
+        "https://example/duro-tds", "https://example/duro-tds"]
+
+
+def test_two_sections_of_one_datasheet_both_survive():
+    """Identity is the passage, not the document.
+
+    Dropping by document would throw away the Mixing section because the
+    Application section came from the same sheet, which is the opposite of what
+    is wanted: a datasheet answering two halves of a question with two sections
+    is the good case.
+    """
+    hits = [
+        passage("first section", section="Mixing", url="https://example/d"),
+        passage("second section", section="Application", url="https://example/d"),
+    ]
+    assert len(_distinct(hits)) == 2
+
+
+def test_only_exact_repetition_counts_as_duplication():
+    """A near-duplicate is a judgement this layer must not make.
+
+    Silently dropping evidence on a similarity threshold is how a retrieval
+    layer starts deciding what an answer may rest on. Whitespace and case are
+    normalised because a PDF wraps mid-sentence; nothing else is.
+    """
+    hits = [
+        passage("Apply in coats of around 10 to 15mm.", url="https://example/a"),
+        passage("APPLY  in coats\nof around 10 to 15mm.", url="https://example/b"),
+        passage("Apply in coats of around 10 to 20mm.", url="https://example/c"),
+    ]
+    kept = _distinct(hits)
+    assert [h.chunk.canonical_url for h in kept] == [
+        "https://example/a", "https://example/c"]
+
+
+def test_the_repository_is_asked_wider_so_the_freed_slot_is_refilled():
+    """Dropping a duplicate must not mean returning fewer passages.
+
+    Without the over-fetch this would trade a repeated passage for an empty
+    slot, which costs the model evidence rather than giving it better evidence.
+    """
+    assert OVERFETCH >= 2
+
+
+# ------------------- 6. the relevance gate's second chance, finally called
+
+COVERAGE_SECTION = ("Store in a dry, draft free area free from any damp. Shelf "
+                    "life is 6 months. Use bags within 2 days once open. Each "
+                    "bag will cover approximately 1.5m2 at 10mm thick, or 3m2 "
+                    "at 5mm thick.")
+DESCRIPTION = ("Solo is a one-coat lime plaster for interior use on masonry, "
+               "undercoats and boards, designed to be labour saving.")
+SOLO_SHEET = "https://example.invalid/solo-tds"
+
+
+@pytest.fixture
+def coverage_assistant(tmp_path, monkeypatch):
+    """A store where the passage that answers the question cannot be reached
+    by similarity, because its embedding points the other way.
+
+    That is the real corpus's shape, not a contrivance. The Solo datasheet
+    publishes "Each bag will cover approximately 1.5m2 at 10mm thick, or 3m2 at
+    5mm thick" in a section headed "Storage / Coverage" whose text is mostly
+    about storage -- shelf life, keeping bags dry -- so a bare coverage question
+    embeds away from it. Measured against the built index it ranked *tenth*,
+    below the same datasheet's Disclaimer and Finishing sections, and never
+    entered the five passages the answer sees.
+    """
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: _unit(0))
+
+    def stub(*_a, **_k):
+        return ("Each bag will cover approximately 1.5m2 at 10mm thick, "
+                "or 3m2 at 5mm thick [2]."), 0.01
+
+    monkeypatch.setattr(ollama, "generate", stub)
+
+    documents_extra: list = []
+    versions_extra: list = []
+    document = Document(canonical_url=SOLO_SHEET, title="Solo datasheet",
+                        document_type="datasheet", authority=1,
+                        product="Solo", link_text="Datasheet")
+    version = DocumentVersion(canonical_url=SOLO_SHEET, version=1,
+                              content_hash="h1", source_path="cache/solo.pdf",
+                              first_seen_at="2026-01-01",
+                              fetched_at="2026-01-01T00:00:00Z",
+                              checked_at="2026-01-01T00:00:00Z")
+    chunks = [
+        # Reachable: the query embeds onto this one.
+        Chunk(canonical_url=SOLO_SHEET, version=1, chunk_index=0,
+              section="Description", content=DESCRIPTION, product="Solo",
+              document_type="datasheet", authority=1,
+              source_date="2024-07-01", embedding=_unit(0)),
+        # Unreachable by similarity, and the only passage that answers.
+        Chunk(canonical_url=SOLO_SHEET, version=1, chunk_index=1,
+              section="Storage / Coverage", content=COVERAGE_SECTION,
+              product="Solo", document_type="datasheet", authority=1,
+              source_date="2024-07-01", embedding=_unit(7)),
+    ]
+    # Enough other material to score between the two, so the coverage passage
+    # falls outside the window the answer sees. Without this the corpus is
+    # small enough that everything is retrieved, the gate is satisfied by the
+    # passage it was supposed to have missed, and the test proves nothing --
+    # which is what the first version of it did.
+    #
+    # None of these mentions covering anything, and all belong to other
+    # products, so they can neither satisfy the gate nor be reached by a lookup
+    # scoped to Solo.
+    middling = [0.0] * DIMS
+    middling[0], middling[1] = 0.5, 0.8660254
+    for i, other in enumerate(("Duro", "Forte", "Ultra", "Tradirend",
+                               "Natural Finish"), 2):
+        url = f"https://example.invalid/{other.lower().replace(' ', '-')}"
+        documents_extra.append(
+            Document(canonical_url=url, title=f"{other} datasheet",
+                     document_type="datasheet", authority=1, product=other,
+                     link_text="Datasheet"))
+        versions_extra.append(
+            DocumentVersion(canonical_url=url, version=1,
+                            content_hash=f"h{i}", source_path=f"cache/{i}.pdf",
+                            first_seen_at="2026-01-01",
+                            fetched_at="2026-01-01T00:00:00Z",
+                            checked_at="2026-01-01T00:00:00Z"))
+        chunks.append(
+            Chunk(canonical_url=url, version=1, chunk_index=0,
+                  section="Description",
+                  content=f"{other} is a lime product for masonry backgrounds.",
+                  product=other, document_type="datasheet", authority=1,
+                  source_date="2024-07-01", embedding=list(middling)))
+    snapshot = Snapshot(
+        snapshot_id="snap-coverage", created_at="2026-01-01T00:00:00Z",
+        embedding_model=ollama.EMBED_MODEL,
+        embedding_dimensions=ollama.EMBED_DIMENSIONS,
+        chunking_version=CHUNKING_VERSION, document_count=1,
+        chunk_count=len(chunks),
+        notes={"products": ["Solo", "Duro", "Forte", "Ultra", "Tradirend",
+                            "Natural Finish"], "colours": [], "merchants": [],
+               "contact": {"phone": "0800 538 5746",
+                           "hours": "Mon - Fri 9:00am - 5:00pm"}})
+    repo = SQLiteKnowledgeRepository(tmp_path / "index" / "knowledge.db")
+    repo.publish([document] + documents_extra, [version] + versions_extra,
+                 chunks, snapshot, [])
+    try:
+        yield Assistant(repo, cache=False, log=False)
+    finally:
+        repo.close()
+
+
+def _find_property_calls(assistant, question: str) -> list[tuple]:
+    """Every term tuple the targeted lexical lookup was asked for.
+
+    Spying on the seam rather than on the answer, because three different
+    passes call `find_property` and the question being pinned is *which one
+    ran*. They are distinguishable by shape: `_missed_evidence` asks for one
+    rare word at a time, the calculation edge asks for `COVERAGE_TERMS`, and the
+    relevance gate's second chance asks for the whole term list the gate refused
+    on. Only the last of those carries several terms for a question with no
+    calculation words in it.
+    """
+    calls: list[tuple] = []
+    original = assistant.retriever.find_property
+
+    def spy(product, terms, audiences=("public",), limit=3):
+        calls.append(tuple(terms))
+        return original(product, terms, audiences=audiences, limit=limit)
+
+    assistant.retriever.find_property = spy
+    try:
+        assistant.ask(question)
+    finally:
+        assistant.retriever.find_property = original
+    return calls
+
+
+def test_the_gate_second_chance_looks_up_the_terms_it_refused_on(
+        coverage_assistant):
+    """`Router.unsupported_terms` existed to offer this and nothing called it.
+
+    Its own docstring names the case exactly -- "semantic retrieval having
+    failed to surface the term is exactly the moment a lexical lookup is worth
+    doing" -- and it was dead code in the product, reachable only from a test.
+
+    Neither existing pass covers it. The targeted coverage lookup fires only on
+    calculation words, and "what is the coverage of Solo" has none. And
+    `_missed_evidence` declines because its rule is rarity and, scoped to
+    "solo", "coverage" comes back over the distinctiveness cap -- it matches
+    Solo Primer, Solo Mesh and Solo Filler too. Both rules are right about
+    themselves and the answer still went missing between them. Measured on the
+    built index, the question refused at step 4 while the Solo datasheet
+    publishes "Each bag will cover approximately 1.5m2 at 10mm thick".
+    """
+    calls = _find_property_calls(coverage_assistant,
+                                 "What is the coverage of Solo?")
+    gated = [t for t in calls if len(t) > 1 and any("cover" in x for x in t)]
+    assert gated, (
+        f"the gate's terms were never looked up lexically; calls were {calls}")
+
+
+def test_the_second_chance_does_not_rescue_a_genuine_absence(
+        coverage_assistant):
+    """The near-miss must still refuse, or the fix has spent safety for reach.
+
+    Nothing in this corpus states a U-value, so the lexical lookup finds
+    nothing and step 4 fires exactly as before. This is the assertion that
+    separates "recovered a published fact the embedding missed" from "loosened
+    the gate".
+    """
+    reply = coverage_assistant.ask("What is the U-value of Solo?")
+    answers = [a for _q, a in reply.parts]
+
+    assert all(a.refused for a in answers)
+    assert [a.diagnostics.get("step") for a in answers] == ["4"], (
+        [a.diagnostics.get("step") for a in answers])
+
+
+def test_the_second_chance_is_scoped_to_the_product_that_was_named(
+        coverage_assistant):
+    """A question naming no product gets no lexical sweep from this pass.
+
+    An unscoped lookup for "coverage" returns every datasheet's coverage
+    section, which is the cross-product contamination this system spends a
+    check catching. A question naming no product and retrieving nothing for its
+    term is one the gate should refuse.
+    """
+    calls = _find_property_calls(coverage_assistant, "What is the coverage?")
+    gated = [t for t in calls if len(t) > 1 and any("cover" in x for x in t)]
+    assert not gated, (
+        f"a question naming no product ran a scoped lexical sweep: {calls}")
