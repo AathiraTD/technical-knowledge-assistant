@@ -333,8 +333,11 @@ PAGE = """<!doctype html>
     font-size:11px; color:var(--muted);
   }}
 
-  .upload-note {{ background:var(--warnbg); color:var(--warn); }}
-  .error-bubble {{
+  .message.assistant .message-bubble.upload-note {{
+    background:var(--warnbg); color:var(--warn);
+    border:1px solid var(--warn);
+  }}
+  .message.assistant .message-bubble.error-bubble {{
     background:var(--warnbg); color:var(--warn);
     border:1px solid var(--warn);
   }}
@@ -344,7 +347,6 @@ PAGE = """<!doctype html>
   }}
   .sent-attachments {{ margin-top:6px; font-size:12px; opacity:0.85; }}
   .attached-file {{ list-style:none; font-size:12px; color:var(--accent); }}
-  .upload-notes {{ margin:4px 0 0; padding:0; }}
   .attach-btn.has-files {{
     border-color:var(--accent); color:var(--accent); font-weight:700;
   }}
