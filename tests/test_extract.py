@@ -346,6 +346,59 @@ def test_product_links_are_harvested_for_the_real_names_check():
     assert "Duro Lime Plaster Base Coat" in products
 
 
+def test_editorial_prose_does_not_donate_a_generic_noun_as_a_product_name():
+    """The shape the breathability article actually publishes.
+
+    A sentence links the words it is already using -- "...a lime plaster..." --
+    to the Solo product page, and the anchor text is a category, not a name.
+    Harvested as one, **"lime plaster" became a canonical product**, and the
+    recommendation guard then found it inside the ordinary sentence "Ultra is a
+    general purpose lime plaster", read that as recommending an unapproved
+    product, and threw away a correct cited answer.
+
+    The link is genuine and the page is right to publish it. What must not
+    happen is the phrase entering the registry check 5 and the guard trust.
+    """
+    html = ('<div class="blog-body"><p>Use a breathable '
+            '<a href="/products/lime-plaster/solo-onecoat-plaster"> lime plaster</a> '
+            'on solid walls, or see '
+            '<a href="/products/lime-mortar/ashlar-mortar">here in our gallery</a>.'
+            '</p></div>')
+    products = harvest(soup_of(html))["products"]
+
+    assert products == [], products
+
+
+def test_a_product_named_in_prose_is_still_harvested():
+    """Prose links are where the brand-prefixed names come from, so they stay.
+
+    The obvious fix -- harvest only from the navigation block -- was measured
+    and rejected: it costs twenty real names, including every one below. The
+    signal is the text, not the place.
+    """
+    html = ('<div class="blog-body"><p>We recommend '
+            '<a href="/products/insulation/ultra">Lime Green Ultra</a>, '
+            '<a href="/products/lime-plaster/duro-plaster">Duro</a>, '
+            '<a href="/products/lime-plaster/solo-onecoat-plaster">Solo</a> and '
+            '<a href="/products/lime-render/natural-finish">Natural Finish</a>.'
+            '</p></div>')
+    products = harvest(soup_of(html))["products"]
+
+    assert products == ["Lime Green Ultra", "Duro", "Solo", "Natural Finish"]
+
+
+def test_the_capital_rule_is_not_applied_to_colours():
+    """Colours are a different link shape and were never the defect.
+
+    Widening a rule past the case it was measured against is how the next
+    defect arrives, so this pins that the colour path is untouched -- a
+    lower-case colour label would still be harvested.
+    """
+    html = '<a href="/products-by-colour/york">york</a>'
+
+    assert harvest(soup_of(html))["colours"] == ["york"]
+
+
 def test_a_sentence_length_link_label_is_not_taken_as_a_name():
     """A call-to-action link under a colour URL would otherwise become a colour the assistant may name."""
     html = ('<a href="/products-by-colour/york">York</a>'
