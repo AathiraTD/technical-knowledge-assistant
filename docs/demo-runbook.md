@@ -457,6 +457,23 @@ Recorded so nobody mistakes them for new:
   repository without `thread_safe=True` and reproduces the SQLite cross-thread
   error that the shipping UI already avoids by passing it. A test-side defect.
 
+  **This file also does three things the rest of the suite does not**, and they
+  are worth knowing before a demonstration rather than after. `setUpClass` calls
+  `SQLiteKnowledgeRepository()` with no path, which is **the real
+  `data/index/knowledge.db`** — not a temporary one. It then calls **real
+  Ollama**, so single tests take 87 s and 143 s. And because the engine records
+  spans, **running it writes test turns into the database the demonstration
+  serves from**: they appear in `python -m assistant.trace` with `source
+  unknown`, interleaved with real ones.
+
+  None of that is dangerous — spans are append-only and the index is not
+  modified — but it does mean **the trace list is noisy after a full test run**.
+  Before demonstrating, either ask a fresh question and use its correlation id,
+  or read the list and ignore the `unknown` rows. It is also why CI cannot run
+  this file: `CLAUDE.md` requires deterministic CI independent of live models,
+  and on a machine with no index or no Ollama `setUpClass` raises and every test
+  in the class errors — which is exactly the 17 errors above.
+
 Baseline before this work: **1368 passed, 17 failed, 85 skipped, 17 errors.**
 This work adds **12** passing tests — ten in
 [`tests/test_readiness_endpoint.py`](../tests/test_readiness_endpoint.py) and
