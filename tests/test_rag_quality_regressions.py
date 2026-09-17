@@ -1,4 +1,4 @@
-"""Regressions for three retrieval-quality defects found by the gold set.
+"""Regressions for four answer-quality defects found by the gold set.
 
 Each of these was measured against the real 94-document index before it was
 fixed, and each is reproduced here against fixtures so it fails in a second
@@ -23,6 +23,13 @@ The defects, in the order they appear below:
    three passages printed under "what the site does publish on this" were the
    pages selling the product rather than the technical note explaining the
    defect.
+
+4. **The recommendation guard swallowed a refusal.** A refusal quotes the
+   closest published passage, and published prose reads as advice; the guard
+   cannot tell a quotation from a recommendation, so it replaced a correct
+   cited hand-off with a bare one. The two orchestration paths then gave
+   different answers to the same question -- and the half of the canonical
+   evaluation that would have noticed calls the path no customer uses.
 """
 
 from __future__ import annotations
@@ -233,3 +240,138 @@ def test_a_corpus_of_only_product_pages_still_prints_product_pages():
     chosen = _diagnostic_passages(hits)
     assert [h.chunk.canonical_url for h in chosen] == [
         "https://example/0", "https://example/1", "https://example/2"]
+
+
+# ------------------------------ 4. the guard must not swallow a refusal
+
+import pytest                                                       # noqa: E402
+
+from assistant import candidates as cand                            # noqa: E402
+from assistant import ollama                                        # noqa: E402
+from assistant.conversation import TurnInput                        # noqa: E402
+from assistant.engine import Assistant                              # noqa: E402
+from assistant.index import CHUNKING_VERSION                        # noqa: E402
+from assistant.model import DocumentVersion, Snapshot               # noqa: E402
+from assistant.store import SQLiteKnowledgeRepository               # noqa: E402
+
+# The three conditions that make the guard fire on a refusal, which is why the
+# fixture is built here rather than borrowed. All three hold in the real corpus
+# and none of them holds in the small two-product store the other guard tests
+# use, which is precisely why the defect survived those tests.
+#
+#   1. the refusal quotes a passage naming a registry product;
+#   2. that passage reads as advice, because datasheets are written to be
+#      followed -- "you should use" is a sentence a datasheet contains;
+#   3. the question's own wording does not match the registry's spelling, so
+#      `resolved.product` is empty and the asked-about exemption does not apply.
+#
+# Condition 3 is the one that looks like an accident and is not: the site writes
+# "Solo Onecoat Lime Plaster" and customers write "Solo Onecoat plaster".
+CATALOGUE = "Solo Onecoat Lime Plaster"
+SHEET = "https://example.invalid/solo-onecoat"
+ADVICE = ("Over old lime plasters you should use Solo Onecoat Lime Plaster "
+          "applied as a skim finish approximately 4mm thick.")
+DIMS = 1024
+
+
+def _unit(axis: int) -> list[float]:
+    v = [0.0] * DIMS
+    v[axis] = 1.0
+    return v
+
+
+@pytest.fixture
+def near_miss_assistant(tmp_path, monkeypatch):
+    """A store whose only passage is advice, and a question about a property it
+    does not publish. The relevance gate must refuse, with the passage shown."""
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: _unit(0))
+
+    def no_generation(*_a, **_k):
+        raise AssertionError("a refusal must not call the model")
+
+    monkeypatch.setattr(ollama, "generate", no_generation)
+
+    document = Document(canonical_url=SHEET, title=f"{CATALOGUE} datasheet",
+                        document_type="datasheet", authority=1,
+                        product=CATALOGUE, link_text="Datasheet")
+    version = DocumentVersion(canonical_url=SHEET, version=1, content_hash="h1",
+                              source_path="cache/solo.pdf",
+                              first_seen_at="2026-01-01",
+                              fetched_at="2026-01-01T00:00:00Z",
+                              checked_at="2026-01-01T00:00:00Z")
+    passage_ = Chunk(canonical_url=SHEET, version=1, chunk_index=0,
+                     section="Preparation & Application", content=ADVICE,
+                     product=CATALOGUE, document_type="datasheet", authority=1,
+                     source_date="2024-07-01", embedding=_unit(0))
+    snapshot = Snapshot(
+        snapshot_id="snap-near-miss", created_at="2026-01-01T00:00:00Z",
+        embedding_model=ollama.EMBED_MODEL,
+        embedding_dimensions=ollama.EMBED_DIMENSIONS,
+        chunking_version=CHUNKING_VERSION, document_count=1, chunk_count=1,
+        notes={"products": [CATALOGUE], "colours": [], "merchants": [],
+               "contact": {"phone": "0800 538 5746",
+                           "hours": "Mon - Fri 9:00am - 5:00pm"}})
+    repo = SQLiteKnowledgeRepository(tmp_path / "index" / "knowledge.db")
+    repo.publish([document], [version], [passage_], snapshot, [])
+    try:
+        yield Assistant(repo, cache=False, log=False)
+    finally:
+        repo.close()
+
+
+def _turn(question: str, session: str = "s1") -> TurnInput:
+    turn = TurnInput(raw_question=question, turn_index=1, session_id=session)
+    object.__setattr__(turn, "history", "")
+    return turn
+
+
+NEAR_MISS = "What is the U-value of Solo Onecoat plaster?"
+
+
+def test_the_fixture_reproduces_the_conditions_the_defect_needed():
+    """Guard the guard's test: if these stop holding, the test below is empty."""
+    assert cand.recommends_a_product(ADVICE, [CATALOGUE]) == ["solo onecoat lime plaster"]
+    assert CATALOGUE.lower() not in NEAR_MISS.lower(), (
+        "the question must not name the product the registry's way, or the "
+        "asked-about exemption applies and nothing is being tested")
+
+
+def test_a_refusal_keeps_the_passage_it_cited(near_miss_assistant):
+    """The defect: the guard discarded a correct, cited hand-off.
+
+    A refusal prints the hand-off template plus the closest published passage,
+    quoted and cited -- the value decision 9 says a refusal must carry.
+    `recommends_a_product` reads text rather than provenance, so it cannot tell
+    that quotation from a recommendation this system made, and the guard then
+    substituted a bare refusal citing nothing.
+
+    The trade was strictly negative: a refusal replaced by a worse refusal buys
+    no safety, because a refusal is already the fail-closed outcome.
+    """
+    reply, _state = near_miss_assistant.ask_turn(_turn(NEAR_MISS))
+    answers = [a for _q, a in reply.parts]
+
+    assert answers and all(a.refused for a in answers)
+    assert any(a.sources for a in answers), (
+        "the refusal cited nothing: the guard discarded the hand-off passage")
+    assert [a.diagnostics.get("step") for a in answers] == ["4"], (
+        [a.diagnostics.get("step") for a in answers])
+
+
+def test_the_two_orchestration_paths_refuse_the_same_way(near_miss_assistant):
+    """`ask` and `ask_turn` must not disagree about the same question.
+
+    The situations half of the canonical evaluation calls `ask`; every surface a
+    customer touches -- the page, the CLI conversation -- calls `ask_turn`. A
+    divergence means the evaluation is measuring a path nobody uses, which is
+    exactly how this survived: situation S2 passed throughout.
+    """
+    direct = near_miss_assistant.ask(NEAR_MISS)
+    graphed, _state = near_miss_assistant.ask_turn(_turn(NEAR_MISS, "s2"))
+
+    assert direct.refused == graphed.refused
+    assert ([a.diagnostics.get("step") for _q, a in direct.parts]
+            == [a.diagnostics.get("step") for _q, a in graphed.parts])
+    assert (bool([s for _q, a in direct.parts for s in a.sources])
+            == bool([s for _q, a in graphed.parts for s in a.sources])), (
+        "one path cited its hand-off passage and the other did not")
