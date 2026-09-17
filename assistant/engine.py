@@ -587,9 +587,18 @@ class Assistant:
                     resumed = final.get("resumed_question") or ""
                     if resumed:
                         reply.question = resumed
+                    # What this turn's photographs showed, attached to every
+                    # part so a surface can print it beside the answer without
+                    # reaching into the graph. Set only when there was an
+                    # upload, so its presence *is* the signal that a photograph
+                    # was read -- a page can distinguish "looked and saw
+                    # nothing" from "was sent nothing".
+                    perception = final.get("perception") or {}
                     for part, answer in produced:
                         answer.diagnostics["correlation_id"] = cid
                         answer.diagnostics["trace_id"] = obs.trace_id()
+                        if perception:
+                            answer.diagnostics["perception"] = perception
                         if resolved is not None:
                             answer.diagnostics.setdefault(
                                 "intent", resolved.intent.value)

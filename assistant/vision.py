@@ -1265,6 +1265,107 @@ def slots_from_images(images, model: str = "", **kwargs) -> Resolution:
     return resolve(observe_many(images, model=model, **kwargs))
 
 
+def perception_report(resolution) -> dict:
+    """A `Resolution` as plain data, for a checkpoint, a surface or a log.
+
+    Primitives only, deliberately. The turn state is checkpointed, and a
+    checkpointer that has to rehydrate `ResolvedAttribute`, `Observation`,
+    `Certainty` and `Status` to show somebody what a photograph showed is four
+    more types in the serialisation allow-list for no gain. A channel adapter
+    rendering this its own way wants strings anyway.
+
+    **Every claim travels with its certainty and, where there is one, the
+    reason it was not acted on.** They are in one record rather than two
+    because a caller able to read the value without the hedge would turn a
+    reading into a fact, which is the failure this module is arranged to
+    prevent. `summary` is the pre-rendered English for a surface that wants to
+    print it without deciding the wording itself.
+
+    Every field is read with a fallback, and that is deliberate rather than
+    defensive habit. `Services.vision` is an injected provider -- a test double
+    today, a channel adapter's own perception service tomorrow -- and the
+    contract it satisfies is "returns something with slots and attributes". A
+    report that raised on a provider without `certainty` would mean **a
+    reporting function could fail an answer**, which inverts this module's one
+    rule: failure reduces coverage, not safety. A minimal provider gets a
+    thinner report and a working answer.
+    """
+    routed_slots = dict(getattr(resolution, "slots", {}) or {})
+
+    def certainty_of(attribute) -> Certainty:
+        stated = getattr(attribute, "certainty", None)
+        if isinstance(stated, Certainty):
+            return stated
+        # A provider that does not compute one: derive it from what it did
+        # give, the same way `ResolvedAttribute` would have.
+        if getattr(attribute, "slot", "") in routed_slots:
+            return Certainty.OBSERVED
+        confidence = float(getattr(attribute, "confidence", 0.0) or 0.0)
+        if confidence >= HIGH_FLOOR:
+            return Certainty.LIKELY
+        if confidence >= LIKELY_FLOOR:
+            return Certainty.LIKELY
+        if confidence >= UNCERTAIN_FLOOR:
+            return Certainty.UNCERTAIN
+        return Certainty.CANNOT_DETERMINE
+
+    def one(attribute) -> dict:
+        sources = tuple(getattr(attribute, "sources", ()) or ())
+        status = getattr(attribute, "status", None)
+        return {
+            "attribute": getattr(attribute, "slot", ""),
+            "value": getattr(attribute, "value", ""),
+            "certainty": certainty_of(attribute).value,
+            "status": getattr(status, "value", "") if status else "",
+            "confidence": round(float(
+                getattr(attribute, "confidence", 0.0) or 0.0), 3),
+            "routed": bool(getattr(attribute, "routed",
+                                   getattr(attribute, "slot", "") in routed_slots)),
+            "withheld": getattr(attribute, "withheld", "") or "",
+            "images": sorted({o.image for o in sources
+                              if getattr(o, "image", "")}),
+            "regions": [list(o.region) for o in sources
+                        if getattr(o, "region", None)],
+            # The model's own words, carried for a person to read and never
+            # read by anything that decides. Capped: this is shown on a page.
+            "notes": [o.observation for o in sources
+                      if getattr(o, "observation", "")][:2],
+        }
+
+    order = {Certainty.OBSERVED.value: 0, Certainty.LIKELY.value: 1,
+             Certainty.UNCERTAIN.value: 2, Certainty.CANNOT_DETERMINE.value: 3}
+    rows = sorted((one(a) for a in getattr(resolution, "attributes", ()) or ()),
+                  key=lambda r: (order.get(r["certainty"], 9), r["attribute"]))
+
+    phrase = {
+        Certainty.OBSERVED.value: "{value} ({slot}) -- clearly visible",
+        Certainty.LIKELY.value: "{value} ({slot}) -- likely, but not certain "
+                                "from the photograph",
+        Certainty.UNCERTAIN.value: "{slot} -- uncertain; the photograph is not "
+                                   "clear enough to rely on",
+        Certainty.CANNOT_DETERMINE.value: "{slot} -- cannot be determined from "
+                                          "the photograph",
+    }
+    summary = []
+    for row in rows:
+        summary.append(phrase[row["certainty"]].format(
+            slot=row["attribute"].replace("_", " "),
+            value=str(row["value"]).replace("_", " ")))
+        if row["withheld"]:
+            summary.append(f"    ({row['withheld']})")
+
+    return {
+        "routed": routed_slots,
+        "observations": rows,
+        "cannot_determine_from_image": list(
+            getattr(resolution, "cannot_determine_from_image", ()) or ()),
+        "summary": summary,
+        "discarded": list(getattr(resolution, "discarded", ()) or ()),
+        "refused_attributes": list(getattr(resolution, "refused", ()) or ()),
+        "truncated": bool(getattr(resolution, "truncated", False)),
+    }
+
+
 def encode_image(data: bytes) -> str:
     """Base64 as Ollama's `images` field wants it. Exposed for callers and tests."""
     return base64.b64encode(data).decode("ascii")

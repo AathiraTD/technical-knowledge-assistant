@@ -238,6 +238,12 @@ class TurnState(TypedDict, total=False):
 
     facts: Annotated[dict, merge_facts]
     observations: Annotated[list, merge_observations]
+    # What *this turn's* upload showed, as plain data. Reset by
+    # `understand_turn` like every other per-turn field: a checkpointed channel
+    # keeps its value until something overwrites it, and a turn with no
+    # photograph reporting the previous turn's reading would tell somebody the
+    # assistant had just looked at an image it was not sent.
+    perception: dict
     understanding: Any
     resolved: Any
     missing: list
@@ -310,6 +316,9 @@ def build(services: Services):
                 # wearing the last answer's `compose` path.
                 "answers": [],
                 "answer": None,
+                # See `TurnState.perception`. A turn that sends no photograph
+                # must not inherit the last one's reading.
+                "perception": {},
                 "trace": ResetTrace(["understand_turn"])}
 
     def case_boundary(state: TurnState) -> dict:
@@ -396,11 +405,28 @@ def build(services: Services):
                               image_ref=_image_for(resolution, slot))
             for slot, value in resolution.slots.items()
         }
+        # What the photograph showed, as plain data, for the surface to print.
+        # Separate from `facts` on purpose: `facts` is what the system will
+        # *act* on and holds only the readings that routed, while this holds
+        # everything that was seen, each with its certainty and -- where it did
+        # not route -- the reason. A customer asking "what can you reliably
+        # identify from the photo" is asking for the second one, and answering
+        # it out of the first would report a rendered wall as showing nothing.
+        from .vision import perception_report
+
+        report = perception_report(resolution)
+        if report.get("refused_attributes"):
+            obs.event("vision_refused_attribute",
+                      attributes=report["refused_attributes"])
+        if report.get("truncated"):
+            obs.event("vision_truncated", images=len(images))
+
         # Merged through the same reducer as everything else, which is what
         # makes "a photograph never overwrites a person" structural rather
         # than a rule this node has to remember.
         return {"facts": observed,
                 "observations": list(observed.values()),
+                "perception": report,
                 "trace": [f"analyse_images:{len(observed)}"]}
 
     def determine_missing_information(state: TurnState) -> dict:
