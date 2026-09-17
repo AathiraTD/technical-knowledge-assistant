@@ -16,6 +16,7 @@ exists to avoid. So it is checked once, at load, and raised rather than warned.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from . import observability as obs
@@ -50,6 +51,51 @@ QUERY_INSTRUCTION = (
 
 def as_query(question: str) -> str:
     return QUERY_INSTRUCTION + question
+
+
+# How much wider than `top_k` to ask the repository for, so that dropping a
+# duplicate frees the slot for a different document instead of simply returning
+# fewer passages. Two is enough for a corpus whose duplication is pairwise.
+OVERFETCH = 2
+
+_COLLAPSE = re.compile(r"\s+")
+
+
+def _distinct(hits: list[Retrieved]) -> list[Retrieved]:
+    """Drop a passage whose text a higher-ranked passage already carries.
+
+    The site publishes two product pages for the same product -- `/products/duro`
+    and `/products/duro-plaster`, `/products/ultra` and `/products/ultra-render`
+    -- and each links the *same* datasheet under a different filename. The crawl
+    is faithful, so the index holds `Duro TDS.pdf` and `Duro TDS_1.pdf` with
+    identical content hashes under two product names, and the same for Ultra.
+    Thirty-six of 552 passages live in a duplicated document, and they belong to
+    the two products a demonstration is most likely to ask about.
+
+    The cost is a retrieval slot. Asked "what temperature range can Duro be
+    applied in", the five passages came back as Duro's Application section at
+    rank 1 and *the same Application section* at rank 5, so a fifth of the
+    evidence put in front of the model was a passage it already had. That is
+    exactly what `per_document_cap` exists to prevent -- one document crowding
+    out the others -- defeated by the document appearing twice under two names.
+    So this applies the same principle where the cap cannot see it.
+
+    Identity is the passage text, not the document, because two sections of one
+    datasheet are legitimately different and must both survive. Comparison
+    collapses whitespace and case and nothing else: a near-duplicate that
+    differs by a word is a judgement call this should not be making, and silently
+    dropping evidence on a similarity threshold is how a retrieval layer starts
+    deciding what the answer may rest on.
+    """
+    seen: set[str] = set()
+    kept: list[Retrieved] = []
+    for hit in hits:
+        key = _COLLAPSE.sub(" ", hit.chunk.content).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(hit)
+    return kept
 
 
 class Retriever:
@@ -151,10 +197,18 @@ class Retriever:
                 search["db.system"] = ("postgresql"
                                        if "Postgres" in type(self.repo).__name__
                                        else "sqlite")
-                hits = self.repo.retrieve_for(RetrievalRequest(
-                    embedding=vector, audiences=audiences, top_k=top_k,
+                # Asked wider than `top_k` so that dropping a duplicate frees
+                # the slot for a different document rather than returning four
+                # passages where five were wanted. The repository still applies
+                # the audience filter and the per-document cap over everything
+                # it returns, so nothing here reaches a row it should not.
+                found = self.repo.retrieve_for(RetrievalRequest(
+                    embedding=vector, audiences=audiences,
+                    top_k=top_k * OVERFETCH,
                     per_document_cap=per_document_cap, product=product))
+                hits = _distinct(found)[:top_k]
                 search["returned"] = len(hits)
+                search["duplicates_dropped"] = len(found) - len(_distinct(found))
             record["hits"] = len(hits)
             record["returned"] = len(hits)
             record["top_score"] = self.best_score(hits)

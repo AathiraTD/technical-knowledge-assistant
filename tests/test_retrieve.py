@@ -27,8 +27,10 @@ from assistant.repository import RetrievalRequest               # noqa: E402
 from assistant.repository import IndexMismatch                # noqa: E402
 from assistant.retrieve import (                              # noqa: E402
     DEFAULT_THRESHOLD,
+    OVERFETCH,
     QUERY_INSTRUCTION,
     Retriever,
+    _distinct,
     as_query,
 )
 from assistant.store import SQLiteKnowledgeRepository         # noqa: E402
@@ -277,13 +279,21 @@ def test_the_named_product_reaches_the_repository_as_a_request(monkeypatch):
         return original(request)
 
     repo.retrieve_for = spy
-    Retriever(repo).search("how much water", audiences=("trade",), top_k=4,
-                           per_document_cap=2, product="Solo")
+    hits = Retriever(repo).search("how much water", audiences=("trade",),
+                                  top_k=4, per_document_cap=2, product="Solo")
     request = seen["request"]
     assert isinstance(request, RetrievalRequest)
     assert request.product == "Solo"
     assert request.audiences == ("trade",)
-    assert request.top_k == 4 and request.per_document_cap == 2
+    # The cap travels through unchanged; `top_k` deliberately does not. The
+    # repository is asked wider than the caller wants so that dropping a
+    # duplicate passage frees the slot for a different document instead of
+    # returning three passages where four were asked for -- see `_distinct`.
+    # What the *caller* gets is still bounded by what it asked for, which is the
+    # property this line now states.
+    assert request.per_document_cap == 2
+    assert request.top_k == 4 * OVERFETCH
+    assert len(hits) <= 4
 
 
 # ------------------------------------------ the targeted second retrieval
