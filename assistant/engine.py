@@ -1002,6 +1002,19 @@ class Assistant:
             routing["reason"] = decision.reason
             routing["top_score"] = hits[0].score if hits else 0.0
             routing["slots"] = sorted(decision.slots)
+        # The product the question named, on the decision rather than only in
+        # the diagnostics written at the end. The evidence binding needs it:
+        # without it, a claim about Ultra can be bound to whichever passage
+        # states the property most directly, and a Warmshell system guide
+        # states thicknesses and suitability as clearly as anything Ultra
+        # publishes. The graph path already supplied it through `carried`; this
+        # makes the two paths agree rather than leaving the binding weaker on
+        # whichever one a caller happens to be on.
+        #
+        # `setdefault`, so the router's own merge still wins: `carried` is
+        # merged *under* what the question says, and this must not overturn it.
+        if named:
+            decision.slots.setdefault("product", named)
         # Annotated after the routing decision rather than passed into it,
         # because nothing in the router reads an origin and nothing in it
         # should: the path a question takes must not depend on whether a

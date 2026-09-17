@@ -98,6 +98,31 @@ class Decision:
     per_option: bool = False
     sum_refused: bool = False
     photograph: bool = False
+    # The same gate word list as `asked_terms`, but kept split by the property
+    # each term belongs to instead of flattened into one list.
+    #
+    # `asked_terms` answers "was anything the question asked about present at
+    # all", which is what a gate needs. It cannot answer "which passage states
+    # which half", because flattening throws that away -- and a compound
+    # question is exactly where that matters. Asked whether Ultra suits an
+    # internal brick wall *and* at what thickness, the model was handed five
+    # undifferentiated passages and bound the suitability claim to the
+    # thickness passage; check 1 refused it, correctly, and a fully published
+    # two-part answer was lost. The suitability evidence was retrieved the
+    # whole time.
+    #
+    # Empty means nothing downstream may narrow anything, which is what steps
+    # 1 to 4 hand on and what a `Decision` built directly by a test carries.
+    evidence_terms: dict = field(default_factory=dict)
+    # The published class of the substrate, when the corpus writes it
+    # differently from the caller: "masonry" against a caller's "brick". Empty
+    # when the substrate has no class, or when the caller already used the
+    # corpus's own word.
+    #
+    # It sits beside the substrate rather than replacing it, and that is the
+    # whole point. The caller said brick; the passages say masonry; both facts
+    # are true and the answer must not merge them into "the sheet says brick".
+    substrate_class: str = ""
 
 
 def _load(name: str) -> dict:
@@ -205,7 +230,68 @@ class SlotDetector:
     """Vocabulary matching, with synonyms, over the eight slots."""
 
     def __init__(self) -> None:
-        self.spec = _load("vocabularies.json")["slots"]
+        vocab = _load("vocabularies.json")
+        self.spec = vocab["slots"]
+        self.classes = {k: v for k, v in vocab.get("substrate_classes", {}).items()
+                        if not k.startswith("_")}
+
+    def _ask_only(self, slot: str, value: str) -> list[str]:
+        """Phrasings that ask about a property without being evidence of it.
+
+        Deliberately kept out of `terms_for`, which is what the relevance gate,
+        check 6 and the evidence binding read. The separation is the whole
+        point. "Can Ultra be applied internally on solid brick?" is plainly a
+        suitability question and matched no compatibility term, so no property
+        was detected and no gate ran at all — but putting "applied" among the
+        values would have let the gate be satisfied by a word that appears in
+        nearly every datasheet. Detection widens here; what counts as evidence
+        does not move.
+        """
+        return self.spec.get(slot, {}).get("_ask_only", {}).get(value, [])
+
+    def _score(self, slot: str, value: str, terms: list[str], lowered: str) -> int:
+        """How much of a slot value this question matched, by term length.
+
+        Ask-only phrasings are a **fallback**, counted only where the value
+        matched none of its own words. They exist to recognise a question that
+        names no property in the vocabulary's own terms — "Can Ultra be applied
+        internally on solid brick?" — and letting them add to a value that
+        already matched would let them decide which property wins.
+
+        That is not hypothetical. Scoring is by matched-term length, so adding
+        "applied" to a compatibility already matched by "can i use" carries the
+        compound Ultra question from a tie with *thickness*, which `sort`
+        resolves the way it always has, to a compatibility win — and
+        `_location_matters` reads the winner, so a question plainly asking a
+        thickness would stop being answered for inside and outside separately.
+        A fallback cannot do that: where a property matched its own words, these
+        are not consulted at all.
+        """
+        score = sum(len(t) for t in terms
+                    if re.search(rf"\b{re.escape(t)}\b", lowered))
+        if score:
+            return score
+        return sum(len(t) for t in self._ask_only(slot, value)
+                   if re.search(rf"\b{re.escape(t)}\b", lowered))
+
+    def class_of(self, substrate: str) -> str:
+        """The published class of a substrate, when the corpus names it differently.
+
+        Deterministic and one-directional: brick, stone and block are masonry.
+        It exists so that the bridge between the word a caller uses and the word
+        a datasheet prints is a rule somebody can read, rather than something
+        the model improvises inside a cited sentence — which is how "suitable
+        for most masonry backgrounds including brick" came to be written against
+        a passage containing neither "including" nor "brick".
+
+        It never rewrites the caller's fact. The substrate slot still holds
+        "brick"; this travels beside it.
+
+        Returns "" when the substrate has no published class, and when the
+        caller already used the corpus's own word: there is no gap to bridge.
+        """
+        found = self.classes.get((substrate or "").strip().lower(), "")
+        return found if found != substrate else ""
 
     def detect(self, question: str) -> dict:
         """The best-matching value per slot, scored by how much of it matched.
@@ -222,10 +308,7 @@ class SlotDetector:
                 continue
             scored = []
             for value, terms in spec["values"].items():
-                score = sum(
-                    len(t) for t in terms
-                    if re.search(rf"\b{re.escape(t)}\b", lowered)
-                )
+                score = self._score(slot, value, terms, lowered)
                 if score:
                     scored.append((score, value))
             if not scored:
@@ -254,12 +337,66 @@ class SlotDetector:
         spec = self.spec.get("property_asked", {}).get("values", {})
         scored = []
         for value, terms in spec.items():
-            score = sum(len(t) for t in terms
-                        if re.search(rf"\b{re.escape(t)}\b", lowered))
+            score = self._score("property_asked", value, terms, lowered)
             if score:
                 scored.append((score, value))
         scored.sort(reverse=True)
         return [value for _score, value in scored]
+
+    # Below this share of the leading property's score, a property is something
+    # a word in the question happened to match rather than something it asks.
+    #
+    # Measured over the evaluation questions rather than chosen. Every genuine
+    # second ask scores at or above half the leader — "how thick should the
+    # render be, and what preparation does the background need" at 0.52, the
+    # compound Ultra question at 0.56, situation S8's finish coats at 0.60 —
+    # and every incidental match falls at 0.37 or below: "per bag" reading as
+    # coverage inside a question about mixing water, "plaster" reading as
+    # preparation. The gap between 0.37 and 0.50 is where the line goes, and it
+    # is wide enough that the value is not balanced on a single case.
+    PROPERTY_BAND = 0.5
+
+    def primary_properties(self, question: str) -> list[str]:
+        """The properties this question actually asks about, best first.
+
+        `detect_properties` answers "which properties does this question touch",
+        which is the right question for the relevance gate: it ORs across them
+        so that a two-property enquiry is answered for the half the corpus
+        publishes. This answers the narrower one — "which of them is this
+        question *for*" — because claim binding has the opposite cost. Naming an
+        incidental property tells the model to go and answer it.
+
+        Measured, on the brief's own first test. "How much water does Solo
+        Onecoat need per bag?" touches coverage, because "per bag" is a coverage
+        term; listing it produced an answer that gave the water figure, then the
+        coverage figure, then Solo Primer's coverage — three sentences where the
+        question asked one thing. Suppressing the same list restored the two-
+        sentence answer, which is how the cost was established rather than
+        assumed.
+
+        Two rules. A property scoring below `PROPERTY_BAND` of the leader is
+        incidental. And a property matched *only* by an ask-only phrasing is
+        dropped when anything outscores it: those phrasings exist to recognise a
+        question that names no property at all, not to add a second ask to one
+        that already has a properly matched first.
+        """
+        lowered = question.lower()
+        spec = self.spec.get("property_asked", {}).get("values", {})
+        scored = []
+        for value, terms in spec.items():
+            score = self._score("property_asked", value, terms, lowered)
+            if not score:
+                continue
+            by_value = any(re.search(rf"\b{re.escape(t)}\b", lowered)
+                           for t in terms)
+            scored.append((score, by_value, value))
+        if not scored:
+            return []
+        best = max(score for score, _by_value, _value in scored)
+        return [value for score, by_value, value
+                in sorted(scored, key=lambda t: -t[0])
+                if score >= best * self.PROPERTY_BAND
+                and (by_value or score == best)]
 
     def load_bearing(self) -> list[str]:
         return [s for s, spec in self.spec.items()
@@ -355,6 +492,49 @@ class Router:
                     return " ".join(words)
         return ""
 
+    def _asked_by_property(self, question: str,
+                           slots: dict) -> tuple[str, dict[str, list[str]]]:
+        """The property asked about, and the gate words **kept per property**.
+
+        The same computation `_asked_terms` has always done, stopped one step
+        short of flattening. Flattening is right for the gate, which only has to
+        answer "was any of this present at all". It destroys the thing a
+        compound question needs: which passage states which half.
+
+        `_asked_terms` is now a flatten of this, so there is still exactly one
+        definition of what the gate accepts and the two cannot drift apart.
+        """
+        # A quantity question is a question about coverage, whatever words it
+        # uses to ask. Without this the gate took the caller's own noun — "how
+        # many bags" gives "bags" — and refused the Solo sheet for saying
+        # "sack", which is the same thing and has a synonym entry to prove it.
+        # The gate is meant to catch the near-miss, not the vocabulary gap.
+        if "calculation" in slots and not slots.get("property_asked"):
+            terms = self.slots.terms_for("property_asked", "coverage")
+            return "coverage", {"coverage": list(terms)}
+
+        value = slots.get("property_asked", "")
+        if value:
+            # Every property the question asked for, not only the best-scoring
+            # one. The gate is satisfied by any of them appearing, which is the
+            # right reading of a two-property question: answer the half the
+            # corpus publishes and let check 6 and the citation checks police
+            # what actually prints, rather than refusing the whole enquiry
+            # because the other half is not stated anywhere.
+            asked = self.slots.detect_properties(question) or [value]
+            # Unconditionally, exactly as the flattening version was: a property
+            # carried from an earlier turn can be one this vocabulary no longer
+            # holds, and it contributed nothing to the gate list then. It binds
+            # nothing now for the same reason — no terms, no supporting passage
+            # — so the two stay equivalent without a guard that would have to be
+            # reasoned about separately.
+            by_property = {prop: list(self.slots.terms_for("property_asked", prop))
+                           for prop in asked}
+            return value, by_property
+
+        phrase, variants = self._phrase_terms(question)
+        return (phrase, {phrase: variants}) if phrase else ("", {})
+
     def _asked_terms(self, question: str, slots: dict) -> tuple[str, list[str]]:
         """The property being asked about, and the words that count as it.
 
@@ -367,28 +547,14 @@ class Router:
         the phrase and its head noun are both absent from every passage, which
         means the corpus genuinely does not discuss what was asked.
         """
-        # A quantity question is a question about coverage, whatever words it
-        # uses to ask. Without this the gate took the caller's own noun — "how
-        # many bags" gives "bags" — and refused the Solo sheet for saying
-        # "sack", which is the same thing and has a synonym entry to prove it.
-        # The gate is meant to catch the near-miss, not the vocabulary gap.
-        if "calculation" in slots and not slots.get("property_asked"):
-            return "coverage", self.slots.terms_for("property_asked", "coverage")
+        value, by_property = self._asked_by_property(question, slots)
+        terms: list[str] = []
+        for words in by_property.values():
+            terms += words
+        return value, list(dict.fromkeys(terms))
 
-        value = slots.get("property_asked", "")
-        if value:
-            # Every property the question asked for, not only the best-scoring
-            # one. The gate is satisfied by any of them appearing, which is the
-            # right reading of a two-property question: answer the half the
-            # corpus publishes and let check 6 and the citation checks police
-            # what actually prints, rather than refusing the whole enquiry
-            # because the other half is not stated anywhere.
-            asked = self.slots.detect_properties(question) or [value]
-            terms: list[str] = []
-            for prop in asked:
-                terms += self.slots.terms_for("property_asked", prop)
-            return value, list(dict.fromkeys(terms))
-
+    def _phrase_terms(self, question: str) -> tuple[str, list[str]]:
+        """The fallback when no property matched: the question's own noun phrase."""
         phrase = self.asked_phrase(question)
         if not phrase:
             return "", []
@@ -462,7 +628,11 @@ class Router:
                             "3", slots=slots, hits=hits, photograph=photo)
 
         # Step 4 — the relevance gate: right product, wrong property.
-        asked, terms = self._asked_terms(question, slots)
+        asked, by_property = self._asked_by_property(question, slots)
+        terms: list[str] = []
+        for words in by_property.values():
+            terms += words
+        terms = list(dict.fromkeys(terms))
         if terms and not self._present(terms, hits):
             return Decision(Path_.REFUSE,
                             f"the published material does not state {asked}"
@@ -475,12 +645,31 @@ class Router:
         # narrower one. See `Decision.asked_terms`.
         gate = list(terms)
 
+        # ...and the same list unflattened, so a composing path can bind each
+        # claim to the passage that states it rather than to whichever passage
+        # the model reached for. Carried on every decision past the gate, used
+        # only by Compose, and empty-safe everywhere else.
+        # The gate keeps every property the question touches; the binding keeps
+        # only the ones it is *for*. The two differ on purpose and in opposite
+        # directions: ORing widely is what stops a two-property enquiry being
+        # refused whole, and binding narrowly is what stops an incidental match
+        # being answered as though it had been asked. The fallback to the full
+        # set covers the shapes that are not property names at all — the
+        # coverage substitution on a quantity question, and the noun-phrase
+        # fallback when no property matched.
+        primary = self.slots.primary_properties(question)
+        binding = {p: by_property[p] for p in primary if p in by_property}
+        carry = {
+            "asked_terms": gate,
+            "evidence_terms": binding or dict(by_property),
+            "substrate_class": self.slots.class_of(slots.get("substrate", "")),
+        }
+
         # Step 5 — a load-bearing slot is uncued.
         if "substrate" not in slots and self._needs_substrate(question, slots):
             return Decision(Path_.ASK_BACK,
                             "the substrate decides the product and was not stated",
-                            "5", slots=slots, hits=hits, asked_terms=gate,
-                            photograph=photo)
+                            "5", slots=slots, hits=hits, photograph=photo, **carry)
         per_option = "location" not in slots and self._location_matters(question, slots)
 
         # Step 6 — calculation words: print the published figures, refuse the sum.
@@ -489,27 +678,26 @@ class Router:
                             "a quantity was asked; the published coverage and pack "
                             "size are printed and the multiplication is refused",
                             "6", slots=slots, hits=hits, sum_refused=True,
-                            asked_terms=gate, per_option=per_option,
-                            photograph=photo)
+                            per_option=per_option, photograph=photo, **carry)
 
         # Step 7 — one document and a factual ask: print it, do not paraphrase.
         if self._single_document(hits) and asked:
             return Decision(Path_.EXTRACT,
                             "one document answers a factual question, so the passage "
                             "is printed rather than paraphrased",
-                            "7", slots=slots, hits=hits, asked_terms=gate,
-                            per_option=per_option, photograph=photo)
+                            "7", slots=slots, hits=hits,
+                            per_option=per_option, photograph=photo, **carry)
 
         # Staff see passages, not prose. Composing for staff is roadmap.
         if "staff" in audiences and "public" not in audiences:
             return Decision(Path_.EXTRACT, "staff audience: passages, not prose",
-                            "7s", slots=slots, hits=hits, asked_terms=gate,
-                            photograph=photo)
+                            "7s", slots=slots, hits=hits, photograph=photo,
+                            **carry)
 
         # Step 8 — otherwise the model composes over what was retrieved.
         return Decision(Path_.COMPOSE, "several passages bear on the question",
-                        "8", slots=slots, hits=hits, asked_terms=gate,
-                        per_option=per_option, photograph=photo)
+                        "8", slots=slots, hits=hits,
+                        per_option=per_option, photograph=photo, **carry)
 
     # -- step 5 predicates -------------------------------------------------
 

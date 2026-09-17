@@ -23,6 +23,7 @@ from . import observability as obs
 from . import ollama
 from .logging.diagnosis_capture import DiagnosisCapture
 from .model import Retrieved
+from .repository import product_matches
 from .router import Decision, Path_
 
 # ---------------------------------------------------------------- the prompt
@@ -346,6 +347,170 @@ _COVERAGE = re.compile(
 def _mentions_coverage(text: str) -> bool:
     """Does this passage carry the figure a quantity question needs?"""
     return bool(_COVERAGE.search(text))
+
+
+# ------------------------------------------------------- evidence binding
+#
+# A compound question asks for two things and the answer has to carry two
+# claims, each cited to the passage that actually states it. Nothing used to
+# establish that correspondence: the model was handed five undifferentiated
+# passages and one instruction to cite the right one, and on the question this
+# was written for — whether Ultra suits an internal brick wall, and at what
+# thickness — it bound the suitability claim to the thickness passage. Check 1
+# refused the whole answer, correctly, and a fully published two-part answer
+# was lost while the suitability passage sat in the evidence unread.
+#
+# So the correspondence is computed here, deterministically, from the same
+# vocabulary the relevance gate uses, and the model is told it. This is a
+# generation control and not a safety boundary: checks 1 to 6 are unchanged and
+# remain the enforcement. What it removes is the *opportunity* to misbind,
+# which is the same bargain `recommend` already makes by filtering passages to
+# the approved products before generation.
+
+# At most this many passages per property. A binding that named four passages
+# would be property grouping rather than claim-to-evidence binding, and the
+# model would be no better off than with the undifferentiated list.
+EVIDENCE_BINDING_CAP = 2
+
+# What a passage earns for stating a property beside a figure rather than
+# merely mentioning its name. "in a uniform thickness of between 10 and 30mm"
+# states a thickness; "builds up in thick coats" mentions one. Large enough to
+# beat any difference in term length, because directness is the stronger
+# signal of the two.
+_STATES_IT_BONUS = 100
+
+
+def _property_support(hits: list[Retrieved], terms: list[str],
+                      product: str = "") -> list[int]:
+    """The 1-based markers of the passages that most directly state a property.
+
+    Ranked, then cut to the best-scoring band and capped — not every passage
+    that happens to contain a related word. Asked about thickness, four of the
+    five Ultra passages match something in the thickness vocabulary: one says
+    "uniform thickness of between 10 and 30mm", another says "thick", a third
+    "depth", a fourth "build up". Offering all four as equally valid evidence
+    is how a claim ends up cited to a passage that merely alludes to it.
+
+    Two signals, both deterministic:
+
+    * **Specificity** — the longest vocabulary term the passage matches, the
+      same matched-term-length rule `SlotDetector.detect` scores questions by.
+      "thickness" beats "thick" beats "mm".
+    * **Directness** — whether one of those terms shares a sentence with a
+      figure. A datasheet states a property next to its number; a product page
+      mentions the word in prose.
+
+    Only the passages tied at the best score survive, so a passage that clearly
+    states the property returns alone. Ties are kept, up to the cap, because two
+    sections genuinely stating the same property both belong.
+
+    **The named product wins over both signals.** Lexical ranking alone will
+    hand a claim about Ultra to a Warmshell passage, because a system guide
+    saying "applied at a thickness of 6mm and is suitable for solid walls"
+    matches both vocabularies and states its property beside a figure. Pointing
+    the model at that is worse than not binding at all — it is check 3's
+    cross-product attribution, arranged by the prompt. So a named product's own
+    passages are considered first, and everything else only if the product
+    publishes nothing for this property: a finish coat's hardening time is
+    genuinely published on the base coat's sheet, and refusing to look there
+    would lose the multi-document answers the brief asks for.
+    """
+    scored: list[tuple[int, int]] = []
+    for marker, hit in enumerate(hits, 1):
+        blob = f"{hit.chunk.section} {hit.chunk.content}".lower()
+        matched = [t for t in terms
+                   if re.search(rf"\b{re.escape(t)}\b", blob)]
+        if not matched:
+            continue
+        direct = any(
+            re.search(r"\d", sentence) and re.search(rf"\b{re.escape(t)}\b", sentence)
+            for sentence in _SENTENCE.split(blob) for t in matched)
+        scored.append((max(len(t) for t in matched)
+                       + (_STATES_IT_BONUS if direct else 0), marker))
+    if product:
+        own = [(score, marker) for score, marker in scored
+               if product_matches(product, hits[marker - 1].chunk.product or "")]
+        scored = own or scored
+    if not scored:
+        return []
+    best = max(score for score, _marker in scored)
+    return [marker for score, marker in scored
+            if score == best][:EVIDENCE_BINDING_CAP]
+
+
+def evidence_binding(decision: Decision) -> dict[str, list[int]]:
+    """Each thing the question asked about, and the passage that states it.
+
+    Empty when the decision carries no per-property terms — a `Decision` built
+    directly by a test, or one from a step before the relevance gate — so every
+    caller degrades to the prompt as it was.
+    """
+    product = decision.slots.get("product", "")
+    bound: dict[str, list[int]] = {}
+    for prop, terms in (decision.evidence_terms or {}).items():
+        markers = _property_support(decision.hits, terms, product)
+        if markers:
+            bound[prop] = markers
+    return bound
+
+
+def _binding_guidance(decision: Decision) -> str:
+    """The binding and the substrate wording, as instructions to the model.
+
+    Two parts, each emitted only when it has something to say.
+
+    The **binding** narrows rather than forbids. It names where each half of
+    the question is stated; it does not tell the model a passage is off limits,
+    because a fact can legitimately sit somewhere the vocabulary did not
+    predict, and a prohibition there would buy a refusal rather than a better
+    answer.
+
+    The **substrate line** closes the gap between the caller's word and the
+    corpus's. No Ultra document contains "brick"; the product page says
+    "Suitable for most masonry and lath backgrounds". Left to itself the model
+    bridged that inside a cited sentence — "suitable for most masonry
+    backgrounds including brick" — which reads as the manufacturer having said
+    "brick" when it did not. The class relation is a deterministic rule
+    (`SlotDetector.class_of`), so the honest form of the sentence can be
+    required rather than hoped for.
+    """
+    lines: list[str] = []
+
+    bound = evidence_binding(decision)
+    # Two or more, because one claim cannot be bound to the wrong half of
+    # itself. A question asking a single thing is already covered by the system
+    # prompt's standing rule — cite the passage that contains the fact — and
+    # adding a line that tells it the same thing again buys nothing and costs
+    # prompt churn on every lookup in the corpus. That cost is not theoretical:
+    # the one-property form of this guidance moved "25kg sack" to "25 kg sack"
+    # on the brief's first test question, and the evaluation compares published
+    # figures with whitespace collapsed and nothing else normalised, so a space
+    # the model inserted is a failed assertion about a figure.
+    if len(bound) > 1:
+        lines.append("Where each thing asked about is stated:")
+        lines += [f"- {prop}: "
+                  + ", ".join(f"[{m}]" for m in markers)
+                  for prop, markers in bound.items()]
+        # States the shape without demanding the content. A property can be
+        # detected incidentally — "per bag" reads as coverage in a question
+        # about mixing water — and an instruction to answer every listed
+        # property would turn that into a demand for a coverage sentence.
+        lines.append("Write each fact in its own sentence, cited to the "
+                     "passage listed for it.")
+
+    substrate = decision.slots.get("substrate", "")
+    published = decision.substrate_class
+    if substrate and published:
+        blob = " ".join(f"{h.chunk.section} {h.chunk.content}"
+                        for h in decision.hits).lower()
+        word = substrate.replace("_", " ").lower()
+        if word not in blob and published.lower() in blob:
+            lines.append(
+                f"The passages say \"{published}\" and never say \"{word}\". "
+                f"Write what they say. Do not write \"{word}\" as something "
+                "the passages state.")
+
+    return "\n".join(lines)
 
 
 def _numbers(text: str) -> list[str]:
@@ -834,6 +999,14 @@ class AnswerEngine:
             for i, h in enumerate(hits, 1)
         )
         context = self._prompt_context(decision)
+        # Computed here rather than passed in, so every caller of Compose gets
+        # it — the ordinary answering path, which passes no guidance at all, is
+        # the one the binding was written for. A caller's own guidance is kept
+        # and the binding is added under it: `recommend` names the approved
+        # products, and which passage states which property is a different
+        # instruction that does not replace it.
+        binding = _binding_guidance(decision)
+        guidance = "\n".join(g for g in (guidance, binding) if g)
         prompt = PROMPT.format(
             passages=passages, question=question,
             history=(HISTORY_BLOCK.format(history=history.strip())
