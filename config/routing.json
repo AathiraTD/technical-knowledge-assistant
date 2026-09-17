@@ -69,7 +69,9 @@
       "patterns": [
         "\\bstructural(ly)?\\b", "\\bload ?bearing\\b", "\\bsubsidence\\b",
         "\\bis it safe\\b", "\\bwill it collapse\\b", "\\bcrack.{0,30}\\bserious\\b",
-        "\\bstructural engineer\\b", "\\bmovement\\b.{0,20}\\bbuilding\\b"
+        "\\bstructural engineer\\b", "\\bmovement\\b.{0,20}\\bbuilding\\b",
+        "\\bis\\b[^?.]{0,25}\\b(house|home|wall|walls|building|chimney|gable|structure|roof|ceiling|lintel|property|foundations?|brickwork|masonry)\\b[^?.]{0,25}\\bsafe\\b",
+        "\\bwill\\b[^?.]{0,30}\\b(collapse|fall down|give way|come down)\\b"
       ],
       "referral": "A structural judgement is not something published material can support, and not something this assistant will attempt.",
       "next_step": "This needs a structural engineer or a qualified surveyor who can inspect the building. For product questions once that assessment exists, contact {contact} ({hours}).",
@@ -80,7 +82,9 @@
       "patterns": [
         "\\bsign ?off\\b", "\\bcertif(y|ied|icate|ication)\\b", "\\bapprove(d|s)? (it|this|my)\\b",
         "\\bbuilding control\\b.{0,20}\\b(accept|approve)", "\\bdoes (it|this) comply\\b",
-        "\\bpart [a-l]\\b.{0,25}\\bcomply\\b", "\\bmeets? (the )?regulations?\\b"
+        "\\bpart [a-l]\\b.{0,25}\\bcomply\\b", "\\bmeets? (the )?regulations?\\b",
+        "\\b(does|do|will|would|is|are)\\b[^?.]{0,40}\\bcompl(y|ies|iant)\\b",
+        "\\bcompl(y|ies|iant|iance)\\b[^?.]{0,30}\\b(part\\s+[a-l]\\b|building\\s+reg)"
       ],
       "referral": "Whether a specific build complies is a decision for building control, not for a product assistant. The site explains how the Warmshell systems relate to the regulations, but explaining a regulation is not certifying a project against it.",
       "next_step": "Your building control body decides compliance. For the published guidance and U-value calculations, contact the technical team on {contact} ({hours}).",
