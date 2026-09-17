@@ -73,6 +73,28 @@ class Decision:
     origins: dict = field(default_factory=dict)
     hits: list = field(default_factory=list)
     missing_term: str = ""
+    # Every word the relevance gate will accept as "the thing that was asked
+    # about", computed once at step 4 and carried so that check 6 asks the same
+    # question step 4 asked.
+    #
+    # It exists because the two halves of one gate had drifted apart. Step 4
+    # ORs across every property `detect_properties` finds, on the stated
+    # reasoning that a two-property question should be answered for the half
+    # the corpus publishes rather than refused whole. Check 6 re-derived its
+    # terms from `slots["property_asked"]`, which is the single best-scoring
+    # property, so the other halves were invisible to it. "Which finish coats
+    # are compatible with Forte render, including the hardening time required
+    # first?" therefore passed step 4 on *coat* and *finish* and was then
+    # refused by check 6 for want of *compatible* — a fully published,
+    # correctly retrieved, two-document answer thrown away by the gate meant to
+    # catch the near-miss. Evaluation situation S8, reproducibly.
+    #
+    # Carrying the terms rather than recomputing them is the fix that cannot
+    # drift again: there is one definition, in `_asked_terms`, and both ends of
+    # the gate read the same list. Empty means the gate has no opinion, which is
+    # what steps 1 to 3 hand on, and check 6 skips itself on an empty list
+    # exactly as it did before.
+    asked_terms: list = field(default_factory=list)
     per_option: bool = False
     sum_refused: bool = False
     photograph: bool = False
@@ -448,11 +470,17 @@ class Router:
                             "4", slots=slots, hits=hits, missing_term=asked,
                             photograph=photo)
 
+        # Everything past step 4 carries the gate's own word list, so check 6
+        # can enforce the rule this step just applied instead of re-deriving a
+        # narrower one. See `Decision.asked_terms`.
+        gate = list(terms)
+
         # Step 5 — a load-bearing slot is uncued.
         if "substrate" not in slots and self._needs_substrate(question, slots):
             return Decision(Path_.ASK_BACK,
                             "the substrate decides the product and was not stated",
-                            "5", slots=slots, hits=hits, photograph=photo)
+                            "5", slots=slots, hits=hits, asked_terms=gate,
+                            photograph=photo)
         per_option = "location" not in slots and self._location_matters(question, slots)
 
         # Step 6 — calculation words: print the published figures, refuse the sum.
@@ -461,25 +489,27 @@ class Router:
                             "a quantity was asked; the published coverage and pack "
                             "size are printed and the multiplication is refused",
                             "6", slots=slots, hits=hits, sum_refused=True,
-                            per_option=per_option, photograph=photo)
+                            asked_terms=gate, per_option=per_option,
+                            photograph=photo)
 
         # Step 7 — one document and a factual ask: print it, do not paraphrase.
         if self._single_document(hits) and asked:
             return Decision(Path_.EXTRACT,
                             "one document answers a factual question, so the passage "
                             "is printed rather than paraphrased",
-                            "7", slots=slots, hits=hits, per_option=per_option,
-                            photograph=photo)
+                            "7", slots=slots, hits=hits, asked_terms=gate,
+                            per_option=per_option, photograph=photo)
 
         # Staff see passages, not prose. Composing for staff is roadmap.
         if "staff" in audiences and "public" not in audiences:
             return Decision(Path_.EXTRACT, "staff audience: passages, not prose",
-                            "7s", slots=slots, hits=hits, photograph=photo)
+                            "7s", slots=slots, hits=hits, asked_terms=gate,
+                            photograph=photo)
 
         # Step 8 — otherwise the model composes over what was retrieved.
         return Decision(Path_.COMPOSE, "several passages bear on the question",
-                        "8", slots=slots, hits=hits, per_option=per_option,
-                        photograph=photo)
+                        "8", slots=slots, hits=hits, asked_terms=gate,
+                        per_option=per_option, photograph=photo)
 
     # -- step 5 predicates -------------------------------------------------
 

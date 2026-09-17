@@ -660,6 +660,49 @@ def _source_rows(hits: list[Retrieved]) -> list[dict]:
     return rows
 
 
+# Documents whose job is to describe a product rather than to explain why a
+# wall went wrong. A product page says a render is durable and available in
+# twenty-four colours; it cannot say why this one dried patchy.
+_MARKETING_TYPES = ("product_page", "commercial")
+
+
+def _diagnostic_passages(hits: list[Retrieved], limit: int = 3) -> list[Retrieved]:
+    """The passages a diagnosis hand-off should quote, out of what was retrieved.
+
+    The hand-off's own sentence promises "what the site does publish on this",
+    so the passages under it have to be the ones that actually bear on the
+    symptom. Taking the top three by similarity does not deliver that, and the
+    failure is systematic rather than occasional: on a question about patchy
+    colour after drying, the three highest-scoring passages were two coloured
+    render product pages and a rendering checklist, while the technical note
+    that publishes the mechanism — "an even colour is the result of an even
+    drying rate which in turn is the result of an even application thickness",
+    together with damp patches, trowel pressure, day joints and strong sunlight
+    — sat fifth and was cut. Retrieval had found it. The renderer threw it away.
+
+    Two things push the wrong way at once. A product page repeats the words of
+    the symptom because it is selling a product the symptom belongs to, so it
+    scores highly on similarity alone; and `AUTHORITY` ranks `product_page`
+    above `knowledge_base`, so among near-ties the marketing copy is preferred
+    on purpose. Both are right for a factual lookup about a product and both
+    are backwards for a question about a defect.
+
+    So this is a stable partition rather than a re-scoring: passages keep their
+    similarity order inside each group, and the only thing that changes is that
+    a page selling a product cannot displace a document explaining a failure.
+    Nothing is invented and nothing outside the retrieved set is reached for —
+    if the corpus published nothing but product pages, product pages are what
+    prints, exactly as before.
+
+    The residual limit is worth stating: this can only choose among the
+    passages retrieval returned, so a technical note that never entered the
+    window is still lost. Widening the window for this path is a separate
+    change with its own evidence to gather.
+    """
+    ordered = sorted(hits, key=lambda h: h.document.document_type in _MARKETING_TYPES)
+    return ordered[:limit]
+
+
 def _contact_line(names: dict) -> str:
     contact = names.get("contact", {}) or {}
     phone, hours = contact.get("phone", ""), contact.get("hours", "")
@@ -828,9 +871,21 @@ class AnswerEngine:
         # the span, which emits one line on completion, so emitting both would
         # have been the same fact twice under the same event name.
 
+        # The words the router's relevance gate accepted at step 4, carried on
+        # the decision. Check 6 is the second half of that gate and has to ask
+        # the same question step 4 asked, or a two-property enquiry passes one
+        # half of one gate and is refused by the other. See
+        # `Decision.asked_terms` for the case that proved it.
+        #
+        # The old derivation is kept as a fallback rather than removed: a
+        # `Decision` built directly — by a test, or by any caller that did not
+        # come through `Router.route` — carries no terms, and a check 6 that
+        # silently stopped running would be a safety check turning itself off.
+        # Falling back narrows the gate; it never removes it.
         asked = decision.slots.get("property_asked", "")
-        terms = (self.retriever.slots.terms_for("property_asked", asked)
-                 if hasattr(self.retriever, "slots") else [])
+        terms = list(getattr(decision, "asked_terms", None) or [])
+        if not terms and hasattr(self.retriever, "slots"):
+            terms = self.retriever.slots.terms_for("property_asked", asked)
         # A span around the checks and not inside them. The six checks are a
         # safety boundary and this slice observes them rather than touching
         # them: `run_checks` is called exactly as before and decides exactly
@@ -877,10 +932,11 @@ class AnswerEngine:
         return self._finish(decision, text, decision.hits[:1], question)
 
     def diagnosis(self, decision: Decision, question: str = "") -> Answer:
+        chosen = _diagnostic_passages(decision.hits)
         published = "\n\n".join(
             f"[{i}] {h.document.citation_name}"
             f"{' — ' + h.chunk.section if h.chunk.section else ''}\n{h.chunk.content}"
-            for i, h in enumerate(decision.hits[:3], 1)
+            for i, h in enumerate(chosen, 1)
         )
         text = (
             "Working out what has actually gone wrong with a wall is a judgement "
@@ -893,7 +949,7 @@ class AnswerEngine:
         # Capture diagnosis hand-off for the failure library (fire-and-forget)
         try:
             capture = DiagnosisCapture()
-            chunk_ids = [h.chunk.chunk_id for h in decision.hits[:3]]
+            chunk_ids = [h.chunk.chunk_id for h in chosen]
             tags = [slot for slot in ["symptom", "cause_asked"] if slot in decision.slots]
             capture.capture(
                 question=question,
@@ -905,7 +961,7 @@ class AnswerEngine:
         except Exception as e:
             obs.event("diagnosis_capture_error", error=str(e))
 
-        return self._finish(decision, text, decision.hits[:3], question)
+        return self._finish(decision, text, chosen, question)
 
     def ask_back(self, decision: Decision, question: str = "") -> Answer:
         text = (

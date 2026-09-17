@@ -90,6 +90,7 @@
     "health": {
       "patterns": [
         "\\bburn(s|ed|t)?\\b", "\\beye(s)?\\b.{0,20}\\b(splash|got|in)\\b",
+        "\\b(?:in|into|on)\\s+(?:my|his|her|their|the)\\s+eyes?\\b",
         "\\bswallow(ed)?\\b", "\\bingest(ed)?\\b", "\\bskin (irritation|reaction|rash)\\b",
         "\\bhospital\\b", "\\bpoison", "\\ballerg(y|ic)\\b", "\\basthma\\b",
         "\\binhal(e|ed|ation)\\b.{0,20}\\bdust\\b"
