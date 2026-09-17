@@ -306,3 +306,4 @@ def test_the_exemption_does_not_cover_a_different_product(assistant, monkeypatch
 
     assert reply.parts[0][1].refused, (
         "a product nobody asked about was recommended without assessment")
+

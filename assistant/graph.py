@@ -588,6 +588,36 @@ def build(services: Services):
         answer = state.get("answer")
         if answer is None:
             return {"trace": ["verify:n/a"]}
+
+        # A refusal has nothing to contain, and running the guard over one does
+        # real damage. This is not a shortcut; it is a category error corrected.
+        #
+        # What a refusal prints is the hand-off template plus the closest
+        # published passage, quoted and cited, which is the value decision 9
+        # says a refusal must carry. That passage is published prose, so it
+        # routinely names products and routinely reads as advice — "Suitable
+        # finishing coats are Lime Green Natural Finish, Lime Green Solo or
+        # Fine Stuff" is a sentence out of a datasheet, not a recommendation
+        # this system made. `recommends_a_product` cannot tell those apart,
+        # because by design it reads text rather than provenance.
+        #
+        # Measured, on the near-miss the relevance gate exists for. "What is
+        # the U-value of Solo Onecoat plaster?" refuses correctly at step 4
+        # with one cited passage. The guard then matched the product names
+        # inside that refusal, found no approved set to excuse them — a LOOKUP
+        # has no evidence assessment — and no exemption either, because the
+        # question's own phrasing does not match the registry's spelling
+        # "Solo Onecoat Lime Plaster" exactly. So it discarded the informative
+        # refusal and substituted a bare one citing nothing at all.
+        #
+        # The trade was strictly negative: a refusal replaced by a refusal, one
+        # of them useful. And it was invisible to the canonical evaluation,
+        # because the situations half calls `Assistant.ask` while every real
+        # surface -- the page, the CLI conversation -- calls `ask_turn` and
+        # comes through here.
+        if answer.refused:
+            return {"trace": ["verify:refused"]}
+
         decision = state.get("decision")
         approved = decision.approved_names if decision else frozenset()
 
