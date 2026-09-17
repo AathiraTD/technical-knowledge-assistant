@@ -376,10 +376,16 @@ FIXTURES = [
         title="Rendered elevation, sound",
         build=lambda r: render_wall(r, colour=(206, 198, 176)),
         safe={"existing_finish": "render"},
-        must_not_claim=["substrate", "moisture_evidence", "cracks",
+        must_not_claim=["substrate", "location", "moisture_evidence", "cracks",
                         "damaged_finish"],
         note="A render hides its own background. This is the fixture where "
-             "claiming a substrate is claiming to see through a wall.",
+             "claiming a substrate is claiming to see through a wall. "
+             "`location` is forbidden here too, and the fixture's own name is "
+             "the reason it is worth stating: the file is called 'external' "
+             "because that is what it was drawn as, and nothing inside the "
+             "frame shows it -- no sky, no ground line, no opening. A model "
+             "that gets 'external' right here would be guessing correctly, "
+             "which is not the same as seeing.",
     ),
     dict(
         name="staining-salts-low",
@@ -403,7 +409,8 @@ FIXTURES = [
         build=lambda r: add_cracks(render_wall(r, colour=(216, 209, 192)),
                                    r, crazing=True),
         safe={"cracks": "yes", "existing_finish": "render"},
-        must_not_claim=["substrate", "moisture_evidence", "structural"],
+        must_not_claim=["substrate", "location", "moisture_evidence",
+                        "structural"],
         note="Fine interlinked surface cracking. Distinguishing it from "
              "structural movement needs width, depth and history, none of "
              "which a photograph carries.",

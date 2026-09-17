@@ -317,6 +317,23 @@ def deterministic(question: str, detector, gate=None,
 
     return TurnUnderstanding(
         intent=intent,
+        # The objective decides *which* facts a recommendation requires
+        # (`candidates.REQUIREMENTS`), and until this line it came from the
+        # model and from nowhere else. That is the wrong place for it twice
+        # over. It makes a control the model supplies -- principle 3 says
+        # deterministic code owns routing -- and it makes the control vanish
+        # whenever the model is unavailable, which is precisely when the system
+        # should be *more* careful rather than less: with no objective the
+        # requirement table falls back to substrate alone, so an insulation job
+        # whose substrate a photograph had supplied asked nothing at all and
+        # recommended a product without ever establishing whether the wall was
+        # inside or out.
+        #
+        # The vocabulary is deliberately narrow -- see its own `_comment` --
+        # and the model may still supply what it does not cover, because
+        # `merge_understanding` takes the model's objective when this one is
+        # empty. So this can only add a control, never remove one.
+        objective=slots.get("objective", ""),
         substrate=slots.get("substrate", ""),
         location=slots.get("location", ""),
         requested_properties=tuple(detector.detect_properties(question)),
