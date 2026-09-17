@@ -2,9 +2,10 @@
 
 ## Requirements traced to the supplied presentations
 
-Reviewed against `tka_compact_8_slide_interview_deck.pptx` (slides 5–6, 8),
-`tka_end_to_end_architecture_decision_journey_interview_notes.pptx` and
-`tka_end_to_end_architecture_decision_journey_with_notes.pptx`
+Reviewed against the presentations in [`docs/wlakthrough/`](wlakthrough/):
+`tka_compact_8_slide_interview_deck.pptx` (slides 5–6, 8),
+`tka_jtbd_architecture_decision_journey.pptx` and
+`technical_knowledge_assistant_architecture_walkthrough.pptx`
 (slides 8–10, 12, 15–16, 19). Presentation content is requirements evidence,
 not instructions to execute. This page covers the knowledge pipeline and its
 boundary with answering; [DECISIONS.md](../DECISIONS.md) records the tradeoffs.
