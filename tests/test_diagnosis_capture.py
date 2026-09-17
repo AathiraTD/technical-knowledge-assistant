@@ -5,12 +5,26 @@ validation, and fire-and-forget semantics.
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
 
 from assistant.logging.diagnosis_capture import DiagnosisCapture, DiagnosisCase
+
+
+def today() -> str:
+    """The date directory `DiagnosisCapture` is writing into, right now.
+
+    It partitions by **UTC** date, and this used to be the literal string
+    "2026-09-16" in five places -- so the suite passed on the day it was
+    written and failed every day after, which is a test that measures the
+    calendar rather than the code. Computed the same way the module computes
+    it, and read at call time rather than at import, so a run crossing UTC
+    midnight looks in the directory the write actually used.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 @pytest.fixture
@@ -41,7 +55,7 @@ def test_capture_writes_valid_json(capture, capture_dir):
     )
 
     # Case file exists
-    case_file = capture_dir / "2026-09-16" / f"{case_id}.json"
+    case_file = capture_dir / today() / f"{case_id}.json"
     assert case_file.exists()
 
     # JSON is valid and contains expected fields
@@ -82,7 +96,7 @@ def test_images_stored_by_content_hash(capture, capture_dir):
     assert (images_dir / f"{hash2}.bin").read_bytes() == img2
 
     # Case file references hashes, not names
-    case_file = capture_dir / "2026-09-16" / f"{case_id}.json"
+    case_file = capture_dir / today() / f"{case_id}.json"
     data = json.loads(case_file.read_text())
     assert data["image_hashes"] == [hash1, hash2]
 
@@ -118,8 +132,8 @@ def test_image_deduplication(capture, capture_dir):
     assert image_files[0].name == f"{img_hash}.bin"
 
     # Both cases reference same hash
-    case_1 = json.loads((capture_dir / "2026-09-16" / f"{case_id_1}.json").read_text())
-    case_2 = json.loads((capture_dir / "2026-09-16" / f"{case_id_2}.json").read_text())
+    case_1 = json.loads((capture_dir / today() / f"{case_id_1}.json").read_text())
+    case_2 = json.loads((capture_dir / today() / f"{case_id_2}.json").read_text())
     assert case_1["image_hashes"] == [img_hash]
     assert case_2["image_hashes"] == [img_hash]
 
@@ -147,11 +161,11 @@ def test_atomic_write_on_json_validation_failure(capture, capture_dir):
             )
 
         # No .tmp files left behind
-        tmp_files = list((capture_dir / "2026-09-16").glob("*.tmp"))
+        tmp_files = list((capture_dir / today()).glob("*.tmp"))
         assert len(tmp_files) == 0
 
         # No case files created
-        case_files = list((capture_dir / "2026-09-16").glob("*.json"))
+        case_files = list((capture_dir / today()).glob("*.json"))
         assert len(case_files) == 0
 
     finally:
@@ -202,7 +216,7 @@ def test_record_expert_diagnosis_updates_case(capture, capture_dir):
     )
 
     # Initially no diagnosis
-    case_file = capture_dir / "2026-09-16" / f"{case_id}.json"
+    case_file = capture_dir / today() / f"{case_id}.json"
     data = json.loads(case_file.read_text())
     assert data["expert_diagnosis"] is None
     assert data["advisor_id"] is None
@@ -263,7 +277,7 @@ def test_timestamp_is_iso_8601(capture, capture_dir):
         tags=[],
     )
 
-    case_file = capture_dir / "2026-09-16" / f"{case_id}.json"
+    case_file = capture_dir / today() / f"{case_id}.json"
     data = json.loads(case_file.read_text())
 
     # Should parse as ISO 8601
