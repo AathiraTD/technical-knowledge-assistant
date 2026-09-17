@@ -95,6 +95,62 @@ A VLM observation is not automatically a fact, and a model-proposed product is n
 
 \---
 
+## Runtime profiles: local demo vs production
+
+The interview build deliberately uses SQLite, local embeddings, Ollama and in-memory conversation state because the corpus is small and the exercise prioritises a self-contained local system. Production infrastructure is isolated behind configuration/adapters so the evidence-sufficiency, citation and verification logic does not need to change.
+
+**Local mode changes infrastructure, not safety semantics.**
+
+### What the local/interview runtime is
+
+No environment variable has to be set for any of this. Each line is what the code does when nothing is configured.
+
+|Concern|Local/interview runtime|Selected by|
+|-|-|-|
+|Knowledge store|SQLite at `data/index/knowledge.db`|`ASSISTANT_POSTGRES_DSN` unset|
+|Vector similarity|Local embedding similarity over the active snapshot, in the repository adapter|same — no pgvector, no vector service|
+|Generation|Local Ollama, `qwen3.5:4b`|`OLLAMA_HOST`, `GENERATION_MODEL`|
+|Embeddings|Local Ollama, `qwen3-embedding:0.6b`, snapshot-bound|`EMBED_MODEL`, `EMBED_DIMENSIONS`|
+|Vision|Off; a photograph is acknowledged and handed to a person|`ASSISTANT_VISION_DEMO` unset|
+|Conversation state|LangGraph `InMemorySaver` — per process, lost on restart|`ASSISTANT_CHECKPOINT_DSN` unset|
+|Authentication|None required; the audience is asserted and can only be narrowed|—|
+|Rate limiting / queueing|None|—|
+|Hosted tracing|Disabled in code, not by configuration|`assistant/__init__.py`|
+
+Consequently a local run requires **no PostgreSQL, no pgvector, no message broker, no cache server and no external telemetry endpoint**. `python -m assistant.health` reports `database ready sqlite` and exits `0` with none of them present, and readiness only checks a production dependency when the corresponding variable selects it.
+
+Storage is chosen by one variable and one rule, in one function ([`assistant/store/factory.py`](assistant/store/factory.py)): `ASSISTANT_POSTGRES_DSN` empty or unset selects SQLite; any value selects PostgreSQL + pgvector for the indexer, CLI, UI, session store and readiness alike. There is no second backend switch to disagree with it. Conversation state is a separate variable (`ASSISTANT_CHECKPOINT_DSN`) for the reason given in the table below.
+
+### What production would add, and the honest status of each
+
+|Capability|Status|What that means here|
+|-|-|-|
+|PostgreSQL + pgvector storage|**adapter/contract-tested**|`PostgresKnowledgeRepository` implements the same `KnowledgeRepository` contract and is exercised against a real PostgreSQL 16 with pgvector in CI, including the publication lock and concurrent readers. It has not been *operated*: the submitted demo runs on SQLite and no PostgreSQL instance has answered a question outside a test.|
+|Durable/shared conversation checkpointing|**not implemented**|Dependency-blocked, not merely unbuilt: `langgraph-checkpoint-postgres` 3.0.1 requires `langgraph-checkpoint<4` while `langgraph` 1.2.11 requires `>=4.1.0`. Setting `ASSISTANT_CHECKPOINT_DSN` raises `PostgresCheckpointerUnavailable` rather than pretending. State is in-memory until those versions reconcile.|
+|Authenticated identity|**designed seam**|Audience filtering is real and enforced in code before ranking; the audience behind it is asserted, and over HTTP a request may only narrow what the operator started the server with. Nothing issues or verifies a claim.|
+|Scalable inference|**designed seam**|One Ollama instance serialises generation. No second instance, no worker pool, no model-serving tier.|
+|Rate limiting / load management|**not implemented**|No queue, no per-session limit, no extract-only degradation. Concurrency helps cached and non-compose answers only.|
+|Central observability|**partially implemented**|Structured spans and metrics are built, with opt-in OTLP export via `OTEL_EXPORTER_OTLP_ENDPOINT` (empty disables it). No collector, dashboard or alerting is provided, and hosted LangSmith tracing is closed in code.|
+|Container stack|**implemented, partially verified**|`deploy/` builds and runs as non-root; a full live-model `docker compose up` was not completed. See *Docker / deployment*.|
+
+The per-area detail, including limitations that are not infrastructure, is in [*Limitations and production seams*](#limitations-and-production-seams).
+
+### What does not change between the two
+
+Selecting a different backend changes where bytes are stored and how they are reached. It does not change any of the following, which are the same code on both paths:
+
+* the approved-source boundary — answers come only from indexed, approved evidence
+* metadata filtering — audience, active version, product identity, authority
+* evidence sufficiency and the abstention threshold
+* citation requirements on every factual sentence
+* numeric and product attribution checks
+* post-generation output verification
+* fail-closed refusal and hand-off behaviour
+
+This is the point of the `KnowledgeRepository` boundary: the answer engine depends on the interface and never on a database driver, so a safety check cannot be weakened by a deployment choice.
+
+\---
+
 ## Requirements
 
 * Python 3.11 or later
@@ -138,6 +194,8 @@ pip install -r requirements.txt
 python -m assistant.index
 python -m assistant.ui
 ```
+
+No environment variable needs to be set for this. Unset means SQLite, local Ollama, in-memory conversation state and no hosted tracing — see [*Runtime profiles*](#runtime-profiles-local-demo-vs-production). `.env.example` documents the overrides and the production-only settings; note that the application has **no dotenv loader**, so `.env` is read by Docker Compose only, and a value that is to reach a local run must be exported in the shell.
 
 Other useful entry points:
 

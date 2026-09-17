@@ -7,6 +7,24 @@ def open_repository(db="data/index/knowledge.db", dsn=None, *,
                     apply_schema=True, thread_safe=False):
     """The one place that decides which store an entry point talks to.
 
+    Selection is one variable and one rule: `ASSISTANT_POSTGRES_DSN` unset or
+    empty means SQLite at `db`, anything else means PostgreSQL + pgvector.
+    There is deliberately no second switch — no `STORAGE_BACKEND` naming a
+    backend that the DSN then has to agree with, because two settings that can
+    disagree are a way to select a backend nobody asked for.
+
+    Unset is the local/interview default, and it is a default rather than a
+    fallback: nothing here probes for a database and quietly gives up. The
+    local path needs no PostgreSQL, no pgvector and no server running, and
+    `assistant/health.py` only checks a database when this same variable
+    selects one.
+
+    Conversation state is a separate decision on a separate variable
+    (`ASSISTANT_CHECKPOINT_DSN`, read in `assistant/engine.py`), so selecting
+    PostgreSQL for the knowledge store does not imply a durable checkpointer —
+    which matters, because the PostgreSQL checkpointer is dependency-blocked
+    and raises. See `assistant/graph.py:checkpointer_for`.
+
     `thread_safe` is for callers that serve more than one request at a time.
     It is off by default because the cost is real — every call serialises — and
     a CLI or an indexer has nothing to serialise. The threaded web server turns
