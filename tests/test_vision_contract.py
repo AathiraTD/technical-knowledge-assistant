@@ -438,3 +438,140 @@ def test_the_prompt_lists_the_values_and_names_what_cannot_be_seen():
     assert "ONE observation per attribute" in text
     assert "internal or external" in text
     assert "Do not name any product" in text
+
+
+# =====================================================================
+#  The confidence scale, and the second real photograph
+# =====================================================================
+#
+# The first real image shaped the truncation tests above. The second shaped
+# these, and it failed in the opposite direction: the response was complete,
+# well-formed, non-truncated, schema-valid -- and every observation in it was
+# thrown away.
+#
+# A photograph of an internal wall with the plaster hacked off, through
+# `qwen3.5:4b`, returned exactly this. Both readings are correct and both
+# values are ones the vocabulary defines. The model simply answered on the
+# scale a person would write.
+
+REAL_HUNDRED_SCALE = (
+    '{\n  "observations": [\n'
+    '    {\n      "observation": "substrate",\n'
+    '      "attribute": "exposed_masonry",\n      "value": "yes",'
+    '"confidence":100,\n      "region": [267, 359, 848, 650]\n    },\n'
+    '    {\n      "observation": "substrate",\n'
+    '      "attribute": "existing_finish",\n      "value": "render",'
+    '"confidence":100,\n      "region": [267, 359, 848, 650]\n    }\n  ],\n'
+    '  "cannot_determine_from_image": ['
+    '"symptom: damp or mould cannot be determined from the image", '
+    '"location: internal vs external is ambiguous in this view"]\n}'
+)
+
+
+def test_a_confidence_on_the_hundred_scale_is_read_not_discarded(monkeypatch):
+    """The measured regression: two correct readings, both silently dropped.
+
+    Nothing about this response is malformed. It parses, it satisfies the
+    schema, it is not truncated, both attributes are in the enum and both
+    values are in their vocabularies. The old guard refused it on one line --
+    `0.0 <= confidence <= 1.0` -- and the whole perception reported nothing.
+    """
+    fake_ollama(monkeypatch, response_text=REAL_HUNDRED_SCALE)
+    perception = observe(PIXEL)
+
+    assert perception.ok
+    assert not perception.truncated
+    assert len(perception.observations) == 2, perception.observations
+
+    seen = {o.attribute: o.value for o in perception.observations}
+    assert seen == {"exposed_masonry": "yes", "existing_finish": "render"}
+
+
+def test_what_the_model_could_not_determine_still_travels(monkeypatch):
+    """The half of the contract that was working, and must keep working."""
+    fake_ollama(monkeypatch, response_text=REAL_HUNDRED_SCALE)
+    perception = observe(PIXEL)
+
+    joined = " ".join(perception.cannot_determine_from_image).lower()
+    assert "location" in joined
+    assert "symptom" in joined
+
+
+def test_a_pixel_region_is_refused_rather_than_rescaled(monkeypatch):
+    """An unauditable box must not be manufactured.
+
+    The same response gives its region in pixels, which no longer matches the
+    image once anything is resized, and this module has no image library to ask
+    for the dimensions -- adding one for a roadmap stage is a dependency the
+    runtime does not carry. So the region is dropped and the observation
+    survives without it: a reading whose box cannot be checked is worth less
+    than one whose box can, and worth more than nothing.
+    """
+    fake_ollama(monkeypatch, response_text=REAL_HUNDRED_SCALE)
+    perception = observe(PIXEL)
+
+    assert all(o.region is None for o in perception.observations)
+
+
+@pytest.mark.parametrize("named, expected_band", [
+    ("HIGH", vision.Band.HIGH),
+    ("UNCERTAIN", vision.Band.UNCERTAIN),
+    ("NOT_DETERMINABLE", vision.Band.NOT_DETERMINABLE),
+    ("high", vision.Band.HIGH),
+])
+def test_a_named_band_round_trips_to_the_band_it_names(named, expected_band):
+    """The contract the schema now asks for, and the only one a grammar enforces.
+
+    Carried as the band's own floor, so `band_for` returns what the model said
+    rather than something near it.
+    """
+    confidence = vision._decode_confidence(named)
+
+    assert confidence is not None
+    assert vision.band_for(confidence) is expected_band
+
+
+def test_the_schema_asks_for_the_band_by_name():
+    """`minimum`/`maximum` on a number buys nothing: a grammar enforces types.
+
+    That is why 100 arrived through a schema-validated response in the first
+    place, and why the field is an enum now.
+    """
+    item = vision.observation_schema()["properties"]["observations"]["items"]
+    confidence = item["properties"]["confidence"]
+
+    assert confidence["type"] == "string"
+    assert confidence["enum"] == [b.value for b in vision.Band]
+
+
+def test_the_old_float_contract_still_decodes():
+    """Widening what is read must not narrow it. Every existing fixture is valid."""
+    assert vision._decode_confidence(0.95) == 0.95
+    assert vision._decode_confidence(0.0) == 0.0
+    assert vision._decode_confidence(1.0) == 1.0
+
+
+@pytest.mark.parametrize("junk", [None, True, False, "nonsense", "0.9", 4000, -1])
+def test_what_is_still_refused(junk):
+    """Reading more shapes is not reading anything.
+
+    `True` matters on its own: `isinstance(True, int)` is true in Python, so a
+    bool would otherwise arrive as a confidence of 1.0 and fill a slot.
+    """
+    assert vision._decode_confidence(junk) is None
+
+
+def test_a_top_confidence_still_only_buys_a_band(monkeypatch):
+    """The safety property the rescaling must not touch.
+
+    100 becomes HIGH, and HIGH is what it always took to fill a slot. A model
+    stamping its top confidence on every reading is the reason `Band` exists,
+    and rescaling changes what is *read*, never what is *trusted*.
+    """
+    fake_ollama(monkeypatch, response_text=REAL_HUNDRED_SCALE)
+    perception = observe(PIXEL)
+
+    assert all(o.band is vision.Band.HIGH for o in perception.observations)
+    # And the reading that matters for routing is still absent: the model
+    # reported conditions, never the `substrate` slot itself.
+    assert "substrate" not in {o.attribute for o in perception.observations}
