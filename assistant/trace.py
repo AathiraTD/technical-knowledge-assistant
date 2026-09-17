@@ -41,12 +41,19 @@ from .model import TraceSpan
 from .store.factory import open_repository
 
 # Attributes worth putting on the span's own line rather than under it. These
-# are the ones a question about a wrong answer actually turns on: which product
-# retrieval was told about, how well the top passage scored, which router step
-# fired, and which check refused. Everything else still prints, indented below.
-HEADLINE = ("product", "top_score", "hits", "documents", "path", "step",
-            "route", "refused", "check", "reason", "db.system",
-            "gen_ai.request.model")
+# are the ones a question about a wrong answer actually turns on: what the
+# question was understood to be asking, which product retrieval was told about,
+# how well the top passage scored, which router step fired, what was missing,
+# and which check refused. Everything else still prints, indented below.
+#
+# The order is the reading order, not the alphabet: intent before retrieval
+# before routing before the verdict, because that is the sequence someone
+# retracing an answer follows, and a line that reads in the wrong order costs a
+# second every time it is read.
+HEADLINE = ("intent", "intent_before", "objective", "product", "top_score",
+            "hits", "documents", "slots", "missing", "path", "step", "route",
+            "outcome", "products", "refused", "check", "failed", "reason",
+            "cached", "hit", "db.system", "gen_ai.request.model")
 
 
 def _tree(spans: list[TraceSpan]) -> dict[str, list[TraceSpan]]:
@@ -78,11 +85,47 @@ def _attributes(span: TraceSpan) -> tuple[str, list[str]]:
     return "  ".join(head), rest
 
 
+def _identity(spans: list[TraceSpan]) -> list[str]:
+    """The four ids this turn belongs to, before the tree.
+
+    `observability.py` records a strict containment hierarchy -- session holds
+    turn holds trace holds span -- and until now the text view printed none of
+    it, so the one thing a person had to hand (a correlation id from a header)
+    could not be turned into "and what else did that conversation ask". They
+    are on separate lines rather than in the tree because they identify the
+    whole turn, not any stage within it.
+    """
+    first = spans[0]
+    sessions = {s.session_id for s in spans if s.session_id}
+    header = [
+        f"correlation  {first.trace_id}",
+        f"session      {'  '.join(sorted(sessions)) or '(none)'}",
+        f"turn         {first.turn_id or '(none)'}",
+        f"source       {first.source}  {first.started_at}",
+    ]
+    failed = [s for s in spans if s.status != "ok"]
+    if failed:
+        header.append(f"failed       {', '.join(sorted({s.name for s in failed}))}")
+    # The next command, but only when there is a conversation to widen into.
+    # A library embedder that opens no session would otherwise be handed
+    # `--session ` with nothing after it, which is an instruction to type
+    # something that cannot work.
+    if first.session_id:
+        header += ["", f"--- python -m assistant.trace --session "
+                       f"{first.session_id} for the whole conversation"]
+    return header + [""]
+
+
 def render(spans: list[TraceSpan], show_all: bool = False) -> str:
     """One turn's span tree, or several turns', as indented text."""
     if not spans:
         return "No spans for that id. Traces are kept for fourteen days."
     children, lines = _tree(spans), []
+    # Only for a single turn. A session read is several turns and already gets
+    # a per-turn header below, where repeating the session id on each would be
+    # noise rather than orientation.
+    if len({s.turn_id for s in spans}) == 1:
+        lines.extend(_identity(spans))
 
     def walk(span: TraceSpan, depth: int) -> None:
         pad = "  " * depth

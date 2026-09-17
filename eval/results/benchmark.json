@@ -1,0 +1,160 @@
+{
+ "base": "http://127.0.0.1:8791",
+ "levels": {
+  "1": {
+   "requests": 1,
+   "errors": 0,
+   "error_rate": 0.0,
+   "seconds": {
+    "min": 28.47,
+    "median": 28.47,
+    "p95": 28.47,
+    "max": 28.47
+   },
+   "stages_seconds": {
+    "answer": {
+     "median": 28.44,
+     "max": 28.44,
+     "samples": 1
+    },
+    "checks": {
+     "median": 0.0,
+     "max": 0.0,
+     "samples": 1
+    },
+    "generation": {
+     "median": 27.53,
+     "max": 27.53,
+     "samples": 1
+    },
+    "retrieval": {
+     "median": 0.88,
+     "max": 0.88,
+     "samples": 1
+    }
+   },
+   "paths": [
+    "compose"
+   ],
+   "wall_seconds": 28.47
+  },
+  "3": {
+   "requests": 3,
+   "errors": 0,
+   "error_rate": 0.0,
+   "seconds": {
+    "min": 196.56,
+    "median": 196.6,
+    "p95": 196.63,
+    "max": 196.64
+   },
+   "stages_seconds": {
+    "answer": {
+     "median": 192.8,
+     "max": 196.45,
+     "samples": 3
+    },
+    "checks": {
+     "median": 0.0,
+     "max": 0.0,
+     "samples": 1
+    },
+    "generation": {
+     "median": 174.61,
+     "max": 174.61,
+     "samples": 1
+    },
+    "retrieval": {
+     "median": 3.52,
+     "max": 17.18,
+     "samples": 3
+    }
+   },
+   "paths": [
+    "compose",
+    "refuse"
+   ],
+   "wall_seconds": 196.64
+  },
+  "5": {
+   "requests": 5,
+   "errors": 0,
+   "error_rate": 0.0,
+   "seconds": {
+    "min": 438.65,
+    "median": 438.72,
+    "p95": 438.79,
+    "max": 438.8
+   },
+   "stages_seconds": {
+    "answer": {
+     "median": 220.81,
+     "max": 438.62,
+     "samples": 5
+    },
+    "checks": {
+     "median": 0.0,
+     "max": 0.0,
+     "samples": 4
+    },
+    "generation": {
+     "median": 81.0,
+     "max": 88.51,
+     "samples": 4
+    },
+    "retrieval": {
+     "median": 3.83,
+     "max": 26.3,
+     "samples": 5
+    }
+   },
+   "paths": [
+    "compose",
+    "refuse"
+   ],
+   "wall_seconds": 438.8
+  }
+ },
+ "policy": {
+  "requests": 5,
+  "errors": 0,
+  "error_rate": 0.0,
+  "seconds": {
+   "min": 0.28,
+   "median": 0.31,
+   "p95": 0.33,
+   "max": 0.33
+  },
+  "stages_seconds": {
+   "answer": {
+    "median": 0.05,
+    "max": 0.06,
+    "samples": 5
+   }
+  },
+  "paths": [
+   "route"
+  ]
+ },
+ "cached": {
+  "requests": 1,
+  "errors": 0,
+  "error_rate": 0.0,
+  "seconds": {
+   "min": 0.51,
+   "median": 0.51,
+   "p95": 0.51,
+   "max": 0.51
+  },
+  "stages_seconds": {
+   "answer": {
+    "median": 0.35,
+    "max": 0.35,
+    "samples": 1
+   }
+  },
+  "paths": [
+   "compose"
+  ]
+ }
+}
