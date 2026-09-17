@@ -65,36 +65,41 @@ class TestSlotDetectorAnswerToAskback:
 class TestAssistantDetectAnswerToAskbackSlots:
     """Test the Assistant's detect_answer_to_askback_slots method."""
 
-    def test_detect_substrate_from_short_input(self, repo):
+    def test_detect_substrate_from_short_input(self, indexed_repo):
         """'brick' → {'substrate': 'brick'}"""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         slots = assistant.detect_answer_to_askback_slots("brick")
         assert slots.get("substrate") == "brick"
 
-    def test_detect_location_from_short_input(self, repo):
-        """'outside' → {'location': 'outside'}"""
-        assistant = Assistant(repo, cache=False)
-        slots = assistant.detect_answer_to_askback_slots("outside")
-        assert slots.get("location") == "outside"
+    def test_detect_location_from_short_input(self, indexed_repo):
+        """'outside' -> {'location': 'external'}, normalised by the vocabulary.
 
-    def test_detect_multiple_slots(self, repo):
+        The value is the vocabulary's term, not the caller's word. That is the
+        whole point of a slot vocabulary: "outside", "external" and "outdoors"
+        are one fact, and the passages say "external".
+        """
+        assistant = Assistant(indexed_repo, cache=False)
+        slots = assistant.detect_answer_to_askback_slots("outside")
+        assert slots.get("location") == "external"
+
+    def test_detect_multiple_slots(self, indexed_repo):
         """'brick, outside' → {'substrate': 'brick', 'location': 'outside'}"""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         slots = assistant.detect_answer_to_askback_slots("brick, outside")
         assert slots.get("substrate") == "brick"
-        assert slots.get("location") == "outside"
+        assert slots.get("location") == "external"   # normalised, not echoed
 
-    def test_empty_dict_for_non_answer(self, repo):
+    def test_empty_dict_for_non_answer(self, indexed_repo):
         """Long input returns empty dict (not an answer-to-askback)."""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         slots = assistant.detect_answer_to_askback_slots(
             "How much does lime mortar cost?"
         )
         assert slots == {}
 
-    def test_empty_dict_for_no_slots(self, repo):
+    def test_empty_dict_for_no_slots(self, indexed_repo):
         """Short input with no slots returns empty dict."""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         slots = assistant.detect_answer_to_askback_slots("yes")
         assert slots == {}
 
@@ -102,21 +107,28 @@ class TestAssistantDetectAnswerToAskbackSlots:
 class TestAutoAnswerFlowIntegration:
     """Integration tests for the full auto-answer flow."""
 
-    def test_detect_answer_flow(self, repo):
+    def test_detect_answer_flow(self, indexed_repo):
         """Verify the end-to-end detection works without errors."""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         answer = "brick, outside"
         detected = assistant.detect_answer_to_askback_slots(answer)
         assert "substrate" in detected or len(detected) > 0
 
-    def test_short_answer_input_detected(self, repo):
+    def test_short_answer_input_detected(self, indexed_repo):
         """Very short substrate-only input is detected as answer."""
-        assistant = Assistant(repo, cache=False)
+        assistant = Assistant(indexed_repo, cache=False)
         assert assistant.router.slots.is_answer_to_askback("brick")
 
-    def test_empty_detection_for_new_question(self, repo):
-        """A follow-up question (not answer-to-askback) returns empty."""
-        assistant = Assistant(repo, cache=False)
+    def test_empty_detection_for_new_question(self, indexed_repo):
+        """A follow-up question is a question, however short.
+
+        Both of these used to be classed as answers to a pending ask-back --
+        the second because `detect` finds `property_asked=compatibility` in it
+        -- and the effect was that the person's actual question was discarded
+        and the earlier one re-answered in its place. See
+        `SlotDetector.is_answer_to_askback`.
+        """
+        assistant = Assistant(indexed_repo, cache=False)
         assert assistant.detect_answer_to_askback_slots("What about Forte?") == {}
         assert assistant.detect_answer_to_askback_slots(
             "Can I use Ultra on the same wall?"

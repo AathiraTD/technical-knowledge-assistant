@@ -19,6 +19,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from assistant import ollama                           # noqa: E402
+from assistant.index import CHUNKING_VERSION           # noqa: E402
+from assistant.model import Snapshot                   # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository  # noqa: E402
 
 TEST_POSTGRES_DSN = os.environ.get("ASSISTANT_POSTGRES_DSN")
@@ -70,3 +73,27 @@ def repo(request):
     finally:
         if hasattr(made, "close"):
             made.close()
+
+
+@pytest.fixture
+def indexed_repo(repo):
+    """`repo`, with an empty release published so an `Assistant` can be built.
+
+    `repo` is deliberately empty, which is right for the storage tests that own
+    it. It is wrong for any test that constructs an `Assistant`, because
+    `Retriever._verify()` refuses to run against a store with no active
+    snapshot -- correctly: decision 6 makes an index built by one embedding
+    model and queried by another a refusal rather than a warning, and "no index
+    at all" is the same class of fault.
+
+    So this publishes a release with no documents in it. Retrieval returns
+    nothing, which suits a test about slot detection or session state and would
+    not suit a test about answers.
+    """
+    repo.publish([], [], [], Snapshot(
+        snapshot_id="snap-empty", created_at="2026-01-01T00:00:00Z",
+        embedding_model=ollama.EMBED_MODEL,
+        embedding_dimensions=ollama.EMBED_DIMENSIONS,
+        chunking_version=CHUNKING_VERSION,
+        document_count=0, chunk_count=0, notes={}), [])
+    return repo

@@ -13,6 +13,15 @@ data/index/
 # content hash and model tag, so it either hits correctly or misses and
 # recomputes, and it turns a fifteen-minute first build into a few seconds.
 
+# Captured diagnosis cases, written at runtime whenever a question hands off to
+# the technical team. Two hundred of them accumulate from a single test run,
+# they are regenerated on every run, and the ones a test produces carry
+# `expert_diagnosis: null` and `example.invalid` chunk ids -- capture noise
+# rather than the labelled library decision 16.1 describes. A real library is
+# built by advisors correcting real photographs, and that is partnership work
+# with its own distribution decision to make.
+data/failure_library/
+
 # Evaluation output that is regenerated on each run
 eval/results/*.tmp
 

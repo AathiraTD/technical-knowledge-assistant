@@ -78,28 +78,38 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session")
-def server() -> str:
+def server(tmp_path_factory) -> str:
     """A real `python -m assistant.ui`, on its own port, polled until ready.
 
     A subprocess rather than a thread, because the thing under test includes
     `main` -- the audience the server was started with, the store it opened, the
     session store it installed. A thread sharing this process's imports would
     prove a handler class works and leave the wiring untested.
+
+    **Its output goes to a file, never to a pipe.** `assistant/ui.py` turns
+    structured logging on by default and writes a JSON line per event to stderr,
+    which is several lines per answer. A `subprocess.PIPE` nobody drains holds
+    about 64KB before the writing process blocks on it forever, so the server
+    answered the first test, filled the buffer, and then hung -- presenting as
+    every later test timing out against a server that looked alive and was
+    simply stuck mid-write. A file has no such limit, and it is also the thing
+    worth printing when something here fails.
     """
     import httpx
 
     port = _free_port()
+    log = tmp_path_factory.mktemp("server") / "ui.log"
+    handle = log.open("wb")
     process = subprocess.Popen(
         [sys.executable, "-m", "assistant.ui", "--port", str(port),
          "--no-browser", "--host", "127.0.0.1"],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
     try:
         for _ in range(120):                           # the index and Ollama check
             if process.poll() is not None:
-                out, err = process.communicate()
                 pytest.skip("the server would not start: "
-                            + err.decode("utf-8", "replace")[-400:])
+                            + log.read_text("utf-8", "replace")[-400:])
             try:
                 if httpx.get(f"{base}/health", timeout=1).status_code == 200:
                     break
@@ -114,6 +124,7 @@ def server() -> str:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
+        handle.close()
 
 
 @pytest.fixture(scope="session")

@@ -27,7 +27,19 @@ CONFIG = Path(__file__).resolve().parents[1] / "config"
 
 
 class Path_(str, Enum):
-    """The five outcomes, plus the two composites the diagram names."""
+    """The five outcomes, the two composites the diagram names, and SELECT.
+
+    ``SELECT`` is a printing path like the others and not a second pipeline. It
+    exists because a recommendation has a shape the other paths do not: the
+    model is allowed to choose between products and explain the runner-up, but
+    only from a set `assistant/candidates.py` has already approved on published
+    evidence, and the answer is checked afterwards for having stayed inside it.
+
+    Being a member here rather than a flag on Compose is what keeps the
+    containment check attached. A recommendation printed as `compose` would be
+    indistinguishable, in the log and in the trace, from an ordinary composed
+    answer that never had an approved set to stay inside.
+    """
 
     ROUTE = "route"                 # fixed referral, no retrieval
     EXTRACT = "extract"             # a passage printed verbatim by code
@@ -35,6 +47,7 @@ class Path_(str, Enum):
     DEFER = "cited hand-off"        # a published deferral, quoted
     DIAGNOSIS = "diagnosis"         # published causes plus a hand-off
     ASK_BACK = "ask back"           # a load-bearing slot is uncued
+    SELECT = "select"               # a product chosen from an approved set
     REFUSE = "refuse"
 
 
@@ -233,24 +246,42 @@ class SlotDetector:
     def terms_for(self, slot: str, value: str) -> list[str]:
         return self.spec.get(slot, {}).get("values", {}).get(value, [])
 
+    # A message that asks something is a new question, however short and
+    # however many slots it happens to mention. Both halves are needed: "what
+    # about Forte" carries no question mark, and "brick?" carries no question
+    # word.
+    _ASKS_SOMETHING = re.compile(
+        r"^\s*(?:what|which|how|can|could|do|does|is|are|should|shall|will|"
+        r"would|why|when|where|who|tell|give|any)\b|\?", re.I)
+
     def is_answer_to_askback(self, question: str) -> bool:
-        """True if the input looks like an answer to an ask-back (substrate/location/exposure).
+        """True if this message answers "what is the wall built of?".
 
-        A very short input with load-bearing slot terms is likely answering
-        "What is the substrate? Is it brick?" with "brick, outside" rather than
-        asking a new question.
+        Getting this wrong is expensive in one direction. A false positive
+        discards the question the person actually asked and re-answers the
+        earlier one in its place, so they are answered about something they
+        have moved on from and their real question disappears without trace.
+        A false negative merely costs them the ask-back again.
 
-        Used to detect when a user is answering a missing-fact ask-back so we can
-        re-ask the pending question with the new slots.
+        Two conditions, and the first used to be missing. The rule was "short
+        and any slot was detected", which classed **"Can I use Ultra on the same
+        wall?"** as an answer to an ask-back: it is nine words, and `detect`
+        finds `property_asked=compatibility` in it. That is a new question about
+        a different product, and it was being thrown away.
+
+        So the slot has to be **load-bearing** -- one of the building facts an
+        ask-back is ever raised for, which is what the docstring always claimed
+        and the code did not do -- and the message must not be asking
+        something. `property_asked`, `calculation` and `symptom` are shapes of a
+        question rather than answers to one, and none of them can trigger this.
         """
-        words = question.split()
-        # Very short: 1-10 words is typical for an ask-back answer
-        if len(words) > 10:
+        if len(question.split()) > 10:
             return False
-
-        # Does it contain any load-bearing slot terms?
+        if self._ASKS_SOMETHING.search(question):
+            return False
         detected = self.detect(question)
-        return bool(detected)
+        return any(slot in detected
+                   for slot in ("substrate", "location", "exposure"))
 
 
 # --------------------------------------------------------------------- router

@@ -253,7 +253,14 @@ def test_a_vision_slot_is_not_written_back_into_the_session(
     reply = assistant.ask("how much water does Solo need", images=[PNG])
     handler._remember("how much water does Solo need", reply)
 
-    assert store.carried(session_id) == {}
+    # Named, not compared whole. This asserted `== {}` while `substrate` was the
+    # only slot a turn like this could produce, so the empty dict stood in for
+    # "the observed value did not persist". It stopped standing for that when
+    # `product` joined the carried slots: the question says Solo, so Solo is
+    # carried, and it is carried because the caller wrote it rather than because
+    # a model saw it. The invariant is about the observed slot, so the assertion
+    # now says which slot it means.
+    assert "substrate" not in store.carried(session_id)
 
 
 def test_a_slot_the_caller_also_stated_is_still_remembered(
@@ -275,7 +282,10 @@ def test_a_slot_the_caller_also_stated_is_still_remembered(
     question = "how much water does Solo need on a brick wall"
     handler._remember(question, assistant.ask(question, images=[PNG]))
 
-    assert store.carried(session_id) == {"substrate": "brick"}
+    # The stated value, and specifically not the seen one. Compared by slot
+    # rather than whole for the reason given above: the question also names a
+    # product, and this test is not about which products are remembered.
+    assert store.carried(session_id)["substrate"] == "brick"
 
 
 # ------------------------------------------------------- 4 no new answer route
@@ -401,13 +411,17 @@ def test_the_cli_passes_repeated_image_flags_through(tmp_path, monkeypatch):
     monkeypatch.setattr(ollama, "generate", quoting)
 
     seen = {}
-    real_ask = Assistant.ask
+    real_ask_turn = Assistant.ask_turn
 
-    def record(self, question, **kwargs):
-        seen["images"] = kwargs.get("images")
-        return real_ask(self, question, **kwargs)
+    def record(self, turn, *args, **kwargs):
+        # The CLI answers through the graph now, so the images arrive inside a
+        # `TurnInput` rather than as an `ask()` keyword. What the test is for is
+        # unchanged: `--image` is repeatable and the files reach the engine in
+        # the order they were given.
+        seen["images"] = list(turn.images)
+        return real_ask_turn(self, turn, *args, **kwargs)
 
-    monkeypatch.setattr(Assistant, "ask", record)
+    monkeypatch.setattr(Assistant, "ask_turn", record)
     monkeypatch.setattr(vision, "observe",
                         lambda *_a, **_k: vision.Perception(error="not run"))
 
@@ -533,7 +547,10 @@ def test_an_uploaded_photograph_fills_a_slot_and_says_where_it_came_from(server)
     assert facts["substrate"]["value"] == "stone"
     assert facts["substrate"]["provenance"] == "observed"
     # And it did not land in the session, which is the property §3.4 names.
-    assert payload["session_slots"] == {}
+    # By slot, not whole: `product` is carried now and is read from the question
+    # text, never from the image. What must not appear here is the substrate the
+    # model saw.
+    assert "substrate" not in payload["session_slots"]
 
 
 def test_an_oversized_body_is_refused_before_it_is_read(server):

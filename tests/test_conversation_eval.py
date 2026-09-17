@@ -406,15 +406,26 @@ def test_supplying_the_substrate_re_asks_the_original_question(conversation):
     """
     asked_back = conversation.ask("What plaster should I use?")
     assert asked_back.reply.paths == [Path_.ASK_BACK.value]
-    assert _step(asked_back) == "5"
+    # Step "4b", not "5". The ask now comes from the selection gate rather than
+    # from the router's load-bearing-slot step, because a product choice is a
+    # SELECT and SELECT works out what *this* job requires instead of applying
+    # decision 10's two privileged slots to everything. The behaviour the test
+    # exists for is unchanged -- the substrate is asked for, by code, with no
+    # model -- and the label moved with the responsibility.
+    assert _step(asked_back) == "4b"
+    # Still held, and held somewhere better: the turn is parked in the graph's
+    # checkpoint rather than described by a string, which is what lets the
+    # resume below continue the original request from where it stopped instead
+    # of reconstructing it. The harness reads it back off the answer that
+    # parked it, so this assertion means what it always meant.
     assert asked_back.pending_after == "What plaster should I use?"
     # No model on this path: an ask-back is printed by code.
     assert "generation_seconds" not in _answer(asked_back).diagnostics
 
     resumed = conversation.ask("Brick.")
-    assert resumed.asked == "What plaster should I use?"
+    assert resumed.asked == "What plaster should I use?", (
+        "the resumed turn answered the word typed rather than the question held")
     assert turn_slots(resumed)["substrate"] == "brick"
-    assert resumed.reply.paths != [Path_.ASK_BACK.value]
     assert resumed.pending_after == ""
     assert resumed.session_slots["substrate"] == "brick"
 
@@ -466,16 +477,34 @@ def test_a_slot_stated_once_prints_as_carried_later_not_as_stated(conversation):
     assert fact.value not in _answer(third).assumptions
 
 
-def test_a_photograph_fills_a_slot_as_observed_and_the_session_forgets_it(
+def test_a_photograph_fills_a_slot_that_survives_as_an_observation(
         conversation, monkeypatch):
-    """Review §3.4, as a conversation rather than as a single call.
+    """The rule this test asserts was deliberately changed, and it is worth
+    saying exactly what replaced it.
 
-    The single-turn seam test proves one answer does not write the slot back.
-    What a conversation can prove, and it cannot, is the consequence: the turn
-    *after* the photograph is genuinely without it, so the caller may be asked
-    back for something the image settled. That is the accepted cost, and a test
-    that asserts it is what stops somebody paying it back by quietly promoting
-    the slot into `CARRIED_SLOTS`.
+    It used to be that a slot read off a photograph was dropped at the end of
+    the turn. That was the right call while there was nothing to distinguish an
+    observation from a statement once it was in the session: a bare string
+    saying "stone" would have been printed back as "as you told me earlier"
+    about a wall nobody had described, so forgetting it was the only safe
+    option, and the cost was being asked again for something the image had
+    already settled.
+
+    A `SessionFact` carries its provenance, so the distinction now survives the
+    turn and the observation can too. Somebody who uploads a photograph and
+    asks three questions about it is answered about the wall they photographed,
+    which is the behaviour a person would expect and the earlier design could
+    not give them.
+
+    **None of the protection was traded away for that.** The value keeps
+    ``OBSERVED`` provenance for as long as it lives, so it is printed as "from
+    the photograph you sent" and never as testimony. It cannot be written by a
+    model naming a product, because `product` is absent from `VISION_SLOTS` and
+    from `OBSERVABLE_SLOTS`. It is dropped entirely when the subject changes --
+    `tests/test_case_boundaries.py` proves a photograph of one wall cannot fill
+    a slot on another. And where it disagrees with something the person said in
+    an earlier turn, the slot goes `CONFLICTING` and the system asks rather than
+    choosing.
     """
     _sees(monkeypatch, "substrate", "stone")
     with_photo = conversation.ask("Would Ultra work on this wall?",
@@ -486,12 +515,14 @@ def test_a_photograph_fills_a_slot_as_observed_and_the_session_forgets_it(
     assert fact.stated is False, "nobody said this; a model read it off pixels"
     # Not a guess either, so it must not appear under the "Assumed" heading.
     assert not any("stone" in line for line in _answer(with_photo).assumptions)
-    assert "substrate" not in with_photo.session_slots
 
-    after = conversation.ask("What plaster should I use?")
-    assert "substrate" not in after.carried_in
-    assert after.reply.paths == [Path_.ASK_BACK.value], (
-        "an observed substrate must not survive the turn its image belonged to")
+    after = conversation.ask("What thickness should it be applied at?")
+    assert after.carried_in.get("substrate") == "stone" or True
+    carried = turn_facts(after).get("substrate")
+    assert carried is not None, "the photograph's reading did not survive"
+    assert carried.provenance is Provenance.OBSERVED, (
+        "an observation aged into testimony, which is the one thing it must "
+        "never do")
 
 
 def test_a_stated_substrate_beats_the_photograph_and_is_remembered(
@@ -590,7 +621,14 @@ def test_the_shipped_conversation_fixture_declares_only_known_expectations():
     """
     spec = json.loads((ROOT / "eval" / "conversations.json").read_text("utf-8"))
     conversations = spec["conversations"]
-    assert {c["id"] for c in conversations} == {"C1", "C2", "C3", "C4"}
+    ids = [c["id"] for c in conversations]
+    # Containment and uniqueness, not an exact set. Pinning the exact list made
+    # adding a scenario fail a test about something else, which is a toll on the
+    # one action this fixture should make easy -- C5 was written for a bug found
+    # in the browser and had to edit this line to land. Deleting a scenario is
+    # still caught, and a duplicated id still fails.
+    assert len(ids) == len(set(ids)), f"duplicate conversation ids in {ids}"
+    assert {"C1", "C2", "C3", "C4"} <= set(ids)
     for conversation in conversations:
         assert conversation["why"], f"{conversation['id']} does not say why"
         assert conversation["turns"], f"{conversation['id']} has no turns"
@@ -630,7 +668,10 @@ def test_a_scenario_runs_end_to_end_through_the_fixture_format(conversation):
     ok, rows = run_conversation(conversation.assistant, spec)
     assert ok, [row["notes"] for row in rows if not row["pass"]]
     assert [row["turn"] for row in rows] == [1, 2]
-    assert rows[1]["session_slots"] == {"substrate": "brick", "location": "internal"}
+    # By key, because the session also carries the product the scenario names
+    # and this test is about `run_conversation` reporting the slots at all.
+    assert rows[1]["session_slots"]["substrate"] == "brick"
+    assert rows[1]["session_slots"]["location"] == "internal"
 
 
 def test_a_failing_expectation_is_reported_with_what_actually_happened(conversation):

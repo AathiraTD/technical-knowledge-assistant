@@ -23,6 +23,8 @@ the approximation this system refuses to make everywhere else.
 
 from __future__ import annotations
 
+import hashlib
+
 import re
 import threading
 from collections import OrderedDict
@@ -59,7 +61,7 @@ class AnswerCache:
     def key(question: str, audiences: tuple[str, ...], snapshot_id: str,
             generation_model: str, chunking_version: str,
             carried: dict | None = None,
-            origins: dict | None = None) -> tuple:
+            origins: dict | None = None, history: str = "") -> tuple:
         """Everything that can change the right answer to the same words.
 
         The audience set is sorted rather than taken as given, so ("public",
@@ -92,12 +94,25 @@ class AnswerCache:
 
         Origins are sorted by slot and reduced to their values so the key stays
         a tuple of plain strings, hashable and readable in a diagnostic dump.
+
+        `history` is the conversation shown to the model on Compose, and it is
+        in the key as a digest rather than as text. It has to be in the key at
+        all because it changes the answer to identical words: "does that change
+        your recommendation?" means nothing without the turns before it, and
+        serving one conversation's answer to another conversation asking the
+        same five words is the same class of failure as the audience leak
+        above. It is hashed rather than stored because a cache key is held in
+        memory for the process's life and is printed in diagnostic dumps, and
+        the transcript is the one piece of customer text this system is careful
+        not to retain anywhere it has not deliberately chosen to.
         """
         return (normalise(question), tuple(sorted(audiences)), snapshot_id,
                 generation_model, chunking_version,
                 tuple(sorted((carried or {}).items())),
                 tuple(sorted((slot, getattr(origin, "value", origin))
-                             for slot, origin in (origins or {}).items())))
+                             for slot, origin in (origins or {}).items())),
+                hashlib.sha256(history.encode("utf-8")).hexdigest()[:16]
+                if history else "")
 
     def get(self, key: tuple) -> Any | None:
         with self._lock:

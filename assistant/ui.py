@@ -389,8 +389,9 @@ PAGE = """<!doctype html>
 let conversationActive = false;
 
 function newChat() {{
-  document.cookie = 'tka_session=; Path=/; HttpOnly; SameSite=Lax; expires=Thu, 01 Jan 1970 00:00:00 UTC;';
-  location.reload();
+  // The server ends the session, not this. The cookie is HttpOnly, so a
+  // `document.cookie` write here is silently discarded by the browser.
+  location.href = '/new';
 }}
 
 function triggerFileInput() {{
@@ -402,7 +403,12 @@ function sendMessage() {{
   const question = input.value.trim();
   if (!question) return;
 
-  const files = document.getElementById('file-input').files;
+  // Copied, not referenced. `input.files` is a live FileList, and clearing the
+  // input below empties it -- so the append loop ran over nothing and every
+  // photograph was posted as a body with no image parts in it. The server then
+  // read zero images and had no attachment to complain about either, which is
+  // why this looked like "the assistant ignored my photo" rather than an error.
+  const files = Array.from(document.getElementById('file-input').files);
   const hasImages = files.length > 0;
 
   // Add user message to chat
@@ -800,6 +806,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_plain(metrics.render(self.assistant.repo).encode("utf-8"),
                              metrics.CONTENT_TYPE)
             return
+        # Ending a conversation is a server action, because the cookie naming it
+        # is HttpOnly and a page cannot clear what it is not allowed to read.
+        # `newChat()` used to try, with `document.cookie`; the browser ignores
+        # that write, so the old cookie went straight back up with the next
+        # request and the "new" conversation inherited the substrate, location
+        # and product of the one the person believed they had ended.
+        if url.path == "/new":
+            self.session_id = self.sessions.open("")
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.send_header("X-Correlation-Id", self.correlation_id)
+            self.send_header("Set-Cookie",
+                             f"{SESSION_COOKIE}={self.session_id}; Path=/; "
+                             f"HttpOnly; SameSite=Lax")
+            self.end_headers()
+            return
         if url.path not in ("/", "/ask"):
             self.send_error(404)
             return
@@ -997,39 +1020,35 @@ class Handler(BaseHTTPRequestHandler):
 
         if not session_open:
             self.session_id = self._session()
-        carried = self.sessions.carried(self.session_id)
-        pending = self.sessions.pending(self.session_id)
         asked = question
-        auto_answered = None  # If set, we auto-answered a pending question
-        if pending and question:
-            # The previous turn ended in an ask-back, so this one may be the
-            # answer to it rather than a new question. A short input with
-            # load-bearing slot terms (substrate, location, exposure) is likely
-            # answering "What is the substrate?" rather than asking a new one.
-            stated = self.assistant.detect_answer_to_askback_slots(question)
-            if stated:
-                # Merge new slots with carried, answer the pending question
-                merged = {**carried, **stated}
-                auto_answered = self.assistant.ask(pending, audiences=audiences,
-                                                   correlation_id=self.correlation_id,
-                                                   carried=merged, images=[])
-                # Update carried slots for next question (if there is one)
-                carried = merged
-                asked = pending
+
+        # The ask-back guesswork that used to live here is gone, and its
+        # absence is the point of wiring the graph in.
+        #
+        # It worked like this: the previous turn's question was stored in a
+        # `pending` string, and this turn was inspected to guess whether it was
+        # an answer to it. The guess got "Can I use Ultra on the same wall?"
+        # wrong -- nine words, and the detector found a slot in it -- so a new
+        # question was discarded and the earlier one re-answered in its place.
+        # Everything about the half-finished turn that was not in the `pending`
+        # string was lost, because a string is all there was.
+        #
+        # `assistant/graph.py` pauses the turn instead of describing it. The
+        # conversation is parked in the checkpoint under this session id, and
+        # the next message resumes it from the node it stopped in, through
+        # retrieval and the evidence gate, to the question originally asked.
+        # There is nothing here to keep in step with it.
 
         if path == "/ask":
             reply = None
             try:
-                # Build multi-turn context from prior turns for grounded reasoning
-                context = self._build_context(self.session_id)
-                # If we auto-answered a pending question, use that reply.
-                # Otherwise, ask the current question.
-                reply = (auto_answered if auto_answered else
-                         self.assistant.ask(asked, audiences=audiences,
-                                            correlation_id=self.correlation_id,
-                                            carried=carried, images=images,
-                                            context=context)
-                         if question else None)
+                reply = self._answer(question, audiences, images) if question else None
+                # After a resumed ask-back the message typed was "brick" and the
+                # question answered was the one from two turns ago. The page
+                # reports the latter, which is what the person is reading.
+                if reply is not None and reply.parts:
+                    asked = reply.parts[0][1].diagnostics.get(
+                        "resumed_question") or question
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 # The HTML branch has always handled this; the JSON branch did
                 # not, so an unreachable model answered a request with a
@@ -1049,7 +1068,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if reply is not None:
-                self._remember(question, reply, auto_answered=bool(auto_answered))
+                self._remember(question, reply)
 
             payload = {
                 "question": question,
@@ -1085,16 +1104,8 @@ class Handler(BaseHTTPRequestHandler):
         audience_display = audiences[0] if audiences else "public"
         if question:
             try:
-                # Build multi-turn context from prior turns for grounded reasoning
-                context = self._build_context(self.session_id)
-                # If we auto-answered a pending question, use that reply.
-                # Otherwise, ask the current question.
-                reply = (auto_answered if auto_answered else
-                         self.assistant.ask(asked, audiences=audiences,
-                                            correlation_id=self.correlation_id,
-                                            carried=carried, images=images,
-                                            context=context))
-                self._remember(question, reply, auto_answered=bool(auto_answered))
+                reply = self._answer(question, audiences, images)
+                self._remember(question, reply)
                 initial_content = render_html(reply, verbose)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 initial_content = (f"<div class='message assistant'>"
@@ -1109,7 +1120,34 @@ class Handler(BaseHTTPRequestHandler):
             footer_audience=f"audience: {audience_display}")
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _remember(self, question: str, reply, auto_answered: bool = False) -> None:
+    def _answer(self, question: str, audiences: tuple, images: list):
+        """One turn, through the state machine. The single answering path.
+
+        The session cookie is the graph's `thread_id`, which is what makes the
+        two layers agree by construction rather than by being kept in step: the
+        conversation the page thinks it is showing and the conversation the
+        graph is continuing are the same object, addressed by the same id.
+
+        The transcript is passed as `history` and reaches generation only --
+        never the policy gate, the slot detector or the embedder. That
+        separation is the whole of `tests/test_context_isolation.py`, and it is
+        why `_build_context` is read here and nowhere earlier.
+        """
+        from .conversation import TurnInput
+
+        turn = TurnInput(
+            raw_question=question,
+            turn_index=len(self.sessions.turns(self.session_id)) + 1,
+            images=tuple(images or ()),
+            audiences=tuple(audiences),
+            session_id=self.session_id,
+            correlation_id=self.correlation_id,
+        )
+        object.__setattr__(turn, "history", self._build_context(self.session_id))
+        reply, _state = self.assistant.ask_turn(turn)
+        return reply
+
+    def _remember(self, question: str, reply) -> None:
         """Fold what this turn established back into the session.
 
         The slots taken are the ones the router actually detected, read off the
@@ -1118,10 +1156,24 @@ class Handler(BaseHTTPRequestHandler):
         and cleared by anything else, so a question that was answered never
         resumes later.
 
-        When `auto_answered` is True, we've just answered a pending question
-        with merged slots (carried + newly detected from the ask-back answer).
-        In that case, the slots are taken from carried (since they were used
-        to answer the pending question), and pending is cleared.
+        When `auto_answered` is True this turn answered an ask-back rather than
+        asking a new question, and the slots to remember are the carried ones
+        **plus what this turn just supplied**. `stated` is that second half, and
+        it has to be passed in rather than re-read.
+
+        Re-reading is what the bug was. The branch used to be
+        `slots = self.sessions.carried(self.session_id)`, and the value the
+        caller had just typed was not in there: it was detected from their
+        reply, merged into a *local* dict to answer the pending question, and
+        then dropped. So the assistant asked "what is the substrate?", was told
+        "brick", answered the original question correctly using brick -- and
+        forgot it. The next turn asked for the substrate again. The feature
+        looked like it worked, once, and defeated itself on turn three.
+
+        The provenance is `STATED` and not `CARRIED`: the person said it in
+        this turn. That distinction reaches the printed sentence, so getting it
+        wrong would tell them they had mentioned it "earlier in this
+        conversation" about a word they had just typed.
 
         **A slot read off a photograph is dropped here, and that is the rule the
         whole vision seam rests on.** `diagnostics["slots"]` is the router's
@@ -1142,14 +1194,11 @@ class Handler(BaseHTTPRequestHandler):
         if reply is None:
             return
 
-        if auto_answered:
-            # We just auto-answered a pending question with merged slots.
-            # Slots should be the carried slots (what we used to answer).
-            # Pending should be cleared (we answered it).
-            slots = self.sessions.carried(self.session_id)
-            pending = ""
-        else:
-            # Normal case: extract slots from the answer, detect ask-backs.
+        if True:
+            # Slots read off the answer, as they always were. The
+            # `auto_answered` branch that used to sit here is gone with the
+            # guesswork it served: the graph resumes a paused turn itself, so
+            # there is no second place deciding what an ask-back established.
             slots: dict = {}
             pending = ""
             for _part, answer in reply.parts:

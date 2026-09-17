@@ -208,6 +208,19 @@ def test_a_cause_is_not_a_slot_a_photograph_may_fill(monkeypatch):
 
 
 def test_the_schema_offers_no_field_a_product_belongs_in():
+    """Decision 16.1's first rule: the vision model never names a product.
+
+    The enum comparison below only proves the schema and the constant agree, so
+    it would go on passing if `product` were added to both. The explicit
+    exclusion is the one that matters, and it carries more weight than it used
+    to: `product` is a carried slot now, and the session keeps a carried slot
+    unless the answer marks it OBSERVED. A product the model could see would
+    therefore be a model's guess persisted across turns as something the caller
+    said -- which is the leak the whole vision seam exists to prevent, arriving
+    through the one slot the seam does not filter.
+    """
+    assert "product" not in VISION_SLOTS
+
     schema = observation_schema()
     item = schema["properties"]["observations"]["items"]
     assert item["properties"]["attribute"]["enum"] == list(VISION_SLOTS)

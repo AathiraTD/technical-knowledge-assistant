@@ -4,7 +4,7 @@
   "topics": {
     "price": {
       "patterns": [
-        "\\bprice(s|d|ing)?\\b", "\\bcost(s|ing)?\\b", "how much (is|are) (it|this|the)",
+        "\\bprice(s|d|ing)?\\b", "\\bcost(s|ing)?\\b", "how much (is|are)\\b(?! needed| required)",
         "\\bquote\\b", "\\bquotation\\b", "\\bcheap(er|est)?\\b", "\\bdiscount\\b",
         "\\bper (bag|sack|tonne|pallet) cost\\b", "£"
       ],

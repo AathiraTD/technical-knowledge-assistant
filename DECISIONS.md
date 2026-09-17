@@ -27,6 +27,7 @@ Each entry follows the same five questions, in the order a panel asks them: why 
 | 17 | Embedding cache | Content-addressed and shipped: a clean clone indexes in seconds, not forty minutes |
 | 18 | Delta ingestion | Unchanged documents are not reprocessed; changed ones keep the version they replaced; withdrawn ones are deactivated, never deleted |
 | 19 | Controlled knowledge release | Immutable originals, validated publication, pinned readers, real backend parity and durable ingestion jobs |
+| 20 | Conversation orchestration | LangGraph owns the turn as a state machine; domain logic stays outside it, and hosted tracing is disabled in code |
 
 ---
 
@@ -510,9 +511,90 @@ Run 2 extracted nothing, chunked nothing and embedded nothing. Run 3 left Solo w
 
 **Primary design references:** [SQLite snapshot isolation](https://www.sqlite.org/isolation.html), [SQLite WAL](https://www.sqlite.org/wal.html), [Psycopg transactions](https://www.psycopg.org/psycopg3/docs/basic/transactions.html), [HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html).
 
+## 20. Conversation orchestration: LangGraph, as a stated exception to decision 4
+
+**Why it exists.** Decision 4 rejects frameworks, and that reasoning still holds
+for retrieval: every guardrail sits exactly where a chain would abstract. What
+changed is that the turn stopped being a function and became a state machine.
+Structured query understanding, image observations that persist, a
+missing-information loop, candidate discovery, evidence sufficiency,
+recommendation, verification and multi-turn correction are all *ordering*
+concerns, and the bugs found in the hand-rolled version were all ordering bugs:
+a transcript contaminating deterministic routing, an ask-back value used once
+and dropped, conversation facts from one wall reaching a question about another.
+
+**Alternatives.** Keep hand-rolling the orchestration. Adopt LangChain agents.
+Use a generic agent loop.
+
+**Why this one, and what the spike measured.** Two parallel implementations of
+the same nine-node graph were built and run against the same fourteen
+behavioural checks — one on LangGraph, one on a hand-written runner. **Both
+passed 14/14.** The node functions, the reducer and the routing predicates were
+identical text in both, because they are domain code; what differed was 47 lines
+of runner against 28 additional packages.
+
+On that evidence the first recommendation was to keep the architecture and
+decline the dependency. It was overruled deliberately, and the reason is sound:
+the decision is about conversation-state complexity rather than about line
+count, and a checkpointer, `interrupt()`/`Command(resume=...)` and a
+PostgreSQL-backed store are things this system would otherwise grow itself,
+badly, one requirement at a time. The 47-line runner is only 47 lines because it
+does not yet do durable checkpointing, resume, or time travel.
+
+**What was not given up.** No domain logic moved into the graph. The repository,
+retrieval, the policy gate, the six post-generation checks, the calculations and
+the audience filter are called by nodes and unchanged. `assistant/graph.py`
+contains ordering and nothing else, which is what keeps decision 4's real claim —
+that the technical team can inspect every guardrail — true.
+
+**Prove it.** `tests/test_graph.py` asserts the graph's shape, including that no
+edge exists from the evidence gate to a composing path.
+`tests/test_checkpointing.py` proves continuity comes from the checkpointer
+rather than from the caller, and that two conversations cannot see each other.
+`tests/test_interrupt_resume.py` exercises a real pause and a real resume
+through the HTTP-shaped entry point. Both spike scripts are retained under
+`spikes/` as the evidence for this entry.
+
+**The privacy condition, which is not optional.** `langgraph` depends on
+`langchain-core`, which depends on `langsmith` — a client for a hosted tracing
+service that exports whole runs, and a run here contains the customer's
+question, the retrieved passages and the conversation state. It is switched off
+in `assistant/__init__.py` before anything imports it, by assignment rather than
+`setdefault`, and again at the process-global level in `assistant/graph.py`.
+
+That distinction was measured rather than assumed. The first version used
+`os.environ.setdefault`, which by definition does not override, and a parent
+environment carrying `LANGCHAIN_TRACING_V2=true` with credentials present
+re-enabled export. `tests/test_privacy_tracing.py` now launches the application
+under hostile environment values and proves tracing stays off — with a control
+test proving those same values would switch it on without this application, so
+the suite cannot pass by guarding nothing.
+
+**Where it breaks.** The dependency count went from 5 to 33, which is a real
+cost against decision 4's inspectability argument and is accepted rather than
+explained away. The PostgreSQL checkpointer is a **documented seam, not a
+working adapter**: `langgraph-checkpoint-postgres` publishes 3.0.1, which
+requires `langgraph-checkpoint<4`, while `langgraph==1.2.11` requires `>=4.1.0`
+— installing it downgrades the core package and breaks the graph. Conversation
+state therefore lives in memory, does not survive a restart and is not shared
+between processes; `checkpointer_for()` raises rather than falling back, because
+a deployment that believed its conversations were durable and silently lost them
+would be worse than one that refuses to start.
+
+---
+
 ## Known weaknesses
 
 - **The Postgres adapter passes the contract; it has not been operated.** It now runs the same repository contract, the same ingestion lifecycle, the publication lock and the concurrent-reader tests against a real PostgreSQL 16 with pgvector, in CI and in a container, so parity of testing is no longer the gap it once was. What is missing is use: the submission runs on SQLite, the transcript evidences only that adapter, and no Postgres instance has answered a question outside a test. Contract-verified is not production-proven.
+- **Compatibility is enforced by evidence, and now by a gate over it.**
+  `assistant/candidates.py` assesses each candidate product against the
+  corpus per required property before any recommendation is made, and a
+  product whose substrate suitability is not independently established
+  cannot be recommended. What is still absent is the *matrix*: no
+  product-to-substrate compatibility data exists on the site, and none was
+  invented — `_documented_rule` returns `None` for every pair, and `None`
+  reads as unknown rather than as permission. Building that matrix remains
+  partnership work. The older statement of this weakness follows.
 - **Compatibility is enforced by citation, not by a rules gate.** Nothing deterministic decides which products are eligible for a substrate before retrieval runs; the assistant can only say what a cited passage says, which prevents invention but does not actively exclude an incompatible product. The proper mechanism is an eligibility stage — substrate and exposure in, candidate products out, retrieval restricted to those — and it needs the product-to-substrate compatibility matrix, which the data inventory records as existing nowhere on the site, scattered across datasheets and advisors' heads. Building that matrix is partnership work; the eligibility gate follows it.
 - **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
 - **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
