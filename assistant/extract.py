@@ -599,7 +599,34 @@ def harvest(soup: BeautifulSoup) -> dict:
             if not _NOT_A_COLOUR.search(text):
                 colours.append(text)
         elif re.search(r"/products/[a-z0-9-]+/[a-z0-9-]+", href):
-            products.append(text)
+            # A product is a proper noun, so its name starts with a capital.
+            #
+            # Without this, any editorial link to a product page contributes
+            # whatever words happen to be hyperlinked. The breathability
+            # article writes `<a href="/products/lime-plaster/solo-onecoat-
+            # plaster"> lime plaster</a>` mid-sentence, and **"lime plaster"
+            # became a canonical product name** -- which the recommendation
+            # guard then found inside the perfectly ordinary sentence "Ultra is
+            # a general purpose lime plaster", read as recommending an
+            # unapproved product, and refused a correct cited answer over.
+            #
+            # The obvious rule -- harvest only from the navigation block, as
+            # this function's own docstring claims -- was measured and is
+            # wrong: prose links are where "Lime Green Ultra", "Duro", "Solo"
+            # and "Natural Finish" come from, and excluding them costs 20 real
+            # names that check 5 needs. The text is the signal, not the place.
+            #
+            # Measured over the cached corpus: 63 harvested names become 59,
+            # and the four lost are "lime plaster", "lime mortars", "here in
+            # our gallery" and "pre-mixed Natural Lime Mortar". Every genuine
+            # name survives.
+            #
+            # Deliberately not applied to colours: those are harvested from a
+            # different link shape, the published block is already
+            # title-cased, and widening a rule past the defect it was measured
+            # against is how the next one arrives.
+            if text[:1].isupper():
+                products.append(text)
 
     # The stockists are the alt text of the pins on the supplier map, so they
     # are invisible to any extraction that reads rendered text — which is how a
