@@ -146,6 +146,56 @@ MAX_IMAGE_BYTES = int(os.environ.get("VISION_MAX_IMAGE_BYTES", str(8 * 1024 * 10
 
 VISION_MODEL = os.environ.get("VISION_MODEL", GENERATION_MODEL)
 
+# --------------------------------------------------- the demonstration flag
+#
+# `ASSISTANT_VISION_DEMO=1` turns image reading on. **Off is the default, and
+# off is a supported state rather than a broken one** -- it is exactly decision
+# 16's published behaviour: the photograph is detected, the assistant says it
+# cannot see it, and the enquiry goes to a person. Nothing degrades except
+# coverage.
+#
+# Defaulting to off is the right way round for three reasons that are worth
+# stating, because "new capability, therefore on" is the obvious instinct.
+# Perception costs one to three minutes per image on a processor with no
+# graphics card, so an accidental upload on a shared deployment is a
+# denial-of-service with good intentions. The vision model is a separate pull
+# that an operator may simply not have. And decision 16's argument -- that a
+# confident wrong visual reading is the worst failure this system can produce
+# -- has not been retired by making perception work; it is why every reading
+# is hedged and why `location` still cannot route.
+#
+# Read through `enabled()` rather than captured here, so a process can be
+# started with it set and a test can turn it on and off without reimporting
+# the module.
+VISION_DEMO_FLAG = "ASSISTANT_VISION_DEMO"
+
+_TRUE = {"1", "true", "yes", "on", "enabled"}
+
+
+def enabled(environ=None) -> bool:
+    """Is image reading switched on for this process?
+
+    The single answer to that question. A surface, the graph and a readiness
+    check must not each decide it from their own reading of the environment --
+    that is how a page comes to say it read a photograph that nothing looked
+    at, which is the specific bug the graph's `analyse_images` already carries
+    a comment about.
+    """
+    raw = (environ if environ is not None else os.environ).get(
+        VISION_DEMO_FLAG, "")
+    return str(raw).strip().lower() in _TRUE
+
+
+# What a surface says when a photograph arrives and vision is switched off.
+# Phrased as decision 16's hand-off rather than as an error, because that is
+# what it is: the system is doing the published thing, not failing to do a
+# different one.
+DISABLED_NOTE = (
+    "Image reading is switched off on this deployment, so the photograph was "
+    "not looked at. Tell me what the wall is built of and whether it is "
+    "inside or outside and I can answer from the published material."
+)
+
 # Long, because a vision encoder on a processor with no graphics card is slow.
 # Measured, not estimated: one 512x512 image through `qwen3.5:4b` on the build
 # machine took **191.9 seconds**. That is the same order as the 115-199 s the
@@ -430,38 +480,16 @@ class Resolution:
     # a looping model, and a looping model's readings do not fill slots.
     truncated: bool = False
 
-    def reportable(self) -> tuple[ResolvedAttribute, ...]:
-        """Everything worth showing a person, firmest first."""
-        order = {Certainty.OBSERVED: 0, Certainty.LIKELY: 1,
-                 Certainty.UNCERTAIN: 2, Certainty.CANNOT_DETERMINE: 3}
-        return tuple(sorted(self.attributes,
-                            key=lambda a: (order[a.certainty], a.slot)))
-
-    def summary(self) -> list[str]:
-        """The photograph in plain sentences, each carrying its own certainty.
-
-        Written here rather than in the renderer because the hedge and the
-        claim must not be separable: a caller that could print the value
-        without the certainty would be turning a reading into a fact, which is
-        the failure this whole module is arranged around.
-        """
-        phrase = {
-            Certainty.OBSERVED: "{value} ({slot}) -- clearly visible",
-            Certainty.LIKELY: "{value} ({slot}) -- likely, but not certain "
-                              "from the photograph",
-            Certainty.UNCERTAIN: "{slot} -- uncertain; the photograph is not "
-                                 "clear enough to rely on",
-            Certainty.CANNOT_DETERMINE: "{slot} -- cannot be determined from "
-                                        "the photograph",
-        }
-        out = []
-        for attribute in self.reportable():
-            out.append(phrase[attribute.certainty].format(
-                slot=attribute.slot.replace("_", " "),
-                value=attribute.value.replace("_", " ")))
-            if attribute.withheld:
-                out.append(f"    ({attribute.withheld})")
-        return out
+    # There is deliberately no `summary()` or `reportable()` here.
+    #
+    # Both existed and both were replaced by `perception_report`, which has to
+    # tolerate an injected provider that is not this class. Leaving them would
+    # have left **two** copies of the certainty phrase table -- one keyed on
+    # the enum, one on its value -- and two renderings of the same reading that
+    # nothing forced to agree. A drift between them would show up as a
+    # photograph described one way on the page and another in the log, which is
+    # the sort of discrepancy that costs an afternoon to chase and is free to
+    # prevent by having one renderer.
 
 
 # --------------------------------------------------------------- the schema
@@ -1363,6 +1391,36 @@ def perception_report(resolution) -> dict:
         "discarded": list(getattr(resolution, "discarded", ()) or ()),
         "refused_attributes": list(getattr(resolution, "refused", ()) or ()),
         "truncated": bool(getattr(resolution, "truncated", False)),
+        # True whenever perception actually ran, which is what lets a surface
+        # tell "looked and saw nothing" apart from "never looked". The two
+        # deserve different sentences and only one of them is a limitation of
+        # the photograph.
+        "enabled": True,
+    }
+
+
+def disabled_report() -> dict:
+    """The same shape, for a turn where image reading is switched off.
+
+    Same keys as `perception_report`, so no caller needs a second branch and
+    no renderer can be surprised by a missing field. What differs is `enabled`,
+    and it differs *loudly*: `summary` carries the hand-off sentence, so a
+    surface that prints the summary and nothing else still tells the truth.
+
+    This exists because the alternative -- returning nothing at all -- is the
+    failure the graph already carries a comment about: every surface passed no
+    provider, every photograph was ignored, and the page still said it had read
+    one. Silence about an upload is indistinguishable from having looked.
+    """
+    return {
+        "routed": {},
+        "observations": [],
+        "cannot_determine_from_image": [],
+        "summary": [DISABLED_NOTE],
+        "discarded": [],
+        "refused_attributes": [],
+        "truncated": False,
+        "enabled": False,
     }
 
 

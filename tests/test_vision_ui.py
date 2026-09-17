@@ -70,6 +70,10 @@ def serve(tmp_path, monkeypatch):
 
     def start(seen):
         monkeypatch.setattr(vision, "observe", lambda *_a, **_k: seen)
+        # The enabled path, over HTTP. No provider is injected here on purpose
+        # -- the point is to exercise what a browser actually reaches -- so the
+        # flag has to be on, exactly as it would be on a demo deployment.
+        monkeypatch.setenv(vision.VISION_DEMO_FLAG, "1")
         Handler.assistant = Assistant(repo)
         Handler.meta = "test"
         Handler.audiences = ("public",)

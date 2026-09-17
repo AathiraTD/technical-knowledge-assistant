@@ -509,6 +509,19 @@ function renderPerception(perception, container) {{
   if (!perception) return;
   const el = document.createElement('div');
   el.className = 'message assistant';
+
+  // Switched off is a supported state, not an error, and it gets its own
+  // sentence rather than an empty "From the photograph" heading -- which would
+  // read as "looked and saw nothing" when nothing looked.
+  if (perception.enabled === false) {{
+    el.innerHTML = '<div class="message-bubble"><strong>Photograph not read' +
+                   '</strong><div class="perception-none">' +
+                   escapeHtml((perception.summary || []).join(' ')) +
+                   '</div></div>';
+    container.appendChild(el);
+    return;
+  }}
+
   let html = '<div class="message-bubble"><strong>From the photograph</strong>';
 
   const rows = (perception.observations || []);
