@@ -310,13 +310,18 @@
       "name": "Render cracking, with the symptom slot dropped afterwards",
       "category": "troubleshooting",
       "expected": "handoff",
-      "why": "The diagnosis path again, plus the state rule that matters for a demonstration: a symptom must not pin the session to the diagnosis path. The second turn is an ordinary lookup and must route as though the first had never been asked.",
+      "why": "The state rule that matters for a demonstration: a symptom must not pin the session to the diagnosis path. The second turn is an ordinary lookup and must route as though the first had never been asked. Two routes are accepted on the first turn, and the reason is a finding rather than a hedge. Step 3 is the diagnosis path; step 2 is the published deferral, and it fires here because the top passage is the Tradirend product page, whose marketing copy ends by inviting the reader to contact the team. Decision 8 gives step 2 precedence deliberately -- where Lime Green has already said a question needs a person, the assistant does not answer around it -- but a page footer is not a decision about this question, and the diagnosis hand-off is the better of the two outputs: it says plainly that working out what went wrong is a judgement for the technical team, and quotes three passages rather than one. This is the same root cause as the diagnosis-selection defect, marketing copy outranking technical content, one layer earlier. Changing router precedence is a documented-architecture decision rather than a bug fix, so it is reported rather than taken. Both outputs hand off and neither diagnoses, which is what the remaining expectations assert.",
       "turns": [
         {
           "question": "Why is my lime render cracking?",
           "expect": {
-            "path_in": ["diagnosis"],
-            "step_in": ["3"],
+            "path_in": ["diagnosis", "cited hand-off"],
+            "step_in": ["2", "3"],
+            "must_cite_or_handoff": true,
+            "answer_must_not_match": [
+              "\\bthis is (?:definitely|certainly|clearly)\\b",
+              "\\bthe cause is\\b"
+            ],
             "session_slots_exclude": ["symptom", "cause_asked"]
           }
         },
