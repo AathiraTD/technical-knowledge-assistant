@@ -1031,14 +1031,43 @@ def check_gold_turn(spec: dict, record: "TurnRecord",
 
 
 def run_gold(assistant, spec: dict, context: "GoldContext") -> tuple[bool, list[dict]]:
-    """One gold scenario, end to end, through the page's own orchestration."""
+    """One gold scenario, end to end, through the page's own orchestration.
+
+    A turn that cannot be asked at all is recorded as a failure and the run
+    carries on. That is not indulgence towards a flaky model server; it is the
+    difference between a measurement and nothing. A full pass over this set is
+    the better part of an hour of generation on this hardware, and the first
+    attempt died on scenario two with an Ollama 500 -- an intermittent fault
+    under memory pressure, on a machine where the same compose has been timed
+    between 7 and 184 seconds. Losing the other twenty-seven scenarios to it
+    told us nothing about any of them.
+
+    The failure is tagged `[infrastructure]` rather than blamed on a stage, so
+    it cannot be mistaken for a retrieval or verification result, and it is
+    counted separately in the summary. A scenario that could not be evaluated is
+    not a scenario that passed and not one the system got wrong.
+    """
     conversation = Conversation(assistant, label=spec["id"])
     questions = [t["question"] for t in spec["turns"]]
     rows: list[dict] = []
     ok = True
     for number, turn_spec in enumerate(spec["turns"]):
-        record = conversation.ask(turn_spec["question"],
-                                  audiences=tuple(spec.get("audiences", ["public"])))
+        try:
+            record = conversation.ask(
+                turn_spec["question"],
+                audiences=tuple(spec.get("audiences", ["public"])))
+        except Exception as error:                            # noqa: BLE001
+            ok = False
+            rows.append({"turn": number + 1, "question": turn_spec["question"],
+                         "asked": turn_spec["question"], "pass": False,
+                         "notes": [f"[infrastructure] the turn could not be "
+                                   f"asked: {type(error).__name__}: {error}"],
+                         "paths": [], "refused": False, "render": "",
+                         "steps": [], "intents": [], "sources": [],
+                         "slots": {}, "session_slots": {}})
+            # The rest of the scenario depends on this turn's state, so
+            # continuing would measure a conversation that never happened.
+            break
         turn_ok, notes = check_gold_turn({**turn_spec, "_turns": questions},
                                          record, context)
         ok = ok and turn_ok
@@ -1101,11 +1130,19 @@ def gold_metrics(results: list[dict]) -> dict:
     multi_turn_failures = [
         r for r in multi_turn
         if any(layer_of(n) == "state" for t in r["turns"] for n in t["notes"])]
+    # Scenarios that could not be asked at all. Reported apart from everything
+    # else, because a model server that fell over is not a result about the
+    # system and counting it as one would be the harness lying in the direction
+    # that flatters nobody.
+    not_evaluated = [r["id"] for r in results
+                     if any(layer_of(n) == "infrastructure"
+                            for t in r["turns"] for n in t["notes"])]
 
     return {
         "scenarios": total,
         "passed": len(passed),
         "failed": len(failed),
+        "not_evaluated": not_evaluated,
         "by_expected": {kind: {"total": len(of_kind(kind, results)),
                                "passed": len(of_kind(kind, passed))}
                         for kind in OUTCOMES},
@@ -1146,6 +1183,8 @@ def gold_report(results: list[dict], metrics: dict, header: list[str]) -> str:
         f"{len(m['multi_turn']['context_failures'])}"
         + (f" — {', '.join(m['multi_turn']['context_failures'])}"
            if m['multi_turn']['context_failures'] else ""),
+        f"Not evaluated (the model server failed): {len(m['not_evaluated'])}"
+        + (f" — {', '.join(m['not_evaluated'])}" if m['not_evaluated'] else ""),
         "",
         "## Failed expectations by stage",
         "",
