@@ -118,14 +118,26 @@ def check(db: str = "", dsn: str = "") -> dict:
             return report
 
         # Reported either way; load-bearing only for an image demonstration.
+        #
         # Imported here rather than at module scope because `assistant.vision`
         # pulls in the router and its vocabularies, and a readiness probe that
         # runs every fifteen seconds should not pay for them.
-        from .vision import VISION_MODEL
+        #
+        # Guarded because the text path does not need this module at all. A
+        # readiness check that raised on a broken import would report the whole
+        # system unable to answer questions on account of a roadmap feature it
+        # does not use -- turning an unused stage into an outage, which is the
+        # opposite of what a probe is for.
         demo = vision_demo_enabled()
-        report["vision"] = {"model": VISION_MODEL,
-                            "pulled": _pulled(VISION_MODEL, have),
-                            "required": demo}
+        try:
+            from .vision import VISION_MODEL
+        except Exception as exc:                        # pragma: no cover
+            report["vision"] = {"model": "", "pulled": False, "required": demo,
+                                "error": str(exc)}
+        else:
+            report["vision"] = {"model": VISION_MODEL,
+                                "pulled": _pulled(VISION_MODEL, have),
+                                "required": demo}
         if demo:
             report["checks"]["vision_model_pulled"] = report["vision"]["pulled"]
 
