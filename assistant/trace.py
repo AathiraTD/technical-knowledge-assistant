@@ -106,8 +106,14 @@ def _identity(spans: list[TraceSpan]) -> list[str]:
     failed = [s for s in spans if s.status != "ok"]
     if failed:
         header.append(f"failed       {', '.join(sorted({s.name for s in failed}))}")
-    return header + ["", "--- python -m assistant.trace "
-                     f"--session {first.session_id} for the whole conversation", ""]
+    # The next command, but only when there is a conversation to widen into.
+    # A library embedder that opens no session would otherwise be handed
+    # `--session ` with nothing after it, which is an instruction to type
+    # something that cannot work.
+    if first.session_id:
+        header += ["", f"--- python -m assistant.trace --session "
+                       f"{first.session_id} for the whole conversation"]
+    return header + [""]
 
 
 def render(spans: list[TraceSpan], show_all: bool = False) -> str:
