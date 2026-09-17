@@ -624,13 +624,35 @@ def _figure_is_published(token: str, passage: str) -> bool:
     return re.search(anchored, passage) is not None
 
 
+def products_named(text: str, registry) -> set[str]:
+    """Every published product this text names, in the one normalised spelling.
+
+    Word boundaries, not containment. `"solo" in text` matches "solo" inside
+    "isolation" and every other accident of spelling, and the thing this feeds
+    refuses an answer, so a false positive is a refusal of something correct.
+
+    Returned without the maker's name, because the site writes both forms and
+    which one a passage uses is an accident of how that page was written.
+    """
+    lowered = text.lower()
+    return {_without_brand(name.lower()) for name in registry
+            if name and re.search(rf"\b{re.escape(name.lower())}\b", lowered)}
+
+
 def run_checks(
     text: str,
     hits: list[Retrieved],
     names: dict,
     asked_terms: list[str],
+    product: str = "",
+    asked_products: tuple[str, ...] = (),
 ) -> list[str]:
-    """The six checks, in order. Returns the failures; empty means it prints."""
+    """The checks, in order. Returns the failures; empty means it prints.
+
+    `product` and `asked_products` drive check 7 and nothing else. Both default
+    to empty, so every existing caller runs exactly the six checks it always
+    ran, and a question that resolved no product is unaffected.
+    """
     failures: list[str] = []
     cited_index = {i + 1: h for i, h in enumerate(hits)}
 
@@ -803,6 +825,62 @@ def run_checks(
                         for h in considered).lower()
         if not any(t.lower() in blob for t in asked_terms):
             failures.append("check 6: the property asked about is not in a cited passage")
+
+    # 7 — the answer is still about the product that was asked about.
+    #
+    # The five checks above ask whether a claim is *supported*. None of them
+    # asks whether it is about the right thing, and the gap between those two
+    # is a real answer this system gave: asked "and what thickness should I
+    # apply it at?" with Ultra carried from the previous turn, it replied "for
+    # the general purpose Duro lime base coat, the first coat should be applied
+    # between 9 to 12 mm thick" and **passed every check**.
+    #
+    # It passed honestly, which is what makes this worth a check of its own.
+    # The sentence is supported by the passage it cites, the figure is verbatim
+    # in that passage, and Duro is a real published product, so check 5 allows
+    # it. Check 3 -- the one that exists to keep a figure with its product --
+    # could not fire either, because it compares against the products of the
+    # *retrieved passages* and no Duro passage was retrieved. Duro was named
+    # inside the prose of a general FAQ answer about lime basecoats, and the
+    # model copied it out. Citation correctness held; product correctness did
+    # not.
+    #
+    # **Cited evidence only.** The allowed set grows from the passages the
+    # answer actually relied on, not from everything retrieval happened to
+    # return -- the same tightening check 6 already had, for the same reason.
+    # Expanding it from all retrieved own-product passages was measured and is
+    # too wide: on the failing turn it would have admitted Solo, Fine Stuff and
+    # Natural Finish, and caught Duro only by the accident that no Ultra
+    # passage mentions Duro.
+    #
+    # The third source is what keeps legitimate cross-product answers working.
+    # Situation S8 asks which finish coats suit Forte, and the Forte
+    # datasheet's own Finishing Coats section names Tradirend, Natural Finish
+    # and Finish WP outright. A product the resolved product's own cited
+    # evidence introduces is a product that evidence authorises, so naming it
+    # back is not drift.
+    #
+    # Skipped entirely when nothing resolved a product, which is most of the
+    # corpus's questions and all of the ones with no product to be about.
+    if product:
+        registry = names.get("products", [])
+        cited = {m for s in sentences for m in
+                 (int(x) for x in _CITE.findall(s)) if m in cited_index}
+        allowed = {_without_brand(product.lower())}
+        allowed |= {_without_brand(p.lower()) for p in asked_products if p}
+        for marker in cited:
+            hit = cited_index[marker]
+            if product_matches(product, hit.chunk.product or ""):
+                allowed |= products_named(hit.chunk.content, registry)
+        # Compared with the shared containment rule rather than by equality,
+        # so the catalogue's "Ultra Insulating Lime Render Base Coat" and a
+        # caller's "Ultra" are one product and not two.
+        strayed = sorted(named for named in products_named(text, registry)
+                         if not any(product_matches(named, ok) for ok in allowed))
+        if strayed:
+            failures.append(
+                f"check 7: the answer is about {strayed[0]!r}, which is not the "
+                "product this question asked about")
 
     return list(dict.fromkeys(failures))
 
@@ -1152,8 +1230,16 @@ class AnswerEngine:
         # them: `run_checks` is called exactly as before and decides exactly
         # what it decided before. What the span adds is how long they cost and
         # which ones fired, which is how over-refusal becomes countable.
-        with obs.span("checks", count=6) as checking:
-            failures = run_checks(text, hits, self.names, terms)
+        # The product this answer is supposed to be about, and the products the
+        # caller named themselves. Check 7 reads both; nothing else does. Taken
+        # from the question rather than from retrieval, because "can I use Ultra
+        # over Solo" authorises Solo whether or not a Solo passage was ranked.
+        scope = decision.slots.get("product", "")
+        asked_products = tuple(products_named(question,
+                                              self.names.get("products", [])))
+        with obs.span("checks", count=7, product=scope) as checking:
+            failures = run_checks(text, hits, self.names, terms,
+                                  product=scope, asked_products=asked_products)
             # The check *numbers*, not the failure messages. The review's table
             # asks for "check numbers and text" and the text cannot come: check
             # 1 quotes seventy characters of the offending sentence and check 5

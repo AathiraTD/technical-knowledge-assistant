@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.answer import run_checks                      # noqa: E402
+from assistant.answer import products_named, run_checks      # noqa: E402
 from assistant.model import Chunk, Document, Retrieved       # noqa: E402
 
 NAMES = {
@@ -499,3 +499,177 @@ def test_the_makers_name_is_forgiven_against_the_passage_too():
     ok = run_checks("The finishing treatment is Lime Green Silguard [1].",
                     [sheet], NAMES, [])
     assert "check 5" not in names_of(ok), ok
+
+
+# ---------------------------------------------------------------- check 7
+#
+# The answer is still about the product that was asked about.
+#
+# Checks 1 to 6 ask whether a claim is *supported*. None asks whether it is
+# about the right thing, and the gap between those two is a real answer this
+# system gave: asked "and what thickness should I apply it at?" with Ultra
+# carried from the previous turn, it replied "for the general purpose Duro lime
+# base coat, the first coat should be applied between 9 to 12 mm thick" and
+# passed every check. It passed honestly -- the sentence was supported by the
+# passage it cited, the figure was verbatim in it, and Duro is a real published
+# product, so check 5 allowed it. Check 3, the one that exists to keep a figure
+# with its product, could not fire either: it compares against the products of
+# the *retrieved* passages, and no Duro passage was retrieved. Duro was named
+# inside the prose of a general FAQ answer about lime basecoats, and the model
+# copied it out. Citation correctness held; product correctness did not.
+
+ULTRA_REGISTRY = {
+    "products": ["Ultra", "Ultra Insulating Lime Render Base Coat", "Duro",
+                 "Solo", "Natural Finish"],
+    "colours": [], "merchants": [],
+    "contact": {"phone": "0800 538 5746", "hours": "Mon - Fri 9:00am - 5:00pm"},
+}
+
+ULTRA_PASSAGE = passage(
+    "Ultra should be applied in a uniform thickness of between 10 and 30mm.",
+    product="Ultra Insulating Lime Render Base Coat", section="How to Apply",
+    url="https://example/ultra")
+
+# The shape that caused the defect: a general answer carrying no product tag of
+# its own, naming another product in its prose.
+FAQ_PASSAGE = passage(
+    "The recommended thickness depends on the product being applied. In the "
+    "case of our general purpose Duro lime base coat, the first coat should be "
+    "applied between 9 to 12 mm thick.",
+    product="Frequently Asked Questions about Lime Green products",
+    section="Plasters", url="https://example/faq")
+
+
+def test_an_answer_about_another_product_is_refused():
+    """The measured failure, reduced to its fixture.
+
+    Everything about this sentence is honest except its subject: it cites the
+    passage it came from, the figure is verbatim in that passage, and Duro is a
+    published product. Only check 7 can see that the question was about Ultra.
+    """
+    failures = run_checks(
+        "For the general purpose Duro lime base coat, the first coat should be "
+        "applied between 9 to 12 mm thick [1].",
+        [FAQ_PASSAGE], ULTRA_REGISTRY, [], product="ultra")
+
+    assert "check 7" in names_of(failures), failures
+
+
+def test_an_answer_about_the_resolved_product_passes():
+    """The ordinary case, which must not become a refusal."""
+    failures = run_checks(
+        "Ultra should be applied in a uniform thickness of between 10 and 30mm [1].",
+        [ULTRA_PASSAGE], ULTRA_REGISTRY, [], product="ultra")
+
+    assert failures == [], failures
+
+
+def test_a_product_the_caller_named_themselves_is_allowed():
+    """Situation S9: is Natural Finish compatible with Duro?
+
+    Naming Duro in the answer is answering the question that was asked. The
+    allowed set takes it from the question rather than from the evidence,
+    because a caller who names a product has authorised it whether or not
+    retrieval happened to rank one of its passages.
+    """
+    both = passage(
+        "Natural Finish is applied as a finishing coat to Duro lime render.",
+        product="Natural Finish", section="Finishing Coats",
+        url="https://example/natural-finish")
+
+    failures = run_checks(
+        "Natural Finish is applied as a finishing coat to Duro lime render [1].",
+        [both], ULTRA_REGISTRY, [], product="natural finish",
+        asked_products=("duro", "natural finish"))
+
+    assert failures == [], failures
+
+
+def test_a_product_the_cited_evidence_introduces_is_allowed():
+    """Situation S8's shape: the resolved product's own sheet names another.
+
+    The Forte datasheet's Finishing Coats section names Tradirend outright, so
+    naming it back is not drift -- that evidence authorised it. Here the cited
+    Ultra passage names Solo.
+    """
+    ultra_names_solo = passage(
+        "Ultra may be finished with Solo where a smooth surface is wanted.",
+        product="Ultra Insulating Lime Render Base Coat",
+        section="Finishing Coats", url="https://example/ultra")
+
+    failures = run_checks(
+        "Ultra may be finished with Solo where a smooth surface is wanted [1].",
+        [ultra_names_solo], ULTRA_REGISTRY, [], product="ultra")
+
+    assert failures == [], failures
+
+
+def test_an_uncited_passage_cannot_widen_the_allowed_set():
+    """Cited evidence only, which is the same tightening check 6 already had.
+
+    The Ultra passage naming Solo is retrieved but never cited, so it
+    authorises nothing. Expanding from everything retrieval returned was
+    measured and is too wide: on the failing turn it would have admitted Solo,
+    Fine Stuff and Natural Finish, and caught Duro only by the accident that no
+    Ultra passage mentions it.
+    """
+    ultra_names_solo = passage(
+        "Ultra may be finished with Solo where a smooth surface is wanted.",
+        product="Ultra Insulating Lime Render Base Coat",
+        section="Finishing Coats", url="https://example/ultra-finishing")
+
+    failures = run_checks(
+        "Ultra is applied in a uniform thickness of between 10 and 30mm, and "
+        "Solo goes over it [1].",
+        [ULTRA_PASSAGE, ultra_names_solo], ULTRA_REGISTRY, [], product="ultra")
+
+    assert "check 7" in names_of(failures), failures
+
+
+def test_check_seven_does_not_run_when_no_product_was_resolved():
+    """Most questions resolve no product, and GD2 and S8 are two of them.
+
+    A question about rendering an exposed wall names no product and must not
+    acquire a product-scope rule it was never in scope for.
+    """
+    failures = run_checks(
+        "For the general purpose Duro lime base coat, the first coat should be "
+        "applied between 9 to 12 mm thick [1].",
+        [FAQ_PASSAGE], ULTRA_REGISTRY, [])
+
+    assert "check 7" not in names_of(failures), failures
+
+
+def test_the_catalogue_name_and_the_callers_name_are_one_product():
+    """Ultra and Ultra Insulating Lime Render Base Coat are not two products.
+
+    Chunks carry the catalogue name and callers say "Ultra", so comparing the
+    allowed set by equality would refuse an answer for naming the very product
+    it is about. The shared containment rule is what makes them one.
+    """
+    failures = run_checks(
+        "Ultra Insulating Lime Render Base Coat should be applied in a uniform "
+        "thickness of between 10 and 30mm [1].",
+        [ULTRA_PASSAGE], ULTRA_REGISTRY, [], product="ultra")
+
+    assert "check 7" not in names_of(failures), failures
+
+
+def test_a_product_name_inside_another_word_is_not_a_mention():
+    """Word boundaries, not containment.
+
+    Testing membership with `in` matches "solo" inside "isolation", and what
+    this feeds refuses an answer, so a false positive here is a refusal of
+    something correct.
+    """
+    named = products_named(
+        "Ultra provides good isolation and consolidates the surface.",
+        ULTRA_REGISTRY["products"])
+
+    assert named == {"ultra"}
+
+    failures = run_checks(
+        "Ultra provides good isolation of the wall at between 10 and 30mm [1].",
+        [ULTRA_PASSAGE], ULTRA_REGISTRY, [], product="ultra")
+
+    assert "check 7" not in names_of(failures), failures
