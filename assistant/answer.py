@@ -372,6 +372,12 @@ def _mentions_coverage(text: str) -> bool:
 # model would be no better off than with the undifferentiated list.
 EVIDENCE_BINDING_CAP = 2
 
+# The document types that speak for a product. Everything else -- the FAQ, the
+# knowledge-base articles, the Warmshell system guides -- is written about the
+# range rather than about one product in it, and that is what makes it
+# dangerous as evidence for a question that named one.
+PRODUCT_DOCUMENT_TYPES = ("datasheet", "product_page")
+
 # What a passage earns for stating a property beside a figure rather than
 # merely mentioning its name. "in a uniform thickness of between 10 and 30mm"
 # states a thickness; "builds up in thick coats" mentions one. Large enough to
@@ -520,6 +526,63 @@ def promote_bound(hits: list[Retrieved],
     if not 0 <= index < len(hits) or index == 0:
         return hits
     return [hits[index]] + [h for i, h in enumerate(hits) if i != index]
+
+
+def scoped_evidence(decision: Decision) -> list[Retrieved]:
+    """Drop general-interest documents once the product's own answer is present.
+
+    The measured case: asked "and what thickness should I apply it at?" with
+    Ultra carried from the previous turn, the model answered from the FAQ entry
+    headed "How thick can I apply lime basecoat in any one go" -- whose body
+    opens "in the case of our general purpose **Duro** lime base coat" -- and
+    reported Duro's 9 to 12 mm as the answer. Ultra's own datasheet was in the
+    same evidence set, at marker [1], saying "between 10 and 30mm".
+
+    Ordering had already been tried and does not fix it. Promotion puts the
+    Ultra passage first and the model still reaches past it, because the FAQ is
+    a question-and-answer pair whose *question* is very nearly the one being
+    asked. A heading that matches the question beats a position in a list, so
+    the only thing that works is for the passage not to be there.
+
+    **Only the general-interest types go, and only when the product's own
+    evidence already answers.** Another product's datasheet stays: "can I use
+    Ultra over Solo" needs Solo's, situation S8's finish coats are named in
+    Forte's own sheet, and a cross-product datasheet passage was measured
+    sitting harmlessly in the set while the FAQ in the same set caused the
+    drift. Measured over forty thin follow-ups across five products, every
+    general-interest passage retrieved duplicated an answer the product's own
+    documents already carried, and seven of the eight named a different
+    product while doing it.
+
+    **The coverage condition is what makes it safe.** If the product's own
+    documents do not answer the property, the full set is returned and nothing
+    is lost -- the FAQ may be the only thing that answers, and check 7 remains
+    the backstop if the model then drifts. Coverage is decided by
+    `evidence_binding`, the same property-support logic Compose already uses to
+    bind claims, rather than by a second heuristic that could disagree with it.
+
+    Returns `decision.hits` unchanged whenever the rule does not apply, so a
+    question that resolved no product, bound no property, or has no
+    product-bound answer behaves exactly as it did before.
+    """
+    product = decision.slots.get("product", "")
+    if not product:
+        return decision.hits
+    bound = evidence_binding(decision)
+    if not bound:
+        return decision.hits
+    covered = any(
+        product_matches(product, decision.hits[marker - 1].chunk.product or "")
+        for markers in bound.values() for marker in markers
+        if 0 < marker <= len(decision.hits))
+    if not covered:
+        return decision.hits
+    kept = [h for h in decision.hits
+            if h.chunk.document_type in PRODUCT_DOCUMENT_TYPES]
+    # Never empty the evidence. If the product-bound answer lives in a document
+    # type this rule would drop, the rule has misread the situation and the
+    # honest response is to change nothing.
+    return kept or decision.hits
 
 
 def _binding_guidance(decision: Decision) -> str:
@@ -1152,7 +1215,13 @@ class AnswerEngine:
         # the document caveats, the `top_score` in the diagnostics, and the
         # closest-guidance passage a refusal prints. Promotion is about what
         # the model reads, not about what retrieval found.
-        hits = promote_bound(decision.hits, evidence_binding(decision))
+        # Membership first, then order. Markers are positions in whatever list
+        # survives, so binding and promotion are recomputed against the scoped
+        # set rather than against the one retrieval returned -- otherwise a
+        # dropped passage shifts every marker after it.
+        scoped = scoped_evidence(decision)
+        hits = promote_bound(scoped,
+                             evidence_binding(replace(decision, hits=scoped)))
         passages = "\n\n".join(
             f"[{i}] {h.document.citation_name}"
             f"{' — ' + h.chunk.section if h.chunk.section else ''}\n{h.chunk.content}"
