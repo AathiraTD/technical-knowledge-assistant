@@ -426,7 +426,91 @@ TURN_EXPECTATIONS = frozenset({
     "session_slots_after", "session_slots_exclude", "pending_after",
     "resumes_turn", "answer_contains_all", "answer_must_not_match",
     "must_cite", "chunks_retrieved", "top_source_must_not_match", "cached",
+    # The structural half, added for the gold set. These read the stages rather
+    # than the prose: what the turn was understood to be, which documents ended
+    # up under the answer, what the evidence gate approved, and whether a number
+    # in the printed answer exists in a passage that answer cited.
+    # `check_structure` implements them and needs a `GoldContext`; a scenario
+    # declaring one without a context fails on the missing context rather than
+    # passing quietly, for the same reason an unknown key fails.
+    "intent_in", "outcome_in", "approved_products_include",
+    "approved_products_empty", "rejected_products_include",
+    "cited_documents_include", "cited_documents_exclude",
+    "answer_contains_any", "answer_contains", "must_cite_or_handoff",
+    "no_sources", "absent_from_evidence", "failed_checks_empty",
+    "numbers_are_published", "no_unapproved_recommendation",
+    "graph_includes", "graph_excludes",
 })
+
+# Which stage a failed expectation points at. What this branch owes is not
+# "nine failures" but "three of them are retrieval and one is conversation
+# state", so every note carries the layer it belongs to and the summary counts
+# them. The mapping is per expectation key rather than per scenario, because one
+# scenario can fail in two different places on two different runs and being told
+# which one is most of the value of having run it.
+LAYER_OF = {
+    "intent_in": "understanding",
+    "slots_include": "understanding",
+    "slots_exclude": "state",
+    "facts": "state",
+    "no_facts_for": "state",
+    "session_slots_after": "state",
+    "session_slots_exclude": "state",
+    "pending_after": "state",
+    "resumes_turn": "state",
+    "cited_documents_include": "retrieval",
+    "cited_documents_exclude": "retrieval",
+    "top_source_must_not_match": "retrieval",
+    "chunks_retrieved": "retrieval",
+    "absent_from_evidence": "retrieval",
+    "no_sources": "routing",
+    "path_in": "routing",
+    "path_not_in": "routing",
+    "step_in": "routing",
+    "step_not_in": "routing",
+    "model_ran": "routing",
+    "graph_includes": "routing",
+    "graph_excludes": "routing",
+    "outcome_in": "sufficiency",
+    "approved_products_include": "sufficiency",
+    "approved_products_empty": "sufficiency",
+    "rejected_products_include": "sufficiency",
+    "refused": "generation",
+    "answer_contains": "generation",
+    "answer_contains_all": "generation",
+    "answer_contains_any": "generation",
+    "cached": "generation",
+    "must_cite": "verification",
+    "must_cite_or_handoff": "verification",
+    "failed_checks_empty": "verification",
+    "answer_must_not_match": "verification",
+    "numbers_are_published": "verification",
+    "no_unapproved_recommendation": "verification",
+}
+
+
+# The expectations `check_structure` owns. Everything else in
+# `TURN_EXPECTATIONS` is checked by `check_turn`, which predates the gold set
+# and is shared with the conversation scenarios.
+STRUCTURAL_KEYS = frozenset({
+    "intent_in", "outcome_in", "approved_products_include",
+    "approved_products_empty", "rejected_products_include",
+    "cited_documents_include", "cited_documents_exclude",
+    "answer_contains_any", "answer_contains", "must_cite_or_handoff",
+    "no_sources", "absent_from_evidence", "failed_checks_empty",
+    "numbers_are_published", "no_unapproved_recommendation",
+    "graph_includes", "graph_excludes",
+})
+
+
+def tagged(key: str, message: str) -> str:
+    """One failure, carrying the stage it belongs to."""
+    return f"[{LAYER_OF.get(key, 'other')}] {message}"
+
+
+def layer_of(text: str) -> str:
+    found = re.match(r"\[([a-z_]+)\]", text)
+    return found.group(1) if found else "other"
 
 
 def turn_slots(record: "TurnRecord") -> dict:
@@ -441,6 +525,272 @@ def turn_facts(record: "TurnRecord") -> dict:
     """Every slot fact this turn printed, by slot name."""
     return {fact.slot: fact
             for _part, answer in record.reply.parts for fact in answer.facts}
+
+
+# ------------------------------------------------- the structural half
+
+
+# A number, with the unit that makes it a measurement rather than a list index.
+_FIGURE = re.compile(r"\d+(?:[.,]\d+)?")
+# Citation markers, which are digits the answer did not take from a passage.
+_MARKER = re.compile(r"\[\d+\]")
+# A vulgar fraction, which the datasheets use and an answer spells out. Evidence
+# reading "1½ m 2" has to satisfy an answer that printed "1.5", or the check
+# fails on a correctly copied figure — which would make it worse than useless.
+_HALF = re.compile(r"(\d)\s*½")
+
+
+def _numbers_in(text: str) -> list[str]:
+    return _FIGURE.findall(_MARKER.sub(" ", text))
+
+
+def _normalise_figures(text: str) -> str:
+    text = _HALF.sub(r"\1.5", text)
+    return _WHITESPACE.sub(" ", text.replace("½", "0.5")).lower()
+
+
+class GoldContext:
+    """Everything the structural expectations need, gathered once.
+
+    Two things it holds are worth explaining, because both are deliberate
+    choices about *how independent* this harness is from the code it measures.
+
+    **The corpus map.** `numbers_are_published` has to compare a figure in the
+    answer against the passage the answer cited, and `Answer.sources` carries a
+    document name and a URL but not the passage text. Rather than add a
+    chunk-lookup method to `KnowledgeRepository` — a shared interface, and not
+    one an evaluation harness should be allowed to grow — this asks the
+    repository for its whole allowed corpus in one retrieval and keeps the
+    passages by chunk id. One embedding call and one numpy pass at start-up buys
+    the exact check instead of a proxy for it, and the repository boundary is
+    untouched.
+
+    **The registry and the recommendation predicate.** `no_unapproved_recommend-
+    ation` deliberately re-asks the question `assistant/graph.py`'s verify node
+    asks, from outside, on the printed text. It shares `recommends_a_product`
+    with the code under test, which is a real limit and is stated rather than
+    hidden: a bug in that predicate would be invisible to both. What it does
+    catch is the case that matters — a product reaching the customer as advice
+    without an evidence assessment behind it — arriving by a route the graph's
+    own check did not cover.
+    """
+
+    def __init__(self, assistant, audiences: tuple[str, ...] = ("public",)):
+        self.assistant = assistant
+        self.audiences = audiences
+        snapshot = assistant.repo.snapshot()
+        notes = snapshot.notes if snapshot else {}
+        self.registry = list(notes.get("products", []))
+        contact = notes.get("contact", {}) or {}
+        # The contact number is printed by every hand-off and is published on
+        # the contact page rather than in a retrieved passage, so its digits
+        # would otherwise read as figures the system invented.
+        self.contact_digits = set(_FIGURE.findall(
+            " ".join(str(v) for v in contact.values())))
+        self.passages = self._corpus()
+        self._evidence: dict = {}
+
+    def _corpus(self) -> dict:
+        """Every passage this audience may see, by chunk id.
+
+        Asked for as one very wide retrieval. The ordering is irrelevant — what
+        is wanted is the whole allowed set — and asking through `retrieve_for`
+        rather than through SQL keeps the audience filter the repository's job,
+        which is the one place it belongs.
+        """
+        from assistant.repository import RetrievalRequest
+        from assistant import ollama
+        vector = ollama.embed_one("lime", model=self.assistant.retriever.embed_model)
+        hits = self.assistant.repo.retrieve_for(RetrievalRequest(
+            embedding=vector, audiences=self.audiences,
+            top_k=10_000, per_document_cap=10_000))
+        return {h.chunk.chunk_id: h.chunk for h in hits}
+
+    def evidence_for(self, question: str) -> str:
+        """The passages retrieval returns for this question, widened and cached."""
+        if question not in self._evidence:
+            self._evidence[question] = retrieved_evidence(self.assistant, question)
+        return self._evidence[question]
+
+    def cited_text(self, answer) -> str:
+        """The passages this answer actually cited, by chunk id.
+
+        Falls back to nothing rather than to something looser. A check that
+        silently widens its haystack when it cannot find the exact one is a
+        check that reports a pass it did not earn.
+        """
+        ids = answer.diagnostics.get("chunk_ids") or []
+        return " ".join(f"{self.passages[i].section} {self.passages[i].content}"
+                        for i in ids if i in self.passages)
+
+
+def check_structure(spec: dict, record: "TurnRecord",
+                    context: "GoldContext") -> tuple[bool, list[str]]:
+    """The expectations that read the pipeline rather than the prose.
+
+    Split out from `check_turn` rather than folded into it because these need a
+    `GoldContext` and the conversation scenarios do not have one. Keeping them
+    separate means the older scenarios cannot acquire a dependency on the
+    corpus map by accident, and a gold scenario that declares one of these keys
+    without a context fails loudly.
+    """
+    expect = spec.get("expect", {})
+    structural = set(expect) & STRUCTURAL_KEYS
+    if not structural:
+        return True, []
+    if context is None:
+        return False, [f"expectations {sorted(structural)} need a GoldContext "
+                       "and none was supplied, so they were not checked"]
+
+    reply = record.reply
+    parts = list(reply.parts)
+    text = flatten(_text_of(reply))
+    notes: list[str] = []
+    ok = True
+
+    def fail(key: str, message: str) -> None:
+        nonlocal ok
+        ok = False
+        notes.append(tagged(key, message))
+
+    # -- what the turn was understood to be --------------------------------
+    if "intent_in" in expect:
+        allowed = set(expect["intent_in"])
+        seen = [a.diagnostics.get("intent", "") for _q, a in parts]
+        if not seen or [i for i in seen if i not in allowed]:
+            fail("intent_in", f"intent was {seen}, expected only {sorted(allowed)}")
+
+    # -- what the evidence gate decided ------------------------------------
+    if "outcome_in" in expect:
+        allowed = set(expect["outcome_in"])
+        seen = [a.diagnostics.get("outcome", "") for _q, a in parts]
+        if not seen or [o for o in seen if o not in allowed]:
+            fail("outcome_in", f"outcome was {seen}, expected only {sorted(allowed)}")
+
+    approved = {p.lower() for _q, a in parts
+                for p in (a.diagnostics.get("approved") or [])}
+    rejected = {str(r).lower() for _q, a in parts
+                for r in (a.diagnostics.get("rejected") or [])}
+    for wanted in expect.get("approved_products_include", []):
+        if not any(wanted.lower() in p for p in approved):
+            fail("approved_products_include",
+                 f"{wanted!r} is not in the approved set {sorted(approved)}")
+    if expect.get("approved_products_empty") and approved:
+        fail("approved_products_empty",
+             f"the evidence gate approved {sorted(approved)} and this turn "
+             "expects nothing to have been approved")
+    for wanted in expect.get("rejected_products_include", []):
+        if not any(wanted.lower() in r for r in rejected):
+            fail("rejected_products_include",
+                 f"{wanted!r} was not rejected; rejections were {sorted(rejected)}")
+
+    # -- which documents ended up under the answer -------------------------
+    cited = [f"{s['name']} {s['url']}".lower() for _q, a in parts for s in a.sources]
+    for needle in expect.get("cited_documents_include", []):
+        if not any(needle.lower() in c for c in cited):
+            fail("cited_documents_include",
+                 f"no cited document matches {needle!r}; cited "
+                 f"{[c.split()[-1] for c in cited]}")
+    for needle in expect.get("cited_documents_exclude", []):
+        offending = [c.split()[-1] for c in cited if needle.lower() in c]
+        if offending:
+            fail("cited_documents_exclude",
+                 f"the answer cited {offending}, which this turn forbids "
+                 f"({needle!r})")
+
+    if expect.get("no_sources") and cited:
+        fail("no_sources", f"{len(cited)} passage(s) were cited; this question "
+                           "must be answered without retrieval")
+
+    if "graph_includes" in expect or "graph_excludes" in expect:
+        nodes = " ".join(n for _q, a in parts
+                         for n in (a.diagnostics.get("graph") or []))
+        for wanted in expect.get("graph_includes", []):
+            if wanted not in nodes:
+                fail("graph_includes", f"the graph did not run {wanted!r}: {nodes}")
+        for banned in expect.get("graph_excludes", []):
+            if banned in nodes:
+                fail("graph_excludes", f"the graph ran {banned!r} and must not")
+
+    # -- what printed -------------------------------------------------------
+    if "answer_contains" in expect and flatten(expect["answer_contains"]) not in text:
+        fail("answer_contains", f"answer does not contain {expect['answer_contains']!r}")
+
+    any_of = expect.get("answer_contains_any")
+    if any_of and not any(flatten(n) in text for n in any_of):
+        fail("answer_contains_any", f"answer contains none of {any_of}")
+
+    # -- what the checks said -----------------------------------------------
+    if expect.get("failed_checks_empty"):
+        failures = [c for _q, a in parts for c in a.failed_checks]
+        if failures:
+            fail("failed_checks_empty",
+                 f"a post-generation check refused this answer: {failures}")
+
+    if expect.get("must_cite_or_handoff"):
+        if not any(a.sources for _q, a in parts):
+            fail("must_cite_or_handoff",
+                 "nothing was cited, so neither an answer nor a hand-off "
+                 "carried published material")
+
+    # -- the absence claim, re-verified against this index -------------------
+    for term in expect.get("absent_from_evidence", []):
+        haystack = flatten(context.evidence_for(record.asked or record.question))
+        if flatten(term) in haystack:
+            fail("absent_from_evidence",
+                 f"{term!r} appears in the retrieved evidence, so this question "
+                 "is a near-miss and not an absence")
+
+    # -- the figure binding, checked from outside the engine -----------------
+    #
+    # Check 2 already refuses an answer whose numbers are not verbatim in the
+    # passage it cites. This asks the same question independently, against the
+    # passages named by the answer's own chunk ids, so a bug in check 2 shows up
+    # here rather than being certified by itself.
+    #
+    # Three sources of digits are legitimate and are allowed: a passage the
+    # answer cited, a figure the *caller* supplied (a false-premise question
+    # quotes the customer's own wrong number back while denying it, which is
+    # correct behaviour and must not read as fabrication), and the contact
+    # number, which is published on the contact page and printed by every
+    # hand-off rather than retrieved.
+    if expect.get("numbers_are_published"):
+        for _question, answer in parts:
+            allowed = _normalise_figures(
+                " ".join([context.cited_text(answer),
+                          record.question, record.asked or "",
+                          answer.disclosure]))
+            supplied = set(_numbers_in(record.question)) | context.contact_digits
+            invented = [n for n in _numbers_in(answer.body)
+                        if n not in supplied
+                        and _normalise_figures(n) not in allowed]
+            if invented:
+                fail("numbers_are_published",
+                     f"the answer prints {sorted(set(invented))}, which appear "
+                     "in no passage it cited and in nothing the caller said")
+
+    # -- the recommendation guard, re-asked from outside ---------------------
+    if expect.get("no_unapproved_recommendation"):
+        from assistant import candidates as cand
+        from assistant import understanding as und
+        for _question, answer in parts:
+            allowed = {und.normalise_product(p)
+                       for p in (answer.diagnostics.get("approved") or [])}
+            # A product the caller named is not a recommendation the system
+            # made. The exemption is the same one the graph applies and for the
+            # same reason: "would Ultra work?" is answered about Ultra by
+            # definition, and refusing that is an over-refusal traded for
+            # nothing.
+            asked = {und.normalise_product(p) for p in context.registry
+                     if p and p.lower() in record.question.lower()}
+            named = cand.recommends_a_product(answer.text, context.registry)
+            loose = [p for p in named if p not in (allowed | asked)]
+            if loose:
+                fail("no_unapproved_recommendation",
+                     f"the answer recommends {sorted(set(loose))} without an "
+                     "evidence assessment approving it")
+
+    return ok, notes
 
 
 def check_turn(spec: dict, record: "TurnRecord") -> tuple[bool, list[str]]:
@@ -646,6 +996,185 @@ def run_conversation(assistant, spec: dict) -> tuple[bool, list[dict]]:
     return ok, rows
 
 
+# ------------------------------------------------------------------ the gold set
+
+
+def check_gold_turn(spec: dict, record: "TurnRecord",
+                    context: "GoldContext") -> tuple[bool, list[str]]:
+    """Every expectation this turn declares, each tagged with its stage.
+
+    The non-structural half is delegated to `check_turn` **one key at a time**,
+    which looks wasteful and is the point: it reuses the existing
+    implementation verbatim — no second copy of "what does path_in mean" — while
+    still learning which key produced which note, because the note itself does
+    not say. Attribution is the deliverable here. "Nine failures" is not a
+    result anyone can act on; "three retrieval, one conversation state, and the
+    rest verification" is.
+    """
+    expect = spec.get("expect", {})
+    unknown = sorted(set(expect) - TURN_EXPECTATIONS)
+    if unknown:
+        return False, [tagged("", f"unknown expectation(s) {unknown}; "
+                                  "this turn asserts nothing")]
+
+    ok, notes = True, []
+    for key, value in expect.items():
+        if key in STRUCTURAL_KEYS:
+            continue
+        good, reasons = check_turn({**spec, "expect": {key: value}}, record)
+        if not good:
+            ok = False
+            notes += [tagged(key, r) for r in reasons]
+
+    good, reasons = check_structure(spec, record, context)
+    return (ok and good), notes + reasons
+
+
+def run_gold(assistant, spec: dict, context: "GoldContext") -> tuple[bool, list[dict]]:
+    """One gold scenario, end to end, through the page's own orchestration."""
+    conversation = Conversation(assistant, label=spec["id"])
+    questions = [t["question"] for t in spec["turns"]]
+    rows: list[dict] = []
+    ok = True
+    for number, turn_spec in enumerate(spec["turns"]):
+        record = conversation.ask(turn_spec["question"],
+                                  audiences=tuple(spec.get("audiences", ["public"])))
+        turn_ok, notes = check_gold_turn({**turn_spec, "_turns": questions},
+                                         record, context)
+        ok = ok and turn_ok
+        rows.append({"turn": number + 1, "question": turn_spec["question"],
+                     "asked": record.asked, "pass": turn_ok, "notes": notes,
+                     "paths": record.reply.paths,
+                     "refused": record.reply.refused,
+                     "render": render(record.reply, show_diagnostics=True),
+                     "steps": [a.diagnostics.get("step", "")
+                               for _q, a in record.reply.parts],
+                     "intents": [a.diagnostics.get("intent", "")
+                                 for _q, a in record.reply.parts],
+                     "sources": sorted({s["url"].rsplit("/", 1)[-1]
+                                        for _q, a in record.reply.parts
+                                        for s in a.sources}),
+                     "slots": turn_slots(record),
+                     "session_slots": dict(record.session_slots)})
+    return ok, rows
+
+
+# What a correct system does with each scenario. Kept as data on the scenario
+# rather than inferred from the expectations, because the two questions are
+# different: the expectations say what must be true of the output, and this says
+# whether answering at all was the right call. Counting them separately is what
+# stops "safety improved" meaning "it refuses more".
+OUTCOMES = ("answer", "abstain", "handoff", "ask_back")
+
+
+def gold_metrics(results: list[dict]) -> dict:
+    """The summary this branch owes, as numerator and denominator throughout.
+
+    No percentages. Twenty-nine scenarios is too few for a percentage to carry
+    information it has not got, and a reader given 86% will quote it as though
+    it were measured on a sample that supports it.
+    """
+    total = len(results)
+    passed = [r for r in results if r["pass"]]
+    failed = [r for r in results if not r["pass"]]
+
+    by_layer: dict = {}
+    for row in failed:
+        for turn in row["turns"]:
+            for text in turn["notes"]:
+                layer = layer_of(text)
+                by_layer[layer] = by_layer.get(layer, 0) + 1
+
+    def of_kind(kind: str, rows: list[dict]) -> list[dict]:
+        return [r for r in rows if r["expected"] == kind]
+
+    # An over-refusal is a scenario the corpus can answer that refused anyway.
+    # It is counted from the observed route rather than from the expectations,
+    # so a scenario whose other assertions happen to pass still registers here.
+    over_refused = [r for r in results if r["expected"] == "answer"
+                    and any(t["refused"] for t in r["turns"])]
+    # The opposite error, and the more expensive one: a question the corpus
+    # cannot support that was answered rather than declined.
+    unsupported = [r for r in results if r["expected"] == "abstain"
+                   and not any(t["refused"] for t in r["turns"])]
+    multi_turn = [r for r in results if len(r["turns"]) > 1]
+    multi_turn_failures = [
+        r for r in multi_turn
+        if any(layer_of(n) == "state" for t in r["turns"] for n in t["notes"])]
+
+    return {
+        "scenarios": total,
+        "passed": len(passed),
+        "failed": len(failed),
+        "by_expected": {kind: {"total": len(of_kind(kind, results)),
+                               "passed": len(of_kind(kind, passed))}
+                        for kind in OUTCOMES},
+        "failures_by_layer": dict(sorted(by_layer.items(),
+                                         key=lambda kv: -kv[1])),
+        "over_refusals": [r["id"] for r in over_refused],
+        "unsupported_claims": [r["id"] for r in unsupported],
+        "multi_turn": {"total": len(multi_turn),
+                       "context_failures": [r["id"] for r in multi_turn_failures]},
+        "failed_ids": [r["id"] for r in failed],
+    }
+
+
+def gold_report(results: list[dict], metrics: dict, header: list[str]) -> str:
+    """The demo-quality summary, as a file somebody can read without the code."""
+    m = metrics
+    out = ["# Gold evaluation — Lime Green technical assistant", ""]
+    out += [f"    {line}" for line in header] + [""]
+    out += [
+        f"**Scenarios {m['passed']}/{m['scenarios']}**  ",
+        f"Correct answers {m['by_expected']['answer']['passed']}/"
+        f"{m['by_expected']['answer']['total']}  ",
+        f"Correct abstentions {m['by_expected']['abstain']['passed']}/"
+        f"{m['by_expected']['abstain']['total']}  ",
+        f"Correct hand-offs {m['by_expected']['handoff']['passed']}/"
+        f"{m['by_expected']['handoff']['total']}  ",
+        f"Correct ask-backs {m['by_expected']['ask_back']['passed']}/"
+        f"{m['by_expected']['ask_back']['total']}  ",
+        "",
+        f"Over-refusals (answerable, refused): {len(m['over_refusals'])}"
+        + (f" — {', '.join(m['over_refusals'])}" if m['over_refusals'] else ""),
+        f"Unsupported answers (unanswerable, answered): "
+        f"{len(m['unsupported_claims'])}"
+        + (f" — {', '.join(m['unsupported_claims'])}"
+           if m['unsupported_claims'] else ""),
+        f"Multi-turn scenarios: {m['multi_turn']['total']}, "
+        f"conversation-state failures: "
+        f"{len(m['multi_turn']['context_failures'])}"
+        + (f" — {', '.join(m['multi_turn']['context_failures'])}"
+           if m['multi_turn']['context_failures'] else ""),
+        "",
+        "## Failed expectations by stage",
+        "",
+    ]
+    if m["failures_by_layer"]:
+        out += ["| stage | failed expectations |", "|---|---|"]
+        out += [f"| {layer} | {count} |"
+                for layer, count in m["failures_by_layer"].items()]
+    else:
+        out.append("Nothing failed.")
+    out += ["", "## Scenarios", "",
+            "| id | category | expects | result | route |", "|---|---|---|---|---|"]
+    for row in results:
+        routes = "; ".join(sorted({p for t in row["turns"] for p in t["paths"]}))
+        out.append(f"| {row['id']} | {row['category']} | {row['expected']} | "
+                   f"{'pass' if row['pass'] else '**FAIL**'} | {routes} |")
+
+    failed = [r for r in results if not r["pass"]]
+    if failed:
+        out += ["", "## What failed, and where", ""]
+        for row in failed:
+            out += [f"### {row['id']} — {row['name']}", ""]
+            for turn in row["turns"]:
+                if turn["notes"]:
+                    out.append(f"*turn {turn['turn']}*: {turn['question']}")
+                    out += [f"  - {n}" for n in turn["notes"]]
+                    out.append("")
+    return "\n".join(out) + "\n"
+
 
 # ---------------------------------------------------------------------- probes
 
@@ -752,7 +1281,15 @@ def main(argv: list[str] | None = None) -> int:
                              "The harness must be able to run against the "
                              "store the system actually serves from.")
     parser.add_argument("--skip-sweep", action="store_true")
-    parser.add_argument("--only", help="run one id, e.g. S2 or P7")
+    parser.add_argument("--only", help="run one id, e.g. S2, P7 or GB1")
+    parser.add_argument("--gold-only", action="store_true",
+                        help="run the gold set and nothing else. The gold "
+                             "scenarios are the ones a demonstration is built "
+                             "from, and on this hardware a compose costs "
+                             "upwards of a minute, so iterating on them "
+                             "without paying for the situations and probes "
+                             "again is the difference between a usable loop "
+                             "and an hour.")
     args = parser.parse_args(argv)
 
     RESULTS.mkdir(parents=True, exist_ok=True)
@@ -778,10 +1315,66 @@ def main(argv: list[str] | None = None) -> int:
         "",
     ]
 
-    results = {"situations": [], "probes": [], "conversations": [], "sweep": []}
+    results = {"situations": [], "probes": [], "conversations": [], "gold": [],
+               "sweep": []}
+
+    # -- the gold set -----------------------------------------------------
+    # Run first. It is the set a demonstration is built from, so when a run is
+    # interrupted — and on this hardware a full pass is the better part of an
+    # hour — the half that survives should be the half that matters.
+    print("Gold scenarios")
+    gold_specs = [s for s in _load("gold.json")["gold"]
+                  if not args.only or s["id"] == args.only]
+    context = GoldContext(assistant) if gold_specs else None
+    for spec in gold_specs:
+        ok, rows = run_gold(assistant, spec, context)
+        results["gold"].append(
+            {"id": spec["id"], "name": spec["name"],
+             "category": spec["category"], "expected": spec["expected"],
+             "pass": ok,
+             "turns": [{k: v for k, v in row.items() if k != "render"}
+                       for row in rows]})
+        print(f"  {'pass' if ok else 'FAIL':4}  {spec['id']}  {spec['name']}")
+        transcript += ["=" * 76,
+                       f"{spec['id']} — {spec['name']}   [{'pass' if ok else 'FAIL'}]",
+                       f"category: {spec['category']}   "
+                       f"a correct system: {spec['expected']}",
+                       f"why: {spec['why']}", ""]
+        for row in rows:
+            resumed = ("" if row["asked"] == row["question"]
+                       else f"  (re-asked: {row['asked']})")
+            if not row["pass"]:
+                print(f"        turn {row['turn']}: {row['question']}")
+                for n in row["notes"]:
+                    print(f"          {n}")
+            transcript += [
+                f"--- turn {row['turn']}  [{'pass' if row['pass'] else 'FAIL'}]",
+                f"Q: {row['question']}{resumed}",
+                f"intent: {row['intents']}   step: {row['steps']}",
+                f"slots: {row['slots']}",
+                f"session after: {row['session_slots']}",
+                "", row["render"], "",
+            ]
+            if row["notes"]:
+                transcript += ["expectations not met:"]
+                transcript += [f"  - {n}" for n in row["notes"]] + [""]
+
+    if args.gold_only:
+        metrics = gold_metrics(results["gold"])
+        report = gold_report(results["gold"], metrics, transcript[:9])
+        (RESULTS / "gold.md").write_text(report, encoding="utf-8")
+        (RESULTS / "gold.json").write_text(
+            json.dumps({"gold": results["gold"], "metrics": metrics},
+                       indent=1, ensure_ascii=False), encoding="utf-8")
+        (RESULTS / "gold-transcript.txt").write_text("\n".join(transcript),
+                                                     encoding="utf-8")
+        print(f"\nGold {metrics['passed']}/{metrics['scenarios']}   "
+              f"({time.perf_counter() - started:.0f}s)")
+        print("Report: eval/results/gold.md")
+        return 1 if metrics["failed"] else 0
 
     # -- situations -------------------------------------------------------
-    print("Situations")
+    print("\nSituations")
     for spec in _load("situations.json")["situations"]:
         if args.only and spec["id"] != args.only:
             continue
@@ -938,8 +1531,11 @@ def main(argv: list[str] | None = None) -> int:
     sit_pass = sum(1 for r in results["situations"] if r["pass"])
     probe_pass = sum(1 for r in results["probes"] if r["pass"])
     conv_pass = sum(1 for r in results["conversations"] if r["pass"])
+    metrics = gold_metrics(results["gold"])
+    results["gold_metrics"] = metrics
     elapsed = time.perf_counter() - started
-    summary = (f"\nSituations {sit_pass}/{len(results['situations'])}   "
+    summary = (f"\nGold {metrics['passed']}/{metrics['scenarios']}   "
+               f"Situations {sit_pass}/{len(results['situations'])}   "
                f"Probes {probe_pass}/{len(results['probes'])}   "
                f"Conversations {conv_pass}/{len(results['conversations'])}   "
                f"({elapsed:.0f}s)")
@@ -949,11 +1545,17 @@ def main(argv: list[str] | None = None) -> int:
     (RESULTS / "transcript.txt").write_text("\n".join(transcript), encoding="utf-8")
     (RESULTS / "results.json").write_text(
         json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
+    if results["gold"]:
+        (RESULTS / "gold.md").write_text(
+            gold_report(results["gold"], metrics, transcript[:9]),
+            encoding="utf-8")
+        print("Gold report: eval/results/gold.md")
     print(f"\nTranscript: eval/results/transcript.txt")
 
     failed = ((len(results["situations"]) - sit_pass)
               + (len(results["probes"]) - probe_pass)
-              + (len(results["conversations"]) - conv_pass))
+              + (len(results["conversations"]) - conv_pass)
+              + metrics["failed"])
     return 1 if failed else 0
 
 
