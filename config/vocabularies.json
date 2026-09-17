@@ -444,8 +444,22 @@
           "on top of",
           "works with"
         ]
+      },
+      "_ask_only": {
+        "_comment": "Phrasings that show a question is ASKING about a property, but that are not accepted as evidence OF it. 'Can Ultra be applied internally on solid brick?' is plainly a suitability question and matched none of the terms above, so no property was detected at all. Adding 'applied' to the values would have fixed detection and diluted the relevance gate at the same time: 'applied' appears in nearly every datasheet, so any compatibility question would then have passed the gate on a word that proves nothing. Detection and evidence are therefore separated. These terms score in detect() and detect_properties(); terms_for() never returns them, so the gate, check 6 and the evidence binding continue to require a real compatibility word. They are also a FALLBACK: a property that matched one of its own values above does not consult these at all, so they can widen what is recognised but can never decide which property a question is about. Scoring is by matched-term length, and without that rule 'applied' added to a compatibility already matched by 'can i use' would carry 'Can I use Ultra, and what thickness should it be applied at?' from a tie with thickness to a compatibility win, costing the per-option answer that an uncued inside-or-outside is owed.",
+        "compatibility": [
+          "applied",
+          "used on",
+          "be used"
+        ]
       }
     }
+  },
+  "substrate_classes": {
+    "_comment": "The published class a substrate belongs to, so that the gap between the customer's word and the corpus's word is closed by a rule rather than by the model. No Ultra document contains the word 'brick'; the product page says 'Suitable for most masonry and lath backgrounds'. Asked about a brick wall, the model bridged that itself and wrote 'suitable for most masonry backgrounds including brick' inside a cited sentence -- an inference presented as published text. The mapping is used to tell the model, deterministically, which word the passages actually use. It never rewrites the caller's fact: the substrate slot still holds 'brick', and the class travels beside it. A substrate absent from this map has no published class and no bridge is offered.",
+    "brick": "masonry",
+    "stone": "masonry",
+    "block": "masonry"
   },
   "retrieval_synonyms": {
     "_comment": "Applied to the question before embedding and to the relevance gate. The vocabulary gap is the entire reason retrieval is semantic rather than keyword, but a handful of terms are worth stating outright.",
