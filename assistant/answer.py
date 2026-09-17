@@ -15,7 +15,7 @@ litres" is matched against "5 – 6 litres" but printed exactly as published.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 
@@ -483,6 +483,43 @@ def _distinguishes(bound: dict[str, list[int]]) -> bool:
             return False
         seen |= set(markers)
     return True
+
+
+def promote_bound(hits: list[Retrieved],
+                  bound: dict[str, list[int]]) -> list[Retrieved]:
+    """The evidence list with the one authoritative passage moved to the front.
+
+    An experiment in fixing a misbinding by *ordering* rather than by telling
+    the model anything. The failing case is a question asking one thing —
+    "would Ultra be suitable internally" — where the binding correctly
+    identifies the single passage that answers it, the block is suppressed
+    because one claim cannot be bound to the wrong half of itself, and the
+    model then cites a different passage anyway and is refused by check 1. The
+    evidence was there, ranked fourth, and nothing pointed at it.
+
+    **Deliberately narrow.** It fires only when exactly one property is bound
+    to exactly one passage, which is the shape above. Two bound properties are
+    left alone: the model needs both, and promoting one of them says the other
+    matters less. A property bound to two passages is a tie the ranking already
+    declined to break, and breaking it here would be inventing an authority the
+    binding does not claim.
+
+    **Ordering only.** The same passages are returned, none added, none
+    dropped, and everything not promoted keeps its relative order. The caller
+    must then use this one list for the prompt, the checks and the printed
+    sources alike, because markers are positional: a list reordered for the
+    prompt and not for `run_checks` would renumber the evidence underneath the
+    verification, which is the one way this change could do real harm.
+    """
+    if len(bound) != 1:
+        return hits
+    markers = next(iter(bound.values()))
+    if len(markers) != 1:
+        return hits
+    index = markers[0] - 1
+    if not 0 <= index < len(hits) or index == 0:
+        return hits
+    return [hits[index]] + [h for i, h in enumerate(hits) if i != index]
 
 
 def _binding_guidance(decision: Decision) -> str:
@@ -1028,7 +1065,16 @@ class AnswerEngine:
         its own earlier answer would be writing an uncitable sentence, and an
         uncitable sentence does not print.
         """
-        hits = decision.hits
+        # One list, from here to the printed sources. Markers are positional,
+        # so the prompt, `run_checks` and `_source_rows` must all count the
+        # same order or the verification renumbers underneath the answer.
+        #
+        # `decision.hits` is deliberately *not* reordered. Three things read it
+        # directly and all three should keep reading retrieval's own ranking:
+        # the document caveats, the `top_score` in the diagnostics, and the
+        # closest-guidance passage a refusal prints. Promotion is about what
+        # the model reads, not about what retrieval found.
+        hits = promote_bound(decision.hits, evidence_binding(decision))
         passages = "\n\n".join(
             f"[{i}] {h.document.citation_name}"
             f"{' — ' + h.chunk.section if h.chunk.section else ''}\n{h.chunk.content}"
@@ -1041,7 +1087,13 @@ class AnswerEngine:
         # and the binding is added under it: `recommend` names the approved
         # products, and which passage states which property is a different
         # instruction that does not replace it.
-        binding = _binding_guidance(decision)
+        #
+        # Built against the promoted order, so any marker it names is the
+        # marker the prompt used. Today promotion and the binding block are
+        # mutually exclusive — one bound property suppresses the block, two
+        # suppress promotion — but relying on that would be a trap for whoever
+        # relaxes either rule next.
+        binding = _binding_guidance(replace(decision, hits=hits))
         guidance = "\n".join(g for g in (guidance, binding) if g)
         prompt = PROMPT.format(
             passages=passages, question=question,
