@@ -400,15 +400,10 @@ Measured fixed routes completed in **22–48 ms**, with zero retrieved sources a
 
 ### Final integrated numbers
 
-Run and record the final integrated results after this merge:
+Measured after merging Core, Vision, Platform and Submission:
 
-```bash
-python -m pytest -q tests/
-python -m pytest tests/e2e -m smoke -q
-python -m eval.run --gold-only
-```
-
-Branch-level counts above are pre-integration evidence and should not be presented as the final post-merge count.
+```text
+19 failed, 1606 passed, 84 skipped in 446.22s
 
 \---
 
