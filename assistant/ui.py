@@ -1196,34 +1196,60 @@ class Handler(BaseHTTPRequestHandler):
         return fields, images, notes
 
     def _build_context(self, session_id: str, limit: int = 2) -> str:
-        """Build multi-turn context from prior turns for the model to see.
+        """The earlier **questions** of this conversation, for the model to see.
 
         Returns a string like:
-        "Earlier in this conversation, you asked: [Q1]. You answered: [A1].
-        Then the user asked: [Q2]..."
+        "Earlier in this conversation you asked:
+         - What thickness should Lime Green Ultra be applied at?
+         - I have a solid brick wall internally. Can I use Ultra?"
+
+        **The answers are deliberately not here, and that is the whole point of
+        this function.** It used to emit "You answered: ..." beside each
+        question, which put previously generated prose -- figures included --
+        into the next prompt. The model then did the obvious thing with it.
+        Asked a third question in a live conversation, it wrote "It should be
+        applied in a uniform thickness between 10 and 30mm" -- its own answer
+        from turn one -- and cited a passage that does not contain that figure.
+        Check 2 caught it: "'10' is not in the passage it is cited to". Turn
+        four did the same with "It is suitable for masonry backgrounds such as
+        brick walls". Both refused, and both were questions the corpus answers.
+
+        `HISTORY_BLOCK` already tells the model this is not evidence and never
+        to take a fact from it. It ignored that, which is the ordinary result of
+        asking a prompt to be a boundary. Removing the material is a boundary;
+        asking nicely is not.
+
+        Nothing is lost that this is for. The job is resolving a reference --
+        which Ultra "it" means -- and the earlier *question* carries the subject
+        perfectly well. The facts travel separately and always did: the trusted
+        slots in the checkpoint carry product, substrate and location, and they
+        are what the router and retrieval read. The command line sets no history
+        at all and answers the same four turns correctly, which is the clearest
+        evidence that prior answers were never load-bearing.
+
+        The cost, stated: a reference that depends on an answer rather than a
+        question -- "the one you mentioned" -- is now ambiguous. An ambiguous
+        reference becomes an ask-back, and an ask-back is a much better failure
+        than a recycled figure under a citation that does not support it.
 
         Args:
             session_id: the session to get history from
             limit: how many prior turns to include (default 2, keep recent)
 
         Returns:
-            context string (empty if no prior turns)
+            context string (empty if there are fewer than `limit` prior turns)
         """
         turns = self.sessions.turns(session_id)
         if len(turns) < limit:
             # Not enough history to build context
             return ""
 
-        # Get the last `limit` turns
+        # Questions only. `_answer` is bound and discarded rather than skipped
+        # with an underscore-free name, so the shape of what is stored stays
+        # visible to whoever reads this next and wonders where the answers went.
         prior = turns[-limit:]
-        parts = ["Earlier in this conversation,"]
-        for i, (q, a) in enumerate(prior, 1):
-            parts.append(f"you asked: {q}")
-            parts.append(f"You answered: {a}. Then the user")
-        # Remove the trailing "Then the user" from the last turn
-        if parts[-1].endswith(". Then the user"):
-            parts[-1] = parts[-1][: -len(". Then the user")]
-        return "\n".join(parts)
+        return "\n".join(["Earlier in this conversation you asked:"]
+                         + [f"- {question}" for question, _answer in prior])
 
     def _respond(self, path: str, question: str, verbose: bool, audience: str,
                  images: list, notes: list, session_open: bool = False) -> None:

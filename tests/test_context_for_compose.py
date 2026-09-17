@@ -207,3 +207,113 @@ class TestMultiTurnFlow:
 
         # Context would include: "you asked: I have a brick wall"
         # So model sees substrate from earlier
+
+
+class TestHistoryCarriesQuestionsNotAnswers:
+    """The boundary between conversational continuity and evidence.
+
+    Trusted state carries facts. The transcript carries continuity. The
+    transcript must not become a second evidence channel -- and for a while it
+    was one, because `_build_context` emitted "You answered: ..." beside each
+    question and the model recycled what it found there.
+
+    Measured, in a live four-turn conversation: turn three wrote "It should be
+    applied in a uniform thickness between 10 and 30mm" -- its own answer from
+    turn one -- and cited a passage that does not contain the figure. Check 2
+    caught it ("'10' is not in the passage it is cited to") and the turn
+    refused. Turn four repeated the pattern with "It is suitable for masonry
+    backgrounds such as brick walls". Both were questions the corpus answers.
+
+    `HISTORY_BLOCK` already instructs the model never to take a fact from the
+    transcript. It did anyway, which is what happens when a prompt is asked to
+    be a boundary.
+    """
+
+    def _handler(self):
+        """A Handler bound to a real SessionStore, without opening a socket."""
+        from assistant import ui
+
+        handler = ui.Handler.__new__(ui.Handler)
+        handler.sessions = SessionStore()
+        return handler
+
+    def test_prior_assistant_answers_are_absent_from_the_history(self):
+        """A. The fix, stated as the property it guarantees.
+
+        The figure in the earlier answer is the thing that got recycled, so the
+        assertion is about the figure and not merely about the label.
+        """
+        handler = self._handler()
+        session_id = handler.sessions.open()
+        handler.sessions.remember(
+            session_id,
+            "What thickness should Lime Green Ultra be applied at?",
+            "Ultra should be applied in a uniform thickness between 10 and 30mm [1].",
+            {})
+        handler.sessions.remember(
+            session_id,
+            "I have a solid brick wall internally. Can I use Lime Green Ultra?",
+            "Lime Green Ultra is suitable for masonry backgrounds [4].",
+            {})
+
+        context = handler._build_context(session_id)
+
+        assert "You answered" not in context, context
+        assert "10 and 30mm" not in context, context
+        assert "masonry backgrounds" not in context, context
+
+    def test_prior_user_questions_are_present_in_the_history(self):
+        """B. What the transcript is actually for.
+
+        Resolving "it" needs the subject, and the subject is in the question.
+        """
+        handler = self._handler()
+        session_id = handler.sessions.open()
+        handler.sessions.remember(
+            session_id,
+            "What thickness should Lime Green Ultra be applied at?",
+            "Ultra should be applied between 10 and 30mm [1].", {})
+        handler.sessions.remember(
+            session_id,
+            "I have a solid brick wall internally. Can I use Lime Green Ultra?",
+            "Lime Green Ultra is suitable for masonry backgrounds [4].",
+            {})
+
+        context = handler._build_context(session_id)
+
+        assert "What thickness should Lime Green Ultra be applied at?" in context
+        assert "I have a solid brick wall internally." in context
+        assert "Ultra" in context, "the subject a follow-up resolves against is gone"
+
+    def test_reference_resolution_survives_without_the_answers(self):
+        """The multi-turn property: continuity kept, facts not.
+
+        A follow-up saying "it" has to be able to find its subject, and the
+        history has to offer nothing citable while it does.
+        """
+        handler = self._handler()
+        session_id = handler.sessions.open()
+        handler.sessions.remember(
+            session_id, "Can I use Lime Green Ultra on a brick wall?",
+            "Ultra is suitable for most masonry and lath backgrounds [2].", {})
+        handler.sessions.remember(
+            session_id, "Is it suitable internally?",
+            "It gives an additional insulation layer to internal walls [4].", {})
+
+        context = handler._build_context(session_id)
+
+        # The subject is reachable...
+        assert "Ultra" in context
+        # ...and nothing in the transcript is a fact worth copying.
+        assert "insulation layer" not in context, context
+        assert "masonry and lath" not in context, context
+        assert "[2]" not in context and "[4]" not in context, (
+            "citation markers from an earlier answer invite a reused citation")
+
+    def test_a_first_turn_still_carries_no_transcript(self):
+        """Unchanged behaviour: below the limit there is no history at all."""
+        handler = self._handler()
+        session_id = handler.sessions.open()
+        handler.sessions.remember(session_id, "One question", "One answer.", {})
+
+        assert handler._build_context(session_id) == ""
