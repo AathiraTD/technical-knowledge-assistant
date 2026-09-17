@@ -474,7 +474,35 @@ Recorded so nobody mistakes them for new:
   and on a machine with no index or no Ollama `setUpClass` raises and every test
   in the class errors — which is exactly the 17 errors above.
 
-Baseline before this work: **1368 passed, 17 failed, 85 skipped, 17 errors.**
+- **`tests/test_diagnosis_capture.py` — 5 failures.** Date-dependent: the
+  capture writes a case under one day's directory and the test reads it from
+  another, so it fails whenever the two disagree
+  (`FileNotFoundError: ...\2026-09-16\<uuid>.json`). Nothing to do with this
+  work; last touched by "Phase 2 Component 1: Diagnosis Hand-off Logging".
+
+### The reconciliation
+
+| | Baseline (`60c9500`) | After this work |
+|---|---|---|
+| passed | 1368 | **1388** |
+| failed | 17 | 26 |
+| errors | 17 | **0** |
+| skipped | 85 | 85 |
+| **not passing** | **34** | **26** |
+
+The failure count rose and the number of failing tests fell, which needs the
+explanation rather than the headline. All 17 baseline *errors* were
+`test_integration_core5`: every test in the class errored because `setUpClass`
+raised when Ollama was unavailable. With Ollama running, `setUpClass` succeeds,
+so those 17 errors became 8 passes and 9 failures. The 17 baseline failures —
+5 `test_diagnosis_capture` + 11 `test_ui_server` + 1 `test_vision_seam` — still
+fail, identically and by the same names.
+
+`1368 + 12 + 8 = 1388` exactly: the twelve tests this work adds, plus the eight
+integration tests that now run instead of erroring. **No new failure, and no
+existing failure changed.** `git diff 60c9500..HEAD --name-only` touches none of
+the failing files.
+
 This work adds **12** passing tests — ten in
 [`tests/test_readiness_endpoint.py`](../tests/test_readiness_endpoint.py) and
 two in [`tests/test_trace_reader.py`](../tests/test_trace_reader.py) — and
