@@ -66,11 +66,12 @@
       },
       "must_not_claim": [
         "substrate",
+        "location",
         "moisture_evidence",
         "cracks",
         "damaged_finish"
       ],
-      "note": "A render hides its own background. This is the fixture where claiming a substrate is claiming to see through a wall."
+      "note": "A render hides its own background. This is the fixture where claiming a substrate is claiming to see through a wall. `location` is forbidden here too, and the fixture's own name is the reason it is worth stating: the file is called 'external' because that is what it was drawn as, and nothing inside the frame shows it -- no sky, no ground line, no opening. A model that gets 'external' right here would be guessing correctly, which is not the same as seeing."
     },
     {
       "name": "staining-salts-low",
@@ -101,6 +102,7 @@
       },
       "must_not_claim": [
         "substrate",
+        "location",
         "moisture_evidence",
         "structural"
       ],
