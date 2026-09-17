@@ -48,12 +48,40 @@ def span(name, span_id, parent="", *, turn="t1", trace="tr1", ms=1,
         session_id=session, source=source, attributes=attributes)
 
 
+def tree_lines(rendered: str) -> list[str]:
+    """The span tree, with the identity header dropped.
+
+    A single-turn read now opens with the correlation, session and turn ids --
+    the three a person has to hand from a page header and could not previously
+    turn into a conversation. The tree is what these tests are about, so they
+    find it rather than assuming it starts at line zero.
+    """
+    lines = rendered.splitlines()
+    for index, line in enumerate(lines):
+        if line and not line.startswith(("correlation", "session", "turn",
+                                         "source", "failed", "---")):
+            return lines[index:]
+    return lines
+
+
+def test_the_identity_of_the_turn_comes_before_the_tree():
+    """A correlation id is the thing someone has; the session is what they want."""
+    out = reader.render([span("answer", "a", session="sess-9", trace="tr-7")])
+
+    assert "correlation  tr-7" in out
+    assert "session      sess-9" in out
+    assert "turn         t1" in out
+    # And the command that widens one answer into the whole conversation, so
+    # the next step does not have to be remembered.
+    assert "--session sess-9" in out
+
+
 def test_a_child_renders_indented_under_its_parent():
-    out = reader.render([
+    out = tree_lines(reader.render([
         span("answer", "a"),
         span("part", "b", "a"),
         span("retrieval", "c", "b"),
-    ]).splitlines()
+    ]))
 
     assert out[0].startswith("answer")
     assert out[1].startswith("  part")
@@ -70,14 +98,33 @@ def test_a_span_whose_parent_was_sliced_away_still_renders():
 
 def test_the_evidence_a_wrong_answer_turns_on_is_on_the_span_s_own_line():
     """The drift case: which product retrieval was told about, and what scored."""
-    line = reader.render([
+    line = tree_lines(reader.render([
         span("retrieval", "r", product="ultra", top_score=0.79, hits=5,
              documents=4, expanded=True),
-    ]).splitlines()[0]
+    ]))[0]
 
     assert "product='ultra'" in line
     assert "top_score=0.79" in line
     assert "expanded" not in line          # real, but not what you look at first
+
+
+def test_what_the_question_was_understood_to_be_asking_is_on_the_line():
+    """The other drift case, and the one a conversation makes possible.
+
+    A recommendation that surprises someone usually turns on the intent and the
+    facts still missing, not on the score. Both are recorded already; until now
+    neither printed without `--all`, so the headline view answered "which
+    passage" and not "which question did it think this was".
+    """
+    line = tree_lines(reader.render([
+        span("candidate_discovery", "c", intent="select_product",
+             objective="replaster a solid brick wall",
+             missing=["substrate"], considered=11),
+    ]))[0]
+
+    assert "intent='select_product'" in line
+    assert "missing=['substrate']" in line
+    assert "considered" not in line
 
 
 def test_the_rest_of_the_attributes_are_available_but_not_in_the_way():
