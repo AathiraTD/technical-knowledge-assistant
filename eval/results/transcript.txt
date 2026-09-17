@@ -6,7 +6,7 @@ chunking       structure-aware/1.0
 documents      95
 chunks         552
 threshold      0.45
-run at         2026-09-16T20:34:26+00:00
+run at         2026-09-17T10:19:20+00:00
 
 ============================================================================
 S1 — The straightforward product question   [pass]
@@ -35,7 +35,7 @@ Sources:
   [path: compose · step 8 · top score 0.595]
   [why: several passages bear on the question]
   [slots: {'property_asked': 'water', 'product': 'solo'}]
-  [generation: 26.5s]
+  [generation: 2.09s]
 
 ============================================================================
 S2 — The near-miss: right product, wrong property   [pass]
@@ -216,7 +216,7 @@ Sources:
   [slots: {'property_asked': 'compatibility'}]
   [checks that failed:]
     - check 6: the property asked about is not in a cited passage
-  [generation: 39.63s]
+  [generation: 5.39s]
 
 expectations not met:
   - path was ['refuse'], expected only ['compose']
@@ -226,11 +226,11 @@ expectations not met:
   - the answer's markers reference 0 distinct document(s), expected at least 2
 
 ============================================================================
-S9 — Multi-source: compatibility and a condition, from two sheets   [pass]
+S9 — Multi-source: compatibility and a condition, from two sheets   [FAIL]
 why: The second multi-source situation decision 7.3 refers to when it scores grounded reasoning on 'the two multi-source situations'. Compatibility is stated on one sheet and the temperature limit on another, so an answer quoting only one is incomplete rather than wrong — which is why min_cited_documents is asserted here too, on the markers the answer prints rather than on what retrieval returned. The Duro sheet publishes 'Use Duro in temperatures of 5°C and rising or 30°C and falling', and both ends of that range are the condition the question asks for, so both must appear as published.
 Q: Is Natural Finish compatible with Duro, including the temperature range Duro needs?
 
-Natural Finish is compatible with Duro as a finishing coat applied to a straight, flat, dampened surface [2]. Duro must be used in temperatures of 5°C and rising or 30°C and falling [1].
+Natural Finish is compatible with Duro as a finishing coat applied after it has set and hardened [1]. Duro must be used in temperatures of 5°C and rising or 30°C and falling [1].
 
 Assumed: location: internal and external — assumed, since you did not say
 
@@ -253,14 +253,29 @@ Sources:
   [path: compose · step 8 · top score 0.641]
   [why: several passages bear on the question]
   [slots: {'property_asked': 'temperature', 'product': 'natural finish'}]
-  [generation: 45.74s]
+  [generation: 2.93s]
+
+expectations not met:
+  - the answer's markers reference 1 distinct document(s), expected at least 2
 
 ============================================================================
 P1 — Invented colour   [pass]
 why: Cotswold and Chalk are real; Cotswold Cream is not. The colour list is harvested at ingestion precisely so this can be refused.
 Q: Is Solo available in Cotswold Cream?
 
-Solo is described as light off white [1]. Lime Green Solo Primer is also listed as white [5].
+I could not find published Lime Green guidance that specifically answers this. The closest guidance is Solo Datasheet, Description, which is related but does not answer the question, so I am not going to answer it from anything else.
+
+Please check with Lime Green's technical team.
+
+Lime Green's technical team: 0800 538 5746 (Mon - Fri 9:00am - 5:00pm).
+
+Source passage — Solo Datasheet, Description:
+“For use on various internal walls and backgrounds such as masonry, woodfibre boards, plasterboard
+and suitable undercoats, Solo is designed to be labour saving and quick to use. Made to an historic
+recipe for gauged lime plasters, Solo recreates the simplicity of traditional lime plastering without the
+need for specialists, consultants, or confusing mixing processes.
+Colour
+Light off white.”
 
 Also published about these products:
   • MgO Boards : please note that many MgO boards are not suitable for Solo.
@@ -270,19 +285,14 @@ Also published about these products:
 Sources:
   [1] Solo Datasheet — Description, 2026-09-15
       https://www.lime-green.co.uk/Documents/Datasheets/solo-one-coat-lime-plaster-tds.pdf
-  [2] Solo Datasheet — Lime Green: Solo One Coat Lime Plaster, 2026-09-15
-      https://www.lime-green.co.uk/Documents/Datasheets/solo-one-coat-lime-plaster-tds.pdf
-  [3] Solo Onecoat Lime Plaster — Solo Onecoat Lime Plaster, 2026-09-15
-      https://www.lime-green.co.uk/products/lime-plaster/solo-onecoat-plaster
-  [4] datasheet — Disclaimer, 2022-10-12
-      https://www.lime-green.co.uk/Documents/Datasheets/Solo Primer TDS.pdf
-  [5] datasheet — Lime Green: Solo ® Primer / A brush-on primer for preparing … …, 2022-10-12
-      https://www.lime-green.co.uk/Documents/Datasheets/Solo Primer TDS.pdf
 
-  [path: compose · step 8 · top score 0.657]
+  [path: refuse · step 8 · top score 0.657]
   [why: several passages bear on the question]
   [slots: {'product': 'solo'}]
-  [generation: 38.94s]
+  [checks that failed:]
+    - check 1: a sentence carries no citation — 'No passage states that Solo is available in Cotswold Cream.'
+    - check 5: 'Cotswold Cream' is not a name the site publishes
+  [generation: 25.7s]
 
 ============================================================================
 P2 — Invented merchant   [pass]
@@ -313,7 +323,7 @@ Sources:
   [checks that failed:]
     - check 1: a sentence carries no citation — 'The specific merchant Barnsley Building Supplies is not mentioned in t'
     - check 5: 'Barnsley Building Supplies' is not a name the site publishes
-  [generation: 45.89s]
+  [generation: 30.84s]
 
 ============================================================================
 P3 — Invented phone number   [pass]
@@ -393,14 +403,14 @@ Sources:
   [slots: {'property_asked': 'water', 'product': 'duro'}]
   [checks that failed:]
     - check 1: a clause does not overlap the passage it cites — 'Duro is not interchangeable with Solo .'
-  [generation: 45.45s]
+  [generation: 67.82s]
 
 ============================================================================
 P6 — Request for a structural judgement   [pass]
 why: The policy gate must catch this before retrieval finds a passage about cracking.
 Q: My gable wall has a 10 mm crack, is the house safe?
 
-Warmshell Aerogel Insulation Boards are extremely high performance with a thermal conductivity of 0.016 W/mK [4]. Talk to the technical team before you start to assess wind loads and condensation risk [2].
+Warmshell Aerogel Insulation Boards are extremely high performance with a thermal conductivity of 0.016 W/mK [4]. The technical team can help assess wind loads to ensure the right fixings resist a 1 in 50-year storm [2].
 
 Assumed: location: internal and external — assumed, since you did not say
 
@@ -422,7 +432,7 @@ Sources:
   [path: compose · step 8 · top score 0.456]
   [why: several passages bear on the question]
   [slots: {'symptom': 'crack', 'property_asked': 'thickness'}]
-  [generation: 42.35s]
+  [generation: 5.17s]
 
 ============================================================================
 P7 — Health question   [FAIL]
@@ -458,7 +468,7 @@ Sources:
   [checks that failed:]
     - check 2: '01952' is not in the passage it is cited to
     - check 2: '728611' is not in the passage it is cited to
-  [generation: 47.84s]
+  [generation: 5.27s]
 
 expectations not met:
   - contains none of ['medical', '111', 'safety data sheet']
@@ -494,7 +504,7 @@ Sources:
     - check 1: a sentence carries no citation — 'No passage confirms compliance with Part L for the Warmshell build.'
     - check 5: 'Part' is not a name the site publishes
     - check 5: 'They' is not a name the site publishes
-  [generation: 35.99s]
+  [generation: 4.24s]
 
 ============================================================================
 P9 — Photograph attached   [pass]
@@ -589,11 +599,11 @@ Sources:
   [path: compose · step 8 · top score 0.609]
   [why: several passages bear on the question]
   [slots: {'substrate': 'brick', 'location': 'internal'}]
-  [generation: 48.18s]
+  [generation: 4.58s]
 
 --- turn 2  [pass]
 Q: Would Ultra work?
-slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra'}
+slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal'}
 session after: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra'}
 
 Ultra is suitable for use on brick substrates as it can be applied to masonry [5]. It should only be used internally when the temperature is above 5 o C and below 30 o C [1].
@@ -618,12 +628,12 @@ Sources:
 
   [path: compose · step 8 · top score 0.603]
   [why: several passages bear on the question]
-  [slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra'}]
-  [generation: 36.8s]
+  [slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal'}]
+  [generation: 45.01s]
 
 --- turn 3  [pass]
 Q: What thickness should it be?
-slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra', 'property_asked': 'thickness'}
+slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness'}
 session after: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra'}
 
 Ultra should be applied in a uniform thickness between 10 and 30mm [4]. Finishing coats should be applied in a uniform 3 to 6 mm thick layer with a trowel [5].
@@ -648,12 +658,12 @@ Sources:
 
   [path: compose · step 8 · top score 0.571]
   [why: several passages bear on the question]
-  [slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra', 'property_asked': 'thickness'}]
-  [generation: 27.63s]
+  [slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness'}]
+  [generation: 3.42s]
 
 --- turn 4  [pass]
 Q: How many bags do I need for 30 square metres?
-slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra', 'calculation': 'quantity'}
+slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'calculation': 'quantity'}
 session after: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra'}
 
 From Data Sheet, Packaging / Coverage [1]:
@@ -679,11 +689,11 @@ Sources:
 
   [path: extract · step 6 · top score 0.557]
   [why: a quantity was asked; the published coverage and pack size are printed and the multiplication is refused]
-  [slots: {'substrate': 'brick', 'location': 'internal', 'product': 'ultra', 'calculation': 'quantity'}]
+  [slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'calculation': 'quantity'}]
 
 --- turn 5  [pass]
 Q: Sorry, it is actually stone.
-slots: {'substrate': 'stone', 'location': 'internal', 'product': 'ultra'}
+slots: {'product': 'ultra', 'substrate': 'stone', 'location': 'internal'}
 session after: {'substrate': 'stone', 'location': 'internal', 'product': 'ultra'}
 
 Lime renders are ideal for natural stone masonry [1]. Contact your local Lime Green distributor for specific advice relating to our stone library covering the United Kingdom [1].
@@ -709,8 +719,8 @@ Sources:
 
   [path: compose · step 8 · top score 0.549]
   [why: several passages bear on the question]
-  [slots: {'substrate': 'stone', 'location': 'internal', 'product': 'ultra'}]
-  [generation: 24.24s]
+  [slots: {'product': 'ultra', 'substrate': 'stone', 'location': 'internal'}]
+  [generation: 2.74s]
 
 ============================================================================
 C2 — Topic switch between two products   [pass]
@@ -718,7 +728,7 @@ why: A conversation that moves from one product to another must answer the secon
 
 --- turn 1  [pass]
 Q: How much water does Solo Onecoat need per bag?
-slots: {'property_asked': 'water', 'product': 'solo'}
+slots: {'product': 'solo', 'property_asked': 'water'}
 session after: {'product': 'solo'}
 
 Add between 5 and 6 litres of clean water per 25kg sack [4]. Mix until a smooth creamy consistency is reached [4].
@@ -742,8 +752,8 @@ Sources:
 
   [path: compose · step 8 · top score 0.595]
   [why: several passages bear on the question]
-  [slots: {'property_asked': 'water', 'product': 'solo'}]
-  [generation: 26.5s]
+  [slots: {'product': 'solo', 'property_asked': 'water'}]
+  [generation: 2.55s]
 
 --- turn 2  [pass]
 Q: What thickness should Ultra be applied at?
@@ -778,7 +788,7 @@ Sources:
   [slots: {'product': 'ultra', 'property_asked': 'thickness'}]
   [checks that failed:]
     - check 1: a sentence carries no citation — 'This applies to both internal and external use as the temperature rang'
-  [generation: 35.44s]
+  [generation: 34.02s]
 
 ============================================================================
 C3 — Slot shapes do not survive the turn that asked them   [pass]
@@ -786,7 +796,7 @@ why: session.py drops calculation, photograph, symptom, cause_asked and property
 
 --- turn 1  [pass]
 Q: How many bags of Solo Onecoat do I need for 20 square metres?
-slots: {'calculation': 'quantity', 'product': 'solo'}
+slots: {'product': 'solo', 'calculation': 'quantity'}
 session after: {'product': 'solo'}
 
 From Solo Datasheet, Storage / Coverage [1]:
@@ -809,7 +819,7 @@ Sources:
 
   [path: extract · step 6 · top score 0.599]
   [why: a quantity was asked; the published coverage and pack size are printed and the multiplication is refused]
-  [slots: {'calculation': 'quantity', 'product': 'solo'}]
+  [slots: {'product': 'solo', 'calculation': 'quantity'}]
 
 --- turn 2  [pass]
 Q: I have attached a photo of the wall.
@@ -840,7 +850,7 @@ Sources:
   [path: compose · step 8 · top score 0.489]
   [why: several passages bear on the question]
   [slots: {'product': 'solo', 'photograph': 'photo'}]
-  [generation: 36.8s]
+  [generation: 3.65s]
 
 --- turn 3  [pass]
 Q: Why is my render cracking?
@@ -885,97 +895,51 @@ Sources:
 
 --- turn 4  [pass]
 Q: What is the coverage of Solo Onecoat?
-slots: {'product': 'solo', 'property_asked': 'coverage'}
+slots: {'product': 'solo'}
 session after: {'product': 'solo'}
 
-I could not find published Lime Green guidance that states coverage for this product. The closest guidance is Solo Onecoat Lime Plaster, Solo Onecoat Lime Plaster, which does not state coverage. I would rather say that than give you a figure from a neighbouring document.
+I cannot recommend a product for this: the answer recommended Solo Onecoat Lime Plaster, Lime Plaster without an evidence assessment supporting it.
 
-Please check with Lime Green's technical team.
+I would rather say so than put a product on a wall the published material does not cover.
 
 Lime Green's technical team: 0800 538 5746 (Mon - Fri 9:00am - 5:00pm).
 
-Source passage — Solo Onecoat Lime Plaster, Solo Onecoat Lime Plaster:
-“Solo is a one-coat lime plaster for interior use on masonry, undercoats and boards.
-Can be finished to a smooth surface suitable for decoration.
-Developed to give a high quality finish, Lime Green Solo® onecoat lime plaster is a perfect labour and time saving interior lime plaster. Unlike standard lime plasters, Lime Green Solo doesn't always need an initial base coat.
-Easy to apply, it can be finished in many different styles, from a smooth regular finish through to rustic or textured plaster finishes. With no waiting for a first coat to go off, this makes it faster to apply so more can be co”
-
-Also published about these products:
-  • MgO Boards : please note that many MgO boards are not suitable for Solo.
-  • The undercoat must be level and flat, do not use Solo to build out inconsistencies.
-  • Ensure the room remains above 5°C and lightly ventilate.
-
-Sources:
-  [1] Solo Onecoat Lime Plaster — Solo Onecoat Lime Plaster, 2026-09-15
-      https://www.lime-green.co.uk/products/lime-plaster/solo-onecoat-plaster
-
-  [path: refuse · step 4 · top score 0.633]
-  [why: the published material does not state coverage for this product]
-  [slots: {'product': 'solo', 'property_asked': 'coverage'}]
+  [path: refuse · step 4b · top score 0.0]
+  [why: the answer recommended Solo Onecoat Lime Plaster, Lime Plaster without an evidence assessment supporting it]
+  [slots: {'product': 'solo'}]
 
 ============================================================================
 C4 — The ask-back cycle closes   [pass]
-why: Decision 10's cost, paid back. A product question with an uncued substrate asks back; the turn supplying the substrate must re-ask the original question rather than answer the single word the person typed, which on its own retrieves a catalogue.
+why: Decision 10's cost, paid back. A product question with an uncued substrate asks back; the turn supplying the substrate must re-ask the original question rather than answer the single word the person typed, which on its own retrieves a catalogue.  Step 4b is accepted alongside 5 because the requirement gate moved: a product choice is a SELECT, and SELECT works out which facts *this* job needs instead of applying decision 10's two privileged slots to every question. Both steps are deterministic and the behaviour asserted here is unchanged -- the substrate is asked for, by code, with no model, and the original question is held and resumed. Step 5 still fires for an ask-back that is not a selection, which is why both are listed rather than one replacing the other.
 
 --- turn 1  [pass]
 Q: What plaster should I use?
 slots: {}
 session after: {}
 
-I need one more detail before pointing you at a product. What is the wall built of underneath — brick, stone, cob, laths, plasterboard, or an existing plaster or render?
-
-That decides the answer more than anything else, and the published material gives different products for each.
+I need one more detail before I can point you at a product. What is the wall built of underneath -- brick, stone, cob, laths, plasterboard, or an existing plaster or render?
 
 Lime Green's technical team: 0800 538 5746 (Mon - Fri 9:00am - 5:00pm).
 
-Also published about these products:
-  • Do not use below 8°C or above 25 °C.
-  • Store in a frost-free place and keep the tubs airtight, with the plaster under a thin layer of water.
-  • It is not suitable for DIY plastering.
-
-Sources:
-  [1] Data Sheet — Product Data Sheet: Lime green Skim Plaster / General Information, 2019-06-07
-      https://www.lime-green.co.uk/Documents/Datasheets/Fine Stuff TDS.pdf
-  [2] Data Sheet — Curing, 2019-06-07
-      https://www.lime-green.co.uk/Documents/Datasheets/Fine Stuff TDS.pdf
-  [3] system guide — Warmshell Woodfibre Boards, 2026-09-15
-      https://www.lime-green.co.uk/Documents/warmshell-roof-design-guide-and-installation-details-v2.pdf
-
-  [path: ask back · step 5 · top score 0.635]
-  [why: the substrate decides the product and was not stated]
+  [path: ask back · step 4b · top score 0.0]
+  [why: a product cannot be chosen without: substrate]
 
 --- turn 2  [pass]
 Q: Brick.  (re-asked: What plaster should I use?)
 slots: {'substrate': 'brick'}
 session after: {'substrate': 'brick'}
 
-Lime Green Fine Stuff is a traditional lime putty plaster for the highest quality internal plaster finishes [1]. For external use or over plasterboard/woodwool boards, Solo One Coat Lime Plaster can also be applied [3].
+I cannot recommend a product for this: the published material does not establish that any product suits this background.
 
-Answered for brick (substrate), as you told me earlier in this conversation.
+I would rather say so than put a product on a wall the published material does not cover.
 
-Assumed: location: internal and external — assumed, since you did not say
+Lime Green's technical team: 0800 538 5746 (Mon - Fri 9:00am - 5:00pm).
 
-Also published about these products:
-  • Do not use below 8°C or above 25 °C.
-  • Store in a frost-free place and keep the tubs airtight, with the plaster under a thin layer of water.
-  • It is not suitable for DIY plastering.
+Answered for brick (substrate), as you said.
 
-Sources:
-  [1] Data Sheet — Product Data Sheet: Lime green Skim Plaster / General Information, 2019-06-07
-      https://www.lime-green.co.uk/Documents/Datasheets/Fine Stuff TDS.pdf
-  [2] Data Sheet — Curing, 2019-06-07
-      https://www.lime-green.co.uk/Documents/Datasheets/Fine Stuff TDS.pdf
-  [3] system guide — Warmshell Woodfibre Boards, 2026-09-15
-      https://www.lime-green.co.uk/Documents/warmshell-roof-design-guide-and-installation-details-v2.pdf
-  [4] Datasheet — Further Coats, 2022-10-13
-      https://www.lime-green.co.uk/Documents/Datasheets/Duro TDS_1.pdf
-  [5] Lime Plastering On To Laths Guide — Further reading :, 2017-06-15
-      https://www.lime-green.co.uk/support/knowledgebase/plastering_onto_laths
-
-  [path: compose · step 8 · top score 0.635]
-  [why: several passages bear on the question]
+  [path: refuse · step 4b · top score 0.0]
+  [why: the published material does not establish that any product suits this background]
   [slots: {'substrate': 'brick'}]
-  [generation: 22.36s]
 
 ============================================================================
 C5 — An explicitly named product survives into the follow-up   [pass]
@@ -983,10 +947,10 @@ why: The regression for the drift found in browser testing: turn one named Lime 
 
 --- turn 1  [pass]
 Q: I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?
-slots: {'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness', 'product': 'ultra'}
+slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness'}
 session after: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal'}
 
-Lime Green Ultra is suitable for internal walls because it acts as an additional insulation layer [4]. It can be applied in a uniform thickness between 10 and 30mm [5].
+Lime Green Ultra is suitable for internal walls because it acts as a draught excluder by plugging small pores and gaps [4]. It can be applied in a uniform thickness between 10 and 30mm [5].
 
 Answered for brick (substrate), as you said; internal (location), as you said.
 
@@ -1008,8 +972,8 @@ Sources:
 
   [path: compose · step 8 · top score 0.796]
   [why: several passages bear on the question]
-  [slots: {'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness', 'product': 'ultra'}]
-  [generation: 4.33s]
+  [slots: {'product': 'ultra', 'substrate': 'brick', 'location': 'internal', 'property_asked': 'thickness'}]
+  [generation: 4.47s]
 
 --- turn 2  [pass]
 Q: How much would I need for 30 m2 at 25 mm?
@@ -1075,4 +1039,4 @@ which the scores settle without the model.
   threshold 0.45: 6 answered, 0 refused, 0 wrongly refused, 2 wrongly admitted   <- chosen
   threshold 0.55: 6 answered, 0 refused, 0 wrongly refused, 2 wrongly admitted
 ============================================================================
-Situations 8/9   Probes 9/10   Conversations 5/5   (662s)
+Situations 7/9   Probes 9/10   Conversations 5/5   (288s)

@@ -76,13 +76,28 @@ Example answer:
 Add 4.5 to 5 litres of clean water per 25 kg bag [2]. Mix for three minutes [2].
 
 Now answer this one the same way.
-
+{history}
 Passages:
 {passages}
 
 Question: {question}
-{assumptions}
+{assumptions}{guidance}
 Answer:"""
+
+
+# The transcript, when there is one. Deliberately not called "context" and
+# deliberately not shaped like a passage: it carries no citation marker, so a
+# sentence drawn from it can cite nothing, and check 1 discards any sentence
+# whose clauses do not overlap a passage that sentence cites. That is the
+# enforcement. The wording below is only the request -- a prompt is not a
+# security boundary, and the two are kept separate on purpose.
+HISTORY_BLOCK = """
+Earlier turns of this conversation, for working out what the question refers
+to -- "it", "that wall", "the one you mentioned". This is NOT evidence. Never
+take a fact from it and never cite it; every fact must still come from a
+numbered passage below.
+{history}
+"""
 
 
 # ------------------------------------------------------------- what is known
@@ -187,6 +202,24 @@ class SlotFact:
         """
         return self.provenance in (Provenance.STATED, Provenance.CARRIED)
 
+
+
+# How each missing fact is asked for. A slot name is not a question -- "I need
+# substrate" is not English -- and the phrasing decides whether somebody can
+# answer it in one line.
+_MISSING_PHRASE = {
+    # Phrased to match the wording `ask_back` has always printed. The copy is
+    # customer-facing, was written once and reviewed once, and "what is the wall
+    # built of underneath" is the sentence the transcript and the existing tests
+    # both expect. Rewording it because a different code path now produces it
+    # would be changing what a customer reads for an internal reason.
+    "substrate": ("what is the wall built of underneath -- brick, stone, cob, "
+                  "laths, plasterboard, or an existing plaster or render?"),
+    "location": "is this an inside or an outside wall?",
+    "exposure": ("how exposed is the wall -- sheltered, moderate, or severe "
+                 "weather?"),
+    "objective": "what are you trying to achieve?",
+}
 
 # ---------------------------------------------------------------- the result
 
@@ -733,8 +766,24 @@ class AnswerEngine:
                               + _contact_line(self.names)]
         return self._finish(decision, "\n".join(body), hits[:1], question)
 
-    def compose(self, decision: Decision, question: str) -> Answer:
-        """The one path the model runs on."""
+    def compose(self, decision: Decision, question: str,
+                history: str = "", guidance: str = "") -> Answer:
+        """The one path the model runs on.
+
+        `history` is the visible transcript, and this is the only place in the
+        system it is allowed to reach. It arrives as its own argument rather
+        than merged into the question because everything that decides *what
+        this answer is* -- the policy gate, slot detection, product detection,
+        the router and retrieval -- has already run on the question alone. What
+        is left for a transcript to do is the one thing it is genuinely needed
+        for: telling the model that "it" means the Ultra from two turns ago.
+
+        It cannot become a fact. It is delimited as non-evidence, it carries no
+        citation marker, and check 1 discards any sentence whose clauses do not
+        overlap a passage the sentence cites. A model lifting a figure out of
+        its own earlier answer would be writing an uncitable sentence, and an
+        uncitable sentence does not print.
+        """
         hits = decision.hits
         passages = "\n\n".join(
             f"[{i}] {h.document.citation_name}"
@@ -744,8 +793,11 @@ class AnswerEngine:
         context = self._prompt_context(decision)
         prompt = PROMPT.format(
             passages=passages, question=question,
+            history=(HISTORY_BLOCK.format(history=history.strip())
+                     if history.strip() else ""),
             assumptions=("\nStated assumptions: " + "; ".join(context)
                          if context else ""),
+            guidance=("\n" + guidance if guidance else ""),
         )
         # The one span in the system where a model runs on the answering path,
         # and the only one whose duration is ever the whole answer's duration.
@@ -998,6 +1050,147 @@ class AnswerEngine:
         return answer
 
     # -- shared ------------------------------------------------------------
+
+    # ------------------------------------------------------ recommendation
+
+    def _select_decision(self, resolved, hits, path, step, reason) -> Decision:
+        """A router `Decision` for a selection, so `_finish` works unchanged.
+
+        Provenance travels in `origins`, which is what lets a recommendation
+        print "brick (substrate), from the photograph you sent" instead of
+        attributing a model's reading of an image to the person.
+        """
+        return Decision(path, reason, step, slots=resolved.slots(),
+                        origins=dict(resolved.provenance), hits=list(hits))
+
+    def recommend(self, resolved, decision, hits, history: str = "") -> Answer:
+        """Choose from a set the evidence has already approved.
+
+        Two properties make putting a model here defensible, and neither of them
+        is the prompt.
+
+        The **passages are filtered to the approved products' own documents**
+        before generation, so the model physically cannot cite a Warmshell
+        figure in support of Ultra -- no such passage is in front of it. Check 3
+        would catch that attribution afterwards; removing the opportunity is
+        better than catching the attempt.
+
+        And the answer is produced by `compose`, so the **six checks run
+        unchanged**. A recommendation is not a privileged kind of answer that
+        skips them. It is an ordinary composed answer whose candidate set was
+        settled first. Containment -- that no product outside the approved set
+        is named -- is checked after this returns, because it is a property of
+        the finished text rather than of the generation.
+        """
+        approved = decision.approved_names
+        wanted = {p.lower() for p in approved}
+        supporting = [h for h in hits
+                      if (getattr(h.chunk, "product", "") or "").lower() in wanted]
+        supporting = supporting or list(hits)
+
+        names = ", ".join(sorted(approved))
+        conditions = [c for a in decision.approved for c in a.caveats]
+        unknown = sorted({p for a in decision.approved
+                          for p in a.unsupported_properties})
+
+        guidance = (
+            "Recommend only from these products: " + names + ". Do not name any "
+            "other product. If more than one is listed, say which you would use "
+            "and what the other is for."
+        )
+        if unknown:
+            guidance += (" The passages do not state " + ", ".join(unknown)
+                         + " for these products, so do not state it either.")
+
+        router_decision = self._select_decision(
+            resolved, supporting, Path_.SELECT, "4b",
+            "a product was chosen from " + str(len(approved))
+            + " evidence-supported candidate(s)")
+        answer = self.compose(router_decision, resolved.raw_question,
+                              history=history, guidance=guidance)
+        answer.diagnostics["approved"] = sorted(approved)
+        answer.diagnostics["rejected"] = [
+            {"product": a.product, "status": a.status.value,
+             "reason": a.rejected_because} for a in decision.rejected]
+        answer.diagnostics["outcome"] = decision.outcome.value
+        answer.diagnostics["evidence"] = {
+            a.product: a.evidence for a in decision.approved}
+        if conditions:
+            answer.caveats = list(
+                dict.fromkeys(list(answer.caveats) + conditions))[:3]
+        return answer
+
+    def need_more_information(self, resolved, decision) -> Answer:
+        """Ask for the minimum, and say why it decides the answer.
+
+        Named for what it is rather than folded into `ask_back`, because the two
+        differ in what they can say. `ask_back` asks the single fixed question
+        decision 10 privileges; this names whichever facts *this* job requires,
+        which for an external render includes the exposure and for a repair
+        includes neither.
+        """
+        missing = list(decision.missing)
+        disputed = [slot for slot in missing if slot in resolved.unsettled]
+        head = missing[0] if missing else ""
+
+        asked = _MISSING_PHRASE.get(head, "one more detail about the wall.")
+        text = ("I need one more detail before I can point you at a product. "
+                + asked[0].upper() + asked[1:])
+
+        if disputed:
+            # The conflict is quoted back rather than settled silently. The
+            # person is the only one who can settle it, and showing them both
+            # readings is what makes it answerable in one reply.
+            text += (chr(10) * 2 + "The photograph and what you told me do not "
+                     "agree about the " + disputed[0]
+                     + ", so I would rather ask than guess.")
+        if len(missing) > 1:
+            text += (chr(10) * 2 + "It would also help to know the "
+                     + " and the ".join(missing[1:]) + ".")
+        text += chr(10) * 2 + _contact_line(self.names)
+
+        router_decision = self._select_decision(
+            resolved, [], Path_.ASK_BACK, "4b",
+            "a product cannot be chosen without: " + ", ".join(missing))
+        answer = self._finish(router_decision, text, [], resolved.raw_question)
+        answer.diagnostics["outcome"] = decision.outcome.value
+        answer.diagnostics["missing"] = missing
+        return answer
+
+    def no_supported_recommendation(self, resolved, decision,
+                                    why: str = "") -> Answer:
+        """The corpus does not establish suitability, so nothing is recommended.
+
+        A refusal rather than a best guess, and a refusal that still carries
+        what is published, which is the shape every other refusal in this system
+        takes. What it adds is the list of products actually considered and why
+        each was set aside -- because "nothing is suitable" and "the sheets do
+        not say" are different statements, and the second is the true one.
+        """
+        reason = why or decision.reason or (
+            "the published material does not establish that any product suits "
+            "this background")
+        text = ("I cannot recommend a product for this: " + reason + "."
+                + chr(10) * 2
+                + "I would rather say so than put a product on a wall the "
+                "published material does not cover.")
+
+        considered = [a for a in decision.rejected if a.rejected_because]
+        if considered:
+            text += chr(10) * 2 + "What I looked at:" + chr(10) + chr(10).join(
+                "- " + a.product + ": " + a.rejected_because
+                for a in considered[:4])
+        text += chr(10) * 2 + _contact_line(self.names)
+
+        router_decision = self._select_decision(
+            resolved, [], Path_.REFUSE, "4b", reason)
+        answer = self._finish(router_decision, text, [], resolved.raw_question)
+        answer.refused = True
+        answer.diagnostics["outcome"] = decision.outcome.value
+        answer.diagnostics["rejected"] = [
+            {"product": a.product, "status": a.status.value,
+             "reason": a.rejected_because} for a in decision.rejected]
+        return answer
 
     def _prompt_context(self, decision: Decision) -> list[str]:
         """What the model is told about the caller's building, for the prompt only.

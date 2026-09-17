@@ -21,3 +21,19 @@ numpy==2.5.3
 # a source build requiring MSVC build tools. That is a clean-clone failure on any ARM64
 # machine, including an assessor's, so the web UI is served from the standard library
 # instead — see DECISIONS.md entry 15.
+
+# Conversation orchestration. The exception to decision 4's "no framework", taken
+# deliberately and recorded as decision 20 -- the turn is a state machine now
+# (structured understanding, image observations, a missing-information loop,
+# candidate discovery, evidence sufficiency, recommendation, verification,
+# multi-turn correction) and those are state-machine concerns.
+#
+# It is the largest dependency in this file by a wide margin: 28 packages
+# install with it, including `langchain-core` and `langsmith`. Two things make
+# that acceptable and both are enforced rather than documented --
+# `assistant/graph.py` disables the hosted tracing client in code before the
+# import, and `tests/test_graph.py` asserts it is inert. No domain logic moved
+# into the graph: the repository, retrieval, the six checks, the policy gate,
+# the calculations and the audience filter are called by nodes, not absorbed
+# into them.
+langgraph==1.2.11

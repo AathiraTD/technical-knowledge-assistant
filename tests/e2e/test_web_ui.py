@@ -18,8 +18,6 @@ import json
 import subprocess
 import sys
 
-import pytest
-
 from .conftest import ROOT, ROUTED_QUESTION, ask
 
 # The smallest thing that is really a PNG: an 8-byte signature and a valid IHDR.
@@ -28,6 +26,17 @@ from .conftest import ROOT, ROUTED_QUESTION, ask
 ONE_PIXEL_PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
     "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+
+# A request carrying a real photograph is slow for a reason that is not this
+# suite's to fix: `Assistant.ask` perceives before it routes, so an image costs a
+# vision-model call even when the question itself is answered from the routing
+# table without retrieval. On a processor with no graphics card that is minutes,
+# not seconds (DECISIONS.md, "Still open"). The default Playwright timeout is
+# thirty seconds, which fails the test while the server is still working
+# correctly -- the first version of this file did exactly that, and the timeouts
+# then cascaded into every test behind it.
+PERCEPTION_TIMEOUT = 300_000
+ROUTED_TIMEOUT = 30_000
 
 
 def session_cookie(page) -> str:
@@ -90,8 +99,9 @@ def test_an_uploaded_photograph_reaches_the_server(page):
     page.set_input_files("#file-input", {
         "name": "wall.png", "mimeType": "image/png", "buffer": ONE_PIXEL_PNG})
 
-    with page.expect_response(lambda r: "/ask" in r.url) as caught:
-        page.fill("#question-input", "This is the wall I am working on.")
+    with page.expect_response(lambda r: "/ask" in r.url,
+                              timeout=PERCEPTION_TIMEOUT) as caught:
+        page.fill("#question-input", ROUTED_QUESTION)
         page.click("#send-btn")
     payload = caught.value.json()
 
@@ -105,8 +115,9 @@ def test_a_photograph_and_the_text_turn_after_it_are_one_conversation(page):
     page.goto("/")
     page.set_input_files("#file-input", {
         "name": "wall.png", "mimeType": "image/png", "buffer": ONE_PIXEL_PNG})
-    with page.expect_response(lambda r: "/ask" in r.url):
-        page.fill("#question-input", "This is the wall I am working on.")
+    with page.expect_response(lambda r: "/ask" in r.url,
+                              timeout=PERCEPTION_TIMEOUT):
+        page.fill("#question-input", ROUTED_QUESTION)
         page.click("#send-btn")
     after_upload = session_cookie(page)
 
@@ -117,15 +128,22 @@ def test_a_photograph_and_the_text_turn_after_it_are_one_conversation(page):
 
 
 def test_an_attachment_that_is_not_an_image_is_refused_and_said_so(page):
-    """Refused by content, and the caller is told rather than quietly ignored."""
+    """Refused by content, and the caller is told rather than quietly ignored.
+
+    Fast, unlike the tests above, and the reason is the behaviour being tested:
+    nothing recognised as an image means nothing to perceive, so the vision model
+    is never called. A regression that started accepting these bytes would show
+    up here as a timeout before it showed up as a wrong assertion.
+    """
     page.goto("/")
     page.set_input_files("#file-input", {
         "name": "wall.png",                  # the name says PNG; the bytes do not
         "mimeType": "image/png",
         "buffer": b"this is not a picture, whatever it is called"})
 
-    with page.expect_response(lambda r: "/ask" in r.url) as caught:
-        page.fill("#question-input", "This is the wall I am working on.")
+    with page.expect_response(lambda r: "/ask" in r.url,
+                              timeout=ROUTED_TIMEOUT) as caught:
+        page.fill("#question-input", ROUTED_QUESTION)
         page.click("#send-btn")
     payload = caught.value.json()
 
@@ -137,18 +155,24 @@ def test_an_attachment_that_is_not_an_image_is_refused_and_said_so(page):
 def test_a_cited_source_renders_as_a_working_link(page):
     """A citation the reader cannot follow is not a citation.
 
-    Asked as a document request, which the manifest answers with names, dates
-    and links and without the model: the question here is whether a source
-    becomes an anchor with an absolute href, not whether generation cites well.
+    A quantity question, because router step 6 takes the extract path: a real
+    passage with a real citation, printed by code with no model, so this costs
+    a retrieval rather than a generation.
+
+    It asked for a datasheet by name first, which was wrong twice over. The
+    manifest path writes its URLs into the body as text and populates no
+    `sources` at all, so `.source-link` was never going to exist -- and because
+    the assertion was guarded by a skip, the test reported success by not
+    running. A test that cannot fail is not evidence, so the skip is gone.
     """
     page.goto("/")
-    ask(page, "Where is the datasheet for Lime Green Ultra?")
+    ask(page, "How many bags of Duro do I need for 20 square metres?")
 
     links = page.locator(".source-link")
-    if links.count() == 0:
-        pytest.skip("this question returned no sources to render")
+    assert links.count() > 0, "an answer with citation markers rendered no sources"
     href = links.first.get_attribute("href")
     assert href and href.startswith("http"), f"source link href was {href!r}"
+    assert page.locator(".citation").count() > 0, "no [n] marker was rendered"
 
 
 def test_a_public_caller_cannot_ask_its_way_into_staff_material(page):
@@ -157,8 +181,17 @@ def test_a_public_caller_cannot_ask_its_way_into_staff_material(page):
     Enforced in `resolve`, but asserted through the URL because that is where a
     caller would actually try it, and because a regression here is a leak rather
     than a bug.
+
+    The question is one the routing table answers, so this navigation does not
+    wait on generation. A composing question here would spend minutes proving
+    something about the audience set that is decided before retrieval runs.
+
+    The parameter is `a`, which is worth stating because the first version of
+    this test sent `audience=staff` -- a name the server does not read at all.
+    It passed, and proved nothing: an attempt at elevation that the code never
+    sees is not an attempt at elevation.
     """
-    page.goto("/?q=What+is+the+coverage%3F&audience=staff")
+    page.goto("/?q=How+much+does+a+bag+cost%3F&a=staff")
 
     footer = page.inner_text("#footer-audience").lower()
     assert "staff" not in footer
@@ -173,7 +206,8 @@ def test_the_correlation_id_the_browser_gets_reads_a_real_trace(page):
     this held, a reported problem could only be investigated by reproducing it.
     """
     page.goto("/")
-    with page.expect_response(lambda r: "/ask" in r.url) as caught:
+    with page.expect_response(lambda r: "/ask" in r.url,
+                              timeout=ROUTED_TIMEOUT) as caught:
         page.fill("#question-input", ROUTED_QUESTION)
         page.click("#send-btn")
     response = caught.value

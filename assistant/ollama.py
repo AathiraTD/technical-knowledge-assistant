@@ -202,12 +202,25 @@ def generate(
     num_ctx: int = 8192,
     seed: int = 0,
     num_predict: int = MAX_ANSWER_TOKENS,
+    schema: dict | None = None,
 ) -> tuple[str, float]:
     """One completion at temperature zero. Returns the text and the seconds it took.
 
     Latency is returned rather than logged because it decides something: the
     trade's tolerance is about ten seconds, and whether the demonstration runs
     live or from a transcript depends on the measured number.
+
+    `schema` constrains the reply to a JSON schema through Ollama's `format`
+    field, so a structured stage gets structured output instead of prose that
+    has to be parsed back. `assistant/vision.py` already posts `format` to this
+    same endpoint with its own client; this brings the second such caller --
+    `assistant/understanding.py` -- through the one place that already knows
+    about timeouts, keep-alive, seeds and the unavailability error.
+
+    Constrained decoding guarantees the *shape* and nothing else. A schema can
+    say `substrate` is a string; it cannot say the string names a real
+    substrate. Every caller validates what comes back against an approved
+    vocabulary, which is why nothing downstream trusts this function's output.
     """
     body = {
         "model": model,
@@ -225,6 +238,8 @@ def generate(
     }
     if system:
         body["system"] = system
+    if schema is not None:
+        body["format"] = schema
 
     started = time.perf_counter()
     try:

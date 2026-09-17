@@ -69,9 +69,28 @@ def test_two_ids_are_never_the_same():
 # ------------------------------------------------------- what is carried
 
 
-def test_the_carried_slots_are_the_facts_about_a_building():
-    """Decision 10's two load-bearing slots, plus the one of the same kind."""
-    assert CARRIED_SLOTS == ("substrate", "location", "exposure")
+def test_the_carried_slots_are_what_a_later_turn_may_inherit():
+    """Decision 10's two load-bearing slots, the one of the same kind, and the
+    subject of the conversation.
+
+    The first three are facts about a building, which is what this list used to
+    hold and what it used to be named for. `product` is not one of those and is
+    deliberately here anyway: without it, "how much would I need for 30 square
+    metres" is a question about the corpus rather than about the product two
+    turns of conversation have been about, and it reads a coverage figure off
+    whichever datasheet ranks first. `eval/conversations.json` C5 is that bug.
+
+    Two properties keep the addition from widening the leak the vision seam
+    exists to close. `product` is absent from `vision.VISION_SLOTS`, so it can
+    only ever be something the caller wrote -- a model that could name a product
+    from a photograph would be persisting a guess as a statement. And an
+    explicit product in a later question overrides the carried one, so the
+    inheritance is a default rather than a lock.
+
+    Asserted as the whole tuple so that adding a fourth kind of memory to a
+    conversation stays a decision somebody makes on purpose.
+    """
+    assert CARRIED_SLOTS == ("product", "substrate", "location", "exposure")
 
 
 def test_a_substrate_established_in_one_turn_is_offered_to_the_next():

@@ -98,8 +98,10 @@
    "id": "S9",
    "name": "Multi-source: compatibility and a condition, from two sheets",
    "question": "Is Natural Finish compatible with Duro, including the temperature range Duro needs?",
-   "pass": true,
-   "notes": [],
+   "pass": false,
+   "notes": [
+    "the answer's markers reference 1 distinct document(s), expected at least 2"
+   ],
    "paths": [
     "compose"
    ],
@@ -114,7 +116,7 @@
    "pass": true,
    "notes": [],
    "paths": [
-    "compose"
+    "refuse"
    ]
   },
   {
@@ -250,9 +252,9 @@
       "8"
      ],
      "slots": {
+      "product": "ultra",
       "substrate": "brick",
-      "location": "internal",
-      "product": "ultra"
+      "location": "internal"
      },
      "session_slots": {
       "substrate": "brick",
@@ -273,9 +275,9 @@
       "8"
      ],
      "slots": {
+      "product": "ultra",
       "substrate": "brick",
       "location": "internal",
-      "product": "ultra",
       "property_asked": "thickness"
      },
      "session_slots": {
@@ -297,9 +299,9 @@
       "6"
      ],
      "slots": {
+      "product": "ultra",
       "substrate": "brick",
       "location": "internal",
-      "product": "ultra",
       "calculation": "quantity"
      },
      "session_slots": {
@@ -321,9 +323,9 @@
       "8"
      ],
      "slots": {
+      "product": "ultra",
       "substrate": "stone",
-      "location": "internal",
-      "product": "ultra"
+      "location": "internal"
      },
      "session_slots": {
       "substrate": "stone",
@@ -351,8 +353,8 @@
       "8"
      ],
      "slots": {
-      "property_asked": "water",
-      "product": "solo"
+      "product": "solo",
+      "property_asked": "water"
      },
      "session_slots": {
       "product": "solo"
@@ -398,8 +400,8 @@
       "6"
      ],
      "slots": {
-      "calculation": "quantity",
-      "product": "solo"
+      "product": "solo",
+      "calculation": "quantity"
      },
      "session_slots": {
       "product": "solo"
@@ -456,11 +458,10 @@
       "refuse"
      ],
      "steps": [
-      "4"
+      "4b"
      ],
      "slots": {
-      "product": "solo",
-      "property_asked": "coverage"
+      "product": "solo"
      },
      "session_slots": {
       "product": "solo"
@@ -483,7 +484,7 @@
       "ask back"
      ],
      "steps": [
-      "5"
+      "4b"
      ],
      "slots": {},
      "session_slots": {}
@@ -495,10 +496,10 @@
      "pass": true,
      "notes": [],
      "paths": [
-      "compose"
+      "refuse"
      ],
      "steps": [
-      "8"
+      "4b"
      ],
      "slots": {
       "substrate": "brick"
@@ -527,10 +528,10 @@
       "8"
      ],
      "slots": {
+      "product": "ultra",
       "substrate": "brick",
       "location": "internal",
-      "property_asked": "thickness",
-      "product": "ultra"
+      "property_asked": "thickness"
      },
      "session_slots": {
       "product": "ultra",

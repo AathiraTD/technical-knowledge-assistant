@@ -67,6 +67,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant.answer import Provenance                  # noqa: E402
+from assistant.conversation import TurnInput             # noqa: E402
 from assistant.engine import Assistant, render          # noqa: E402
 from assistant.router import Path_                      # noqa: E402
 from assistant.session import SessionStore              # noqa: E402
@@ -358,26 +359,34 @@ class Conversation:
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
             images=None) -> TurnRecord:
         carried = self.sessions.carried(self.session_id)
-        pending = self.sessions.pending(self.session_id)
-        asked = question
-        if pending and question:
-            # The router's own vocabulary decides whether this turn answers the
-            # ask-back, never a second copy of it here: "brick" resumes the held
-            # question and "and what colour is it" does not.
-            stated = self.assistant.router.slots.detect(question)
-            if "substrate" in stated:
-                carried = {**carried, **stated}
-                asked = pending
-
         index = len(self.turns)
-        reply = self.assistant.ask(
-            asked, audiences=audiences, carried=carried, images=images,
-            session_id=self.session_id, turn_id=f"{self.label}-t{index + 1}")
+
+        # The ask-back bookkeeping that used to sit here is gone. It guessed
+        # whether a turn answered a held question by looking for a substrate in
+        # it, which is a second copy of a judgement the graph now makes once --
+        # and a copy that could disagree with the one the web page was making is
+        # exactly the divergence between orchestration paths worth removing.
+        # The graph parks the turn and resumes it; this driver only has to send
+        # the message.
+        turn = TurnInput(raw_question=question, turn_index=index + 1,
+                         images=tuple(images or ()), audiences=tuple(audiences),
+                         session_id=self.session_id,
+                         turn_id=f"{self.label}-t{index + 1}")
+        object.__setattr__(turn, "history", "")
+        reply, state = self.assistant.ask_turn(turn)
+        asked = reply.question or question
         self._remember(question, reply)
+        # A held question is a parked graph now, not a string in the session.
+        # It is read back off the answer that parked it, so the harness reports
+        # the same fact it always did from the place that now owns it.
+        pending = next((a.diagnostics.get("resolved_question")
+                        or a.diagnostics.get("interrupted") and question or ""
+                        for _p, a in reply.parts
+                        if a.diagnostics.get("interrupted")), "")
         record = TurnRecord(index=index, question=question, asked=asked,
                             reply=reply,
-                            session_slots=self.sessions.carried(self.session_id),
-                            pending_after=self.sessions.pending(self.session_id),
+                            session_slots=state.active(),
+                            pending_after=pending,
                             carried_in=dict(carried))
         self.turns.append(record)
         return record

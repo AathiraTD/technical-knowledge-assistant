@@ -18,10 +18,13 @@ server nobody can see is not operable.
 
 from __future__ import annotations
 
+import os
+
 import argparse
 import sys
 
 from . import observability as obs, ollama, use_utf8
+from .conversation import TurnInput
 from .engine import Assistant, render
 from .repository import IndexMismatch
 from .store import EmbeddedRepository
@@ -123,7 +126,17 @@ def main(argv: list[str] | None = None) -> int:
 def _ask_once(assistant, question: str, audiences, verbose: bool,
               images=None) -> int:
     try:
-        reply = assistant.ask(question, audiences=audiences, images=images)
+        # Through the graph, like every other surface. The CLI is still
+        # single-turn -- each invocation is a new process, so there is nothing
+        # for a thread id to continue -- and it goes this way anyway, because
+        # what the graph adds is not only memory: structured understanding, the
+        # case boundary, the SELECT flow and the evidence gate all live here.
+        # A command-line question about which product suits a brick wall should
+        # get the same answer the web page gives it.
+        turn = TurnInput(raw_question=question, turn_index=1,
+                         images=tuple(images or ()), audiences=tuple(audiences),
+                         session_id=f"cli-{os.getpid()}")
+        reply, _state = assistant.ask_turn(turn)
     except ollama.OllamaUnavailable as exc:
         print(f"\n{exc}\n", file=sys.stderr)
         return 1

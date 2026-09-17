@@ -11,6 +11,8 @@ asks a price and a coverage should not have one path chosen for both.
 
 from __future__ import annotations
 
+import os
+
 import re
 from dataclasses import dataclass, field, replace
 
@@ -100,7 +102,7 @@ class Assistant:
 
     def __init__(self, repo, threshold: float | None = None, *,
                  cache: bool = True, log: bool = True,
-                 source: str = "unknown") -> None:
+                 source: str = "unknown", checkpointer=None) -> None:
         self.log = log
         # Which surface this instance answers for, written onto every audit row.
         # It defaults to `unknown` rather than to `cli` because a caller that
@@ -120,6 +122,26 @@ class Assistant:
         # router owns it. Handing over the router rather than a copy keeps one
         # definition of what a term means.
         self.engine.retriever = self.router
+        # One checkpointer for this assistant's lifetime. Cheap: it constructs
+        # no graph and imports no orchestration library until `ask_turn` is
+        # actually called.
+        self._init_orchestration(checkpointer)
+
+    def _init_orchestration(self, checkpointer=None) -> None:
+        """One checkpointer for this assistant's lifetime.
+
+        Constructed here rather than per turn, which is the correction P0-3
+        exists for: `build()` used to make a fresh `InMemorySaver` on every
+        call, so `thread_id` addressed a store that was empty by construction.
+        """
+        from .graph import checkpointer_for
+
+        self.checkpointer = checkpointer or checkpointer_for(
+            os.environ.get("ASSISTANT_CHECKPOINT_DSN", ""))
+        self._services = None
+        self._graph = None
+        # The release this turn is pinned to, set inside `ask_turn`.
+        self._turn_snapshot = None
 
     def detect_answer_to_askback_slots(self, question: str) -> dict[str, str]:
         """Extract slots if question looks like an answer to an ask-back.
@@ -201,11 +223,27 @@ class Assistant:
         same turn and a different trace, and collapsing them would make the
         ask-back cycle unreadable in the trace.
         """
-        # Merge context (prior conversation) with the current question for
-        # multi-turn reasoning. Context is prepended so the model can see
-        # earlier turns and make coherent follow-ups.
-        if context:
-            question = context + "\n\n" + question
+        # `context` is NOT merged into the question, and the deleted line is
+        # the whole point of this block.
+        #
+        # `question = context + "\n\n" + question` put an earlier answer's
+        # prose in front of every deterministic stage: the policy gate, the
+        # slot detector, the product detector and the embedder all read it.
+        # Three measured consequences, none of them subtle. A previous answer
+        # containing the word "cost" routed an unrelated follow-up to the price
+        # referral. A previous answer mentioning plaster put a substrate on a
+        # question that named none -- `detect("What plaster should I use on my
+        # wall")` returns `{}`, while `detect(context + question)` returns
+        # `{'substrate': 'existing_plaster', 'property_asked': 'compatibility'}`.
+        # And the embedded query became the transcript, so retrieval answered
+        # the conversation rather than the question.
+        #
+        # One cause behind all three: assistant-generated prose became an input
+        # to deterministic routing, which makes the model the controller by the
+        # back door. The transcript is still useful -- to the model, on Compose,
+        # for resolving "it" and "that wall" -- so it travels as its own
+        # argument and arrives after the route and the passages are decided.
+        history = context
         question = cap(question)
         reply = Reply(question=question, audiences=audiences)
 
@@ -255,7 +293,8 @@ class Assistant:
                         # produced and must keep producing.
                         origins.update({slot: Provenance.OBSERVED
                                         for slot in observed})
-                    self._ask(question, audiences, reply, cid, carried, origins)
+                    self._ask(question, audiences, reply, cid, carried,
+                              origins, history)
                     summary["parts"] = len(reply.parts)
                     summary["paths"] = reply.paths
                     summary["refused"] = reply.refused
@@ -264,6 +303,322 @@ class Assistant:
                 # snapshot, for the reason `log_answer` writes from outside one.
                 self._record_spans(spans)
         return reply
+
+    # ------------------------------------------------- the state machine
+
+    def answer_part(self, part: str, audiences: tuple = ("public",),
+                    carried: dict | None = None, origins: dict | None = None,
+                    history: str = "") -> Answer:
+        """The per-topic answering path, under a name the graph may call.
+
+        `_answer_part` stays private and unchanged; this is the seam. Naming it
+        rather than letting `assistant/graph.py` reach for the underscore keeps
+        the boundary visible: the graph orders the turn and calls this, and
+        everything this does -- the policy gate, retrieval, the router, the six
+        checks -- is the code that was already there.
+        """
+        # Cached, like the path it replaces. `Assistant._ask` looks the answer
+        # up before calling `_answer_part` and stores it after, and moving the
+        # UI onto the graph quietly left that behind -- decision 14's measured
+        # 40.78s to 0.017s on a repeated question, lost, along with the
+        # `cache_lookups` counter every dashboard reads.
+        #
+        # The key is the same function with the same inputs, so the two paths
+        # cannot disagree about what counts as the same question: the audience
+        # set, the snapshot, the model, the chunking version, the carried slots,
+        # their origins and the transcript digest are all in it.
+        snapshot = getattr(self, "_turn_snapshot", None)
+        key = (self._cache_key(part, tuple(audiences), snapshot, carried,
+                               origins, history)
+               if (self.cache is not None and snapshot is not None) else None)
+        if key is not None:
+            with obs.span("cache_lookup") as lookup:
+                cached = self.cache.get(key)
+                lookup["hit"] = cached is not None
+            if cached is not None:
+                return replace(cached, diagnostics={**cached.diagnostics,
+                                                    "cached": True})
+
+        answer = self._answer_part(part, tuple(audiences), carried, origins,
+                                   history)
+        if key is not None:
+            answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
+            answer.diagnostics["embedding_model"] = snapshot.embedding_model
+            answer.diagnostics["chunking_version"] = snapshot.chunking_version
+            self.cache.put(key, answer)
+        return answer
+
+    def recommend(self, resolved, decision, hits, history: str = "") -> Answer:
+        return self.engine.recommend(resolved, decision, hits, history=history)
+
+    def need_more_information(self, resolved, decision) -> Answer:
+        return self.engine.need_more_information(resolved, decision)
+
+    def no_supported_recommendation(self, resolved, decision,
+                                    why: str = "") -> Answer:
+        return self.engine.no_supported_recommendation(resolved, decision,
+                                                       why=why)
+
+    def _graph_for(self, vision, matrix, understanding: bool):
+        """The application's one compiled graph, built once and kept.
+
+        Built lazily rather than in `__init__` because compiling it imports
+        `langgraph`, and a CLI answering a text question should not pay a 1.3
+        second import for a path it does not take.
+
+        `vision`, `matrix` and the registry are set on the services object each
+        turn rather than baked in at compile time. The nodes close over the
+        object and read the attributes when they run, so a graph compiled at
+        start-up still sees this turn's snapshot -- which matters for the
+        registry in particular, because check 5 trusts it and a product
+        withdrawn since start-up must stop being recommendable.
+        """
+        from .graph import Services, build
+
+        if self._services is None:
+            self._services = Services(
+                retriever=self.retriever, router=self.router, engine=self,
+                repo=self.repo, registry=[], checkpointer=self.checkpointer)
+            self._graph = build(self._services)
+        self._services.vision = vision
+        self._services.matrix = matrix
+        self._services.understanding_enabled = understanding
+        self._services.registry = self.engine.names.get("products", [])
+        return self._graph
+
+    @staticmethod
+    def _paused_on(app, thread: str) -> bool:
+        """Is this conversation stopped inside a node, waiting for a reply?
+
+        Read from the checkpoint rather than tracked separately, so there is one
+        answer to the question and it is the graph's. A second flag on the
+        session would be a thing to keep in step, and the two would drift the
+        first time a process restarted.
+        """
+        try:
+            snapshot = app.get_state({"configurable": {"thread_id": thread}})
+        except Exception:                                  # noqa: BLE001
+            return False
+        return bool(getattr(snapshot, "next", ()))
+
+    def _render_interrupt(self, final: dict, thread: str) -> dict:
+        """Turn a paused graph into something a surface can display.
+
+        The graph stops mid-node and produces no answer, which is correct for
+        the graph and useless to an HTTP response. This renders the question it
+        stopped to ask, using the same `need_more_information` path a
+        non-interruptible run would have taken -- so the wording, the provenance
+        line and the contact details are identical either way, and only the
+        machinery behind them differs.
+
+        The pause itself is untouched. The conversation stays parked in the
+        checkpoint, and the next message resumes it.
+        """
+        from .candidates import Outcome, RecommendationDecision
+
+        payload = final["__interrupt__"][0]
+        value = getattr(payload, "value", payload) or {}
+        missing = tuple(value.get("missing") or ())
+        decision = RecommendationDecision(
+            outcome=Outcome.NEED_MORE_INFORMATION, missing=missing,
+            reason="a product cannot be chosen without: " + ", ".join(missing))
+        answer = self.engine.need_more_information(final["resolved"], decision)
+        with obs.span("part",
+                      question=obs.fingerprint(final["resolved"].raw_question)) as span:
+            span["path"] = answer.path
+            span["outcome"] = decision.outcome.value
+            span["interrupted"] = True
+        answer.diagnostics["interrupted"] = True
+        answer.diagnostics["resuming"] = bool(value.get("resuming"))
+        return {**final, "answer": answer, "decision": decision,
+                # `answers` as well as `answer`: `ask_turn` prefers the list, so
+                # setting only the singular left the stale one in place.
+                "answers": [(final["resolved"].raw_question, answer)],
+                "outcome": decision.outcome.value,
+                "trace": list(final.get("trace") or []) + ["interrupted"]}
+
+    def _thread_has_state(self, thread: str) -> bool:
+        """Has this conversation been seen before?
+
+        Asked of the checkpointer, which is the source of continuity now. The
+        answer decides whether the caller's `ConversationState` is used to seed
+        the thread or ignored -- and ignoring it on a known thread is the point:
+        continuity must not depend on the caller remembering to hand state back.
+        """
+        try:
+            return self.checkpointer.get(
+                {"configurable": {"thread_id": thread}}) is not None
+        except Exception:                                  # noqa: BLE001
+            return False
+
+    def conversation_state(self, thread: str):
+        """The conversation this thread holds, as a `ConversationState`.
+
+        A read-only view for a surface that wants to show what is remembered.
+        The checkpoint is authoritative; this is a projection of it.
+        """
+        from .conversation import ConversationState
+
+        try:
+            saved = self.checkpointer.get({"configurable": {"thread_id": thread}})
+        except Exception:                                  # noqa: BLE001
+            saved = None
+        if not saved:
+            return ConversationState()
+        values = saved.get("channel_values", {}) or {}
+        return ConversationState(facts=dict(values.get("facts") or {}),
+                                 observations=tuple(values.get("observations") or ()),
+                                 turn_index=values.get("turn_index", 0))
+
+    def forget(self, thread: str) -> None:
+        """Drop a conversation entirely. What "New chat" means underneath."""
+        try:
+            self.checkpointer.delete_thread(thread)
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def ask_turn(self, turn, state=None, *, vision=None, matrix=None,
+                 understanding: bool = True):
+        """One turn through the state machine. Returns (Reply, ConversationState).
+
+        The opt-in entry point. `ask()` is untouched and every existing caller
+        keeps its behaviour, because a new orchestration that silently replaced
+        the working one would put seven routes at risk in order to add an
+        eighth.
+
+        Three things happen here that cannot happen inside a graph node. The
+        **read snapshot is opened once for the whole turn**, so every node sees
+        one release -- decision 19's pinned reader, which is what stops a
+        publication mid-turn mixing two versions into one answer. The **name
+        lists are refreshed from that snapshot**, because check 5 trusts them
+        and a stale list would let a withdrawn product through. And the **span
+        tree is collected and persisted** once the root span closes.
+        """
+        from .conversation import ConversationState
+
+        state = state or ConversationState()
+        reply = Reply(question=turn.raw_question, audiences=turn.audiences)
+        final: dict = {}
+        thread = turn.session_id or "cli"
+
+        # The caller's id when it has one. `ask()` has always taken this and
+        # `ask_turn` minted a fresh one instead, so the id the browser was shown
+        # in `X-Correlation-Id` addressed a trace that did not exist.
+        with obs.correlation(getattr(turn, "correlation_id", "")) as cid:
+            reply.correlation_id = cid
+            with obs.turn(turn=turn.turn_id or str(turn.turn_index),
+                          session=turn.session_id,
+                          source=self.source) as spans:
+                with obs.span("answer", audiences=list(turn.audiences),
+                              question_words=len(turn.raw_question.split()),
+                              question=obs.fingerprint(turn.raw_question),
+                              orchestration="graph") as summary:
+                    with self.repo.read_snapshot() as snapshot:
+                        self.retriever._verify()
+                        # Held for the turn so `answer_part` can key the cache on
+                        # the release it is actually reading, without the graph
+                        # having to carry a snapshot through its state.
+                        self._turn_snapshot = snapshot
+                        self.engine.names = {
+                            key: snapshot.notes.get(key, default)
+                            for key, default in (("products", []),
+                                                 ("colours", []),
+                                                 ("merchants", []),
+                                                 ("contact", {}))}
+                        app = self._graph_for(vision, matrix, understanding)
+                        paused = self._paused_on(app, thread)
+                        if paused and not self.router.slots.is_answer_to_askback(
+                                turn.raw_question):
+                            # Parked waiting for a substrate, and this message is
+                            # a new question rather than an answer to that. The
+                            # person moved on, and resuming would feed their
+                            # question in as the reply -- discarding it and
+                            # re-asking the same thing, which is precisely the
+                            # bug the `pending` string used to have and the
+                            # reason `interrupt()` is not automatically safer.
+                            #
+                            # The paused turn is abandoned and the conversation
+                            # kept: the facts are read out, the thread dropped,
+                            # and a fresh turn seeded with them.
+                            carried = self.conversation_state(thread)
+                            self.forget(thread)
+                            obs.event("ask_back_abandoned",
+                                      kept=sorted(carried.active()))
+                            state = carried
+                            paused = False
+                        # The facts are seeded from the checkpoint, not from the
+                        # caller. `inherit()` is applied only when this thread
+                        # has no checkpoint yet -- a first turn, or a caller
+                        # deliberately restoring a conversation from elsewhere.
+                        # Sending it every turn would re-apply the whole prior
+                        # state on top of itself and make `source_turn` reset.
+                        seed = {"raw_question": turn.raw_question,
+                                "history": getattr(turn, "history", ""),
+                                "images": list(turn.images),
+                                "audiences": tuple(turn.audiences),
+                                "turn_index": turn.turn_index,
+                                "session_id": turn.session_id}
+                        if not self._thread_has_state(thread):
+                            seed["facts"] = state.inherit()
+                        config = {"configurable": {"thread_id": thread}}
+                        if paused:
+                            # This conversation is stopped inside `ask_back`
+                            # waiting for an answer, so this message *is* the
+                            # answer. Resuming re-enters the node it stopped in
+                            # and carries on to retrieval, evidence and a
+                            # recommendation -- answering the question they
+                            # originally asked, which is the whole point of
+                            # pausing rather than starting again.
+                            from langgraph.types import Command
+                            final = app.invoke(
+                                Command(resume=turn.raw_question), config)
+                        else:
+                            final = app.invoke(seed, config)
+                        if final.get("__interrupt__"):
+                            final = self._render_interrupt(final, thread)
+
+                    # `answers` rather than `answer`: a message carrying two
+                    # jobs is two parts, the same way `Assistant.ask` has always
+                    # treated it. A selection produces one.
+                    produced = final.get("answers") or (
+                        [(turn.raw_question, final["answer"])]
+                        if final.get("answer") is not None else [])
+                    resolved = final.get("resolved")
+                    resumed = final.get("resumed_question") or ""
+                    if resumed:
+                        reply.question = resumed
+                    for part, answer in produced:
+                        answer.diagnostics["correlation_id"] = cid
+                        answer.diagnostics["trace_id"] = obs.trace_id()
+                        if resolved is not None:
+                            answer.diagnostics.setdefault(
+                                "intent", resolved.intent.value)
+                        answer.diagnostics["graph"] = final.get("trace", [])
+                        if resumed:
+                            answer.diagnostics["resumed_question"] = resumed
+                        reply.parts.append((resumed or part, answer))
+                    summary["parts"] = len(reply.parts)
+                    summary["paths"] = reply.paths
+                    summary["refused"] = reply.refused
+                self._record_spans(spans)
+
+        if self.log:
+            self._log(reply)
+
+        # A case boundary is retired here rather than inside the graph. The
+        # graph's `NewCase` instruction resets the *facts channel*, which is
+        # what stops the old wall informing the new one; filing the old case in
+        # `history` is a property of the conversation object the caller holds,
+        # and the graph does not own that. Both halves are needed: without the
+        # reducer the new wall inherits brick, and without this the retired wall
+        # is simply gone and the earlier answers stop being explicable.
+        opened = final.get("case_opened")
+        if opened:
+            state.open_case(turn.turn_index, because=opened)
+        state.facts = dict(final.get("facts") or {})
+        state.observations = tuple(final.get("observations") or ())
+        state.turn_index = turn.turn_index
+        return reply, state
 
     def _record_spans(self, spans: list) -> None:
         """Persist the turn's trace, and never let a trace cost an answer.
@@ -294,7 +649,7 @@ class Assistant:
 
     def _ask(self, question: str, audiences: tuple[str, ...], reply: Reply,
              cid: str, carried: dict | None = None,
-             origins: dict | None = None) -> None:
+             origins: dict | None = None, history: str = "") -> None:
         with self.repo.read_snapshot() as snapshot:
             self.retriever._verify()
             # Names/contact are release metadata too; refresh them together
@@ -311,7 +666,7 @@ class Assistant:
                 with obs.span("part", question=obs.fingerprint(part),
                               snapshot_id=snapshot.snapshot_id) as part_span:
                     key = self._cache_key(part, audiences, snapshot, carried,
-                                          origins)
+                                          origins, history)
                     # `is not None`, not truthiness. AnswerCache defines __len__,
                     # so an empty cache is falsy and `if self.cache` was False on
                     # every call — the cache could never fill, because it was empty.
@@ -322,7 +677,7 @@ class Assistant:
                     part_span["cached"] = answer is not None
                     if answer is None:
                         answer = self._answer_part(part, audiences, carried,
-                                                   origins)
+                                                   origins, history)
                         answer.diagnostics["snapshot_id"] = snapshot.snapshot_id
                         answer.diagnostics["embedding_model"] = snapshot.embedding_model
                         answer.diagnostics["chunking_version"] = snapshot.chunking_version
@@ -474,7 +829,8 @@ class Assistant:
         return best.removeprefix(_BRAND).strip() or best
 
     def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot,
-                   carried: dict | None = None, origins: dict | None = None):
+                   carried: dict | None = None, origins: dict | None = None,
+                   history: str = ""):
         """Everything that can change the right answer to the same words.
 
         The origins belong in the key as much as the values do, and the reason
@@ -488,7 +844,7 @@ class Assistant:
         """
         return AnswerCache.key(part, audiences, snapshot.snapshot_id,
                                ollama.GENERATION_MODEL, snapshot.chunking_version,
-                               carried, origins)
+                               carried, origins, history)
 
     def _log(self, reply: Reply) -> None:
         """Record each part, and never let recording break the answer.
@@ -521,7 +877,7 @@ class Assistant:
 
     def _answer_part(self, part: str, audiences: tuple[str, ...],
                      carried: dict | None = None,
-                     origins: dict | None = None) -> Answer:
+                     origins: dict | None = None, history: str = "") -> Answer:
         matched = self.router.gate.match(part)
         if matched:
             topic, spec = matched
@@ -614,7 +970,8 @@ class Assistant:
             # (location), as you said" when external had come from a question
             # two turns earlier about render.
             Path_.EXTRACT: lambda: self.engine.extract(decision, part),
-            Path_.COMPOSE: lambda: self.engine.compose(decision, part),
+            Path_.COMPOSE: lambda: self.engine.compose(decision, part,
+                                                       history=history),
             Path_.DEFER: lambda: self.engine.defer(decision, part),
             Path_.DIAGNOSIS: lambda: self.engine.diagnosis(decision, part),
             Path_.ASK_BACK: lambda: self.engine.ask_back(decision, part),
