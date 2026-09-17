@@ -219,8 +219,8 @@ Measured 17 September 2026, Python 3.13 on Windows ARM64, Ollama running, index 
 | Group | Count | Status |
 |---|---|---|
 | `tests/` overall | 1390 passed, 77 skipped, 3 xfailed, **19 failed, 0 errors** | Was 1368 passed with 17 failures *and 17 errors*. The 77 skips are PostgreSQL-gated and Docker-gated; a skip is printed, never swallowed |
-| `tests/e2e/` surface | **8 passed** (7m25s) | Cookie, session, upload boundary, rendered citation, audience, correlation id → trace |
-| `tests/e2e/` demo journeys | **11 smoke passed** | Journeys A–H in `tests/e2e/test_demo_journeys.py`. `-m smoke` is the fast pre-flight subset (no generation); the rest are marked `slow` and compose or perceive |
+| `tests/e2e/` full | **27 passed, 0 failed** (8m57s warm) | The surface proofs plus journeys A–H. A cold first run is nearer 27 min: the slow half composes and perceives, and pays for it once |
+| `tests/e2e/` smoke | **11 passed** (2m45s) | `-m smoke`, the pre-flight subset — no generation. What to run before a demonstration |
 | `tests/test_ui_server.py` | **10 known failures** | These assert the *previous* plain-text UI, replaced by the chat interface. The behaviour they describe changed; the tests did not. Diagnosed, not rewritten — see [Known issues](#known-issues-in-this-branch) |
 | `tests/test_integration_core5.py` | **9 known failures** | Committed as WIP. It asserts that the engine writes to a `SessionStore`, which by design it never does. Previously 17 errors; it now skips cleanly when no index is built |
 | `tests/test_policy_gate_phrasing.py` | 7 passed, **3 xfail** | New. Reproduces the policy-gate gap in known issue 1, and pins the phrasings that do work |
