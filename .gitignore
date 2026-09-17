@@ -53,3 +53,21 @@ htmlcov/
 # database still points at — a real risk, but one that only bites a deployment
 # that re-crawls, and such a deployment builds its own archive on first run.
 data/cache/versions/
+
+# Test and tooling output. None of this existed when the rules above were
+# written; `tests/e2e/` drives a real Chromium now, and Playwright's default
+# reporters drop both of these in the repository root on a failure.
+.pytest_cache/
+playwright-report/
+test-results/
+.mypy_cache/
+.ruff_cache/
+
+# Log output. `.env.example` suggests OTEL_LOG_FILE=logs/app.jsonl, which would
+# otherwise land in the working tree untracked and unignored.
+*.log
+logs/
+
+# Editor state
+.vscode/
+.idea/

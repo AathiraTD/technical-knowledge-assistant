@@ -40,7 +40,21 @@ def capture(capture_dir):
     return DiagnosisCapture(base_path=capture_dir)
 
 
-def test_capture_writes_valid_json(capture, capture_dir):
+@pytest.fixture
+def cases_dir(capture):
+    """Where today's captures actually land.
+
+    `DiagnosisCapture` partitions by UTC date, computed once when it is built.
+    These assertions used to spell that day out as a literal, which passed on
+    the day they were written and failed every day after -- the suite broke
+    overnight without a line of source changing. Asking the object where it put
+    the file tests the partitioning rather than the calendar, and reads the date
+    from the same clock and the same timezone the code used.
+    """
+    return capture.cases_dir
+
+
+def test_capture_writes_valid_json(capture, capture_dir, cases_dir):
     """Valid capture writes correct JSON to disk."""
     question = "How to diagnose rising damp on lime render"
     chunk_ids = ["chunk_001", "chunk_002"]
@@ -55,7 +69,7 @@ def test_capture_writes_valid_json(capture, capture_dir):
     )
 
     # Case file exists
-    case_file = capture_dir / today() / f"{case_id}.json"
+    case_file = cases_dir / f"{case_id}.json"
     assert case_file.exists()
 
     # JSON is valid and contains expected fields
@@ -68,7 +82,7 @@ def test_capture_writes_valid_json(capture, capture_dir):
     assert data["expert_diagnosis"] is None
 
 
-def test_images_stored_by_content_hash(capture, capture_dir):
+def test_images_stored_by_content_hash(capture, capture_dir, cases_dir):
     """Images stored by SHA-256 hash, not filename."""
     img1 = b"image_data_1"
     img2 = b"image_data_2"
@@ -96,12 +110,12 @@ def test_images_stored_by_content_hash(capture, capture_dir):
     assert (images_dir / f"{hash2}.bin").read_bytes() == img2
 
     # Case file references hashes, not names
-    case_file = capture_dir / today() / f"{case_id}.json"
+    case_file = cases_dir / f"{case_id}.json"
     data = json.loads(case_file.read_text())
     assert data["image_hashes"] == [hash1, hash2]
 
 
-def test_image_deduplication(capture, capture_dir):
+def test_image_deduplication(capture, capture_dir, cases_dir):
     """Same image uploaded twice is not duplicated on disk."""
     img = b"same_image_data"
     import hashlib
@@ -132,13 +146,13 @@ def test_image_deduplication(capture, capture_dir):
     assert image_files[0].name == f"{img_hash}.bin"
 
     # Both cases reference same hash
-    case_1 = json.loads((capture_dir / today() / f"{case_id_1}.json").read_text())
-    case_2 = json.loads((capture_dir / today() / f"{case_id_2}.json").read_text())
+    case_1 = json.loads((cases_dir / f"{case_id_1}.json").read_text())
+    case_2 = json.loads((cases_dir / f"{case_id_2}.json").read_text())
     assert case_1["image_hashes"] == [img_hash]
     assert case_2["image_hashes"] == [img_hash]
 
 
-def test_atomic_write_on_json_validation_failure(capture, capture_dir):
+def test_atomic_write_on_json_validation_failure(capture, capture_dir, cases_dir):
     """Failed JSON validation leaves no .tmp or partial file."""
     question = "test"
 
@@ -161,11 +175,11 @@ def test_atomic_write_on_json_validation_failure(capture, capture_dir):
             )
 
         # No .tmp files left behind
-        tmp_files = list((capture_dir / today()).glob("*.tmp"))
+        tmp_files = list((cases_dir).glob("*.tmp"))
         assert len(tmp_files) == 0
 
         # No case files created
-        case_files = list((capture_dir / today()).glob("*.json"))
+        case_files = list((cases_dir).glob("*.json"))
         assert len(case_files) == 0
 
     finally:
@@ -205,7 +219,7 @@ def test_empty_image_bytes_raises(capture):
         )
 
 
-def test_record_expert_diagnosis_updates_case(capture, capture_dir):
+def test_record_expert_diagnosis_updates_case(capture, capture_dir, cases_dir):
     """record_expert_diagnosis appends diagnosis to existing case."""
     case_id = capture.capture(
         question="How to diagnose rising damp",
@@ -216,7 +230,7 @@ def test_record_expert_diagnosis_updates_case(capture, capture_dir):
     )
 
     # Initially no diagnosis
-    case_file = capture_dir / today() / f"{case_id}.json"
+    case_file = cases_dir / f"{case_id}.json"
     data = json.loads(case_file.read_text())
     assert data["expert_diagnosis"] is None
     assert data["advisor_id"] is None
@@ -265,7 +279,7 @@ def test_capture_case_id_is_uuid_format(capture):
     uuid.UUID(case_id)
 
 
-def test_timestamp_is_iso_8601(capture, capture_dir):
+def test_timestamp_is_iso_8601(capture, capture_dir, cases_dir):
     """Captured timestamp is ISO 8601 format."""
     from datetime import datetime
 
@@ -277,7 +291,7 @@ def test_timestamp_is_iso_8601(capture, capture_dir):
         tags=[],
     )
 
-    case_file = capture_dir / today() / f"{case_id}.json"
+    case_file = cases_dir / f"{case_id}.json"
     data = json.loads(case_file.read_text())
 
     # Should parse as ISO 8601

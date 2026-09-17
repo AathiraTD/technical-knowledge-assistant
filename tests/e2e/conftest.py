@@ -162,3 +162,121 @@ def ask(page, question: str, timeout: int = 60_000) -> None:
     page.wait_for_function(
         "n => document.querySelectorAll('.message.assistant .tag').length > n",
         arg=before, timeout=timeout)
+
+
+# --------------------------------------------------------------- demo journeys
+#
+# Two suites share this fixture set, and they are deliberately different kinds
+# of test. `test_web_ui.py` proves the surface -- a cookie is HttpOnly, a
+# multipart body arrives, a citation is a working link. `test_demo_journeys.py`
+# walks the journeys the demonstration actually walks, in the order it walks
+# them, so that "it worked when I rehearsed it" is a thing CI can say rather
+# than a thing a person remembers.
+#
+# The split that keeps them usable is speed, and speed here means one thing:
+# whether the model runs. An uncached compose costs tens of seconds to minutes
+# on a processor with no graphics card (DECISIONS.md, "Still open"), so a suite
+# whose every case composes is a suite nobody runs twice. Every journey that is
+# really about browser behaviour therefore picks a question the policy gate or
+# the router answers without generation, and the handful that genuinely need a
+# composed answer are marked `slow` and excluded from the smoke run.
+#
+#   python -m pytest tests/e2e -m smoke      # ~3 min, pre-flight
+#   python -m pytest tests/e2e               # everything, pre-demo
+#
+# Measured: smoke is 11 tests in 2m45s, most of which is one server start and
+# one cold embedding load. The `slow` half composes or perceives and runs in
+# tens of minutes, which is why it is a pre-demo check and not a pre-commit one.
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "smoke: fast pre-flight journeys; no model generation")
+    config.addinivalue_line(
+        "markers", "slow: needs a real composed answer; minutes, not seconds")
+
+
+# A question the policy gate answers from the routing table: no retrieval, no
+# model, and a referral printed verbatim. Journey E's safety case and the
+# fixtures that only need "a turn happened" both use this shape.
+CERTIFICATION_QUESTION = "Can you confirm my Warmshell build complies with Part L?"
+
+# Router step 5: the substrate slot is load-bearing and uncued, so this asks
+# back rather than guessing a wall. No generation.
+SELECTION_QUESTION = "Which plaster should I use?"
+
+# Router step 6: calculation words take the extract path over the coverage and
+# pack-size passages, printed by code with the sum refused. A real retrieval and
+# a real citation, without a generation.
+QUANTITY_QUESTION = "How many bags of Duro do I need for 20 square metres?"
+
+# The smallest thing that is really a PNG: an 8-byte signature and a valid IHDR.
+ONE_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+
+
+def ask_json(page, question: str, timeout: int = 60_000) -> dict:
+    """Send a question and return the `/ask` payload the page received.
+
+    The rendered DOM is what a person sees and the payload is what the server
+    decided; a journey usually wants to assert on both, and intercepting the
+    response is the only way to read the second without asking the page to
+    display things it has no reason to display -- the route taken, the slots
+    carried, how many images were read.
+    """
+    with page.expect_response(lambda r: "/ask" in r.url, timeout=timeout) as caught:
+        page.fill("#question-input", question)
+        page.click("#send-btn")
+    return caught.value.json()
+
+
+def route_of(payload: dict) -> str:
+    """The path the deterministic router took, or '' if nothing was answered."""
+    parts = payload.get("parts") or []
+    return parts[0]["path"] if parts else ""
+
+
+def answer_text(payload: dict) -> str:
+    parts = payload.get("parts") or []
+    return " ".join((p.get("text") or p.get("body") or "") for p in parts)
+
+
+def expand(page, label: str):
+    """Open the Sources or 'Why this answer?' disclosure and return its panel.
+
+    Both are a `button.disclosure-btn` beside a sibling panel, toggled by adding
+    `.open` to each -- not a `<details>`, so there is no `open` attribute to
+    wait on and visibility is decided by a class.
+    """
+    button = page.locator(".disclosure-btn", has_text=label).first
+    button.click()
+    panel = button.locator("xpath=following-sibling::*[1]")
+    panel.wait_for(state="visible", timeout=5_000)
+    return panel
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warm(server):
+    """One retrieval before any browser test, so the first one is not the slow one.
+
+    The embedding model is loaded lazily by Ollama, so whichever test asks the
+    first question that reaches retrieval pays several tens of seconds that have
+    nothing to do with it -- and, being first, it is usually the one with the
+    tightest timeout. That is exactly how the ask-back journey failed at sixty
+    seconds while measuring 21.5 s against an already-warm server.
+
+    This is not a trick to make the suite look fast. It is the same step
+    `docs/DEMO-SCRIPT.md` puts at the top of its pre-demo checklist, for the
+    same reason, and doing it here means a timeout in this suite means something
+    is actually wrong rather than that Ollama was cold.
+
+    Deliberately not warming the *generation* model: the tests that compose are
+    marked `slow` and carry timeouts that expect to pay for it, and warming it
+    would hide a real regression in generation latency behind a fixture.
+    """
+    import httpx
+
+    try:
+        httpx.get(f"{server}/ask", params={"q": QUANTITY_QUESTION}, timeout=300)
+    except Exception:                                  # noqa: BLE001
+        pass          # a cold model is a slow suite, not a failed one
