@@ -384,6 +384,24 @@ def build(services: Services):
         # had read one. A test double is the exception, not the default.
         provider = services.vision
         if provider is None:
+            from . import vision as vision_module
+
+            # `ASSISTANT_VISION_DEMO` decides whether the default provider is
+            # the real one or none at all. An **explicitly injected** provider
+            # is not gated: passing one is a deliberate act by a test, a
+            # channel adapter or a demo driver, and a flag that overrode it
+            # would make the injection point untestable.
+            #
+            # Switched off, the turn takes decision 16's published path -- the
+            # photograph is acknowledged, not looked at, and the enquiry can go
+            # to a person. The *acknowledgement* is the part that matters:
+            # returning nothing here is how the page came to say it had read a
+            # photograph that nothing looked at.
+            if not vision_module.enabled():
+                obs.event("vision_disabled", images=len(images))
+                return {"perception": vision_module.disabled_report(),
+                        "trace": ["analyse_images:disabled"]}
+
             from .vision import slots_from_images
 
             class _Default:
