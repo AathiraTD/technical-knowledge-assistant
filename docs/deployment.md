@@ -1,298 +1,252 @@
-# Docker Compose Deployment
+# Container deployment
 
-A simple production-like stack using Docker Compose: PostgreSQL 16 + pgvector, Ollama, and the Lime Green Technical Knowledge Assistant application.
+The production-shaped stack: the application, PostgreSQL with pgvector, and
+Ollama. Three services because three are needed.
+
+**For a demonstration, do not use this.** Use [`demo-runbook.md`](demo-runbook.md)
+§1 — a local Ollama that already holds the models starts in seconds, where a
+first `compose up` pulls about 4 GB of them. This document is the deployment
+path; that one is the demonstration path, and they are different on purpose.
+
+---
+
+## What this document used to say
+
+It is worth naming, because an earlier version of this file was wrong in ways
+an assessor would find by typing one command, and the repository's own standard
+is that documentation describes reality rather than intention.
+
+It documented the **root** `docker-compose.yml` — a stale parallel stack that
+runs as root, never builds an index, pins nothing, and is referenced by no CI
+job and no other document. It quoted metric names (`tka_questions_total`,
+`tka_generation_seconds`) that **do not exist**; the real families are
+`assistant_*`. It gave a `--index-store postgres` flag that **is not a flag**.
+It said the index "will be created and populated on first query", which is
+**false** — nothing builds an index lazily, and a server started without one
+refuses to start. And it recommended Docker Swarm and Kubernetes, which
+`CLAUDE.md` explicitly rules out.
+
+All of that is corrected below against the stack that actually exists.
+
+---
+
+## Which stack
+
+| | `deploy/` — **use this** | root `Dockerfile` / `docker-compose.yml` — stale |
+|---|---|---|
+| Referenced by | CI, README, DECISIONS 19 | nothing |
+| User | non-root, uid 10001 | root |
+| Base | `python:3.13-slim-bookworm` | `python:3.11-slim` |
+| Database image | `pgvector/pgvector:pg16`, pinned | `ankane/pgvector:latest`, unpinned |
+| Ollama image | `ollama/ollama:0.12.3`, pinned | `ollama/ollama:latest` |
+| Models | `model-init` pulls both, then exits | never pulled |
+| Index | `index-init` completes before the UI starts | never built |
+| Healthcheck | `python -m assistant.health` — readiness | `/health` — liveness only |
+| Port | 8765, bound to 127.0.0.1 | 8000, bound to every interface |
+
+The stale pair is left in the tree rather than deleted — removing tracked files
+is the repository owner's decision — but nothing should be run from it.
 
 ## Prerequisites
 
-- Docker 20.10+
-- Docker Compose 1.29+
-- 24 GB RAM (for Ollama models)
-- 10 GB disk space (for PostgreSQL data + Ollama models)
+- Docker 20.10 or later with Compose v2
+- About 10 GB of disk for the models and the database volume
+- Enough memory to hold a 3.4 GB generation model alongside a 639 MB embedding
+  model. The build machine has 24 GB; that is comfortable, not a floor that has
+  been measured.
 
-## Quick Start
-
-### 1. Clone and Setup
-
-```bash
-git clone <repository> lime-green-assistant
-cd lime-green-assistant
-cp .env.example .env
-```
-
-### 2. Configure Environment
-
-Edit `.env` to customize:
+## Configuration
 
 ```bash
-# PostgreSQL credentials (change password in production)
-POSTGRES_PASSWORD=secure_password_here
-
-# Ollama models (download happens on first startup)
-OLLAMA_HOST=http://ollama:11434
-
-# Application port
-APP_PORT=8000
+cp deploy/.env.example deploy/.env      # then set POSTGRES_PASSWORD
 ```
 
-### 3. Start the Stack
+`POSTGRES_PASSWORD` has **no default**, deliberately: `up` fails on the missing
+variable rather than starting a database with a password someone committed.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `POSTGRES_USER` | `assistant` | |
+| `POSTGRES_PASSWORD` | *(none — required)* | |
+| `POSTGRES_DB` | `assistant` | |
+| `ASSISTANT_PORT` | `8765` | host port, bound to `127.0.0.1` |
+| `GENERATION_MODEL` | `qwen3.5:4b` | recorded in the index header |
+| `EMBED_MODEL` | `qwen3-embedding:0.6b` | changing it means rebuilding the index |
+| `EMBED_DIMENSIONS` | `1024` | must match the model |
+| `ASSISTANT_POSTGRES_DSN` | set by compose | selects PostgreSQL at every entry point |
+| `OLLAMA_HOST` | `http://ollama:11434` | service DNS, never `localhost` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | opt-in OTLP export; empty disables it |
+
+Never commit `deploy/.env`. Inside the compose network, services are reached as
+`db:5432` and `ollama:11434` — `localhost` inside a container is the container.
+
+**The engine refuses to query an index built with a different embedding model**,
+so changing `EMBED_MODEL` is safe and forgetting to rebuild is not silently
+possible. It fails closed rather than returning confident nonsense.
+
+## Starting it
 
 ```bash
-docker compose up -d
+docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml exec app python -m assistant.health
 ```
 
-Watch startup:
+Startup is ordered and each step must complete before the next begins:
+
+1. `db` becomes healthy (`pg_isready` — readiness, not "the server answered").
+2. `ollama` becomes healthy.
+3. `model-init` pulls both models and exits. Separate from the app so a restart
+   does not re-check a 4 GB download, and a failed pull shows as a failed
+   service rather than as a slow start.
+4. `index-init` builds the index against PostgreSQL and exits.
+5. `app` starts, and its healthcheck is readiness rather than liveness.
+
+The corpus is bind-mounted from `../data` rather than held in a named volume. A
+named volume starts empty, so the indexer had nothing to index and the stack
+came up serving an empty store — a failure that looked like a model problem and
+was a mount problem. It also means the shipped embedding cache is the one used,
+so a first build takes seconds rather than re-embedding 552 passages on CPU.
+
+## Verifying it
+
+```powershell
+.\scripts\verify-docker-deployment.ps1          # image-level checks
+.\scripts\verify-docker-deployment.ps1 -Full    # the whole stack
+```
+
+Measured on the build machine, 17 September 2026 — image-level checks:
+
+```
+  ok    docker daemon responding
+  ok    deploy/compose.yaml is valid
+  ok    image built as lime-green-assistant:verify
+  ok    runs as uid 10001
+  ok    application  /app/assistant/health.py
+  ok    authored configuration  /app/config/routing.json
+  ok    deployment schema  /app/db/schema.postgres.sql
+  ok    repository contract  /app/tests/test_repository_contract.py
+  ok    shipped embedding cache  /app/data/index/embeddings.db
+  ok    crawled corpus  /app/data/cache
+  ok    the application imports inside the image
+  ok    hosted tracing stays off under a hostile environment
+```
+
+**Not claimed:** a full live-model `up` has not been completed on this machine.
+The image build, the compose validation, the non-root user, the copied contents
+and the in-image import are verified; the running stack is not.
+
+### On a TLS-intercepting network
+
+A container reaching `pypi.org` directly fails with
+`SSLV3_ALERT_HANDSHAKE_FAILURE` while the host installs perfectly well through
+its own proxied index. Pass that index in:
 
 ```bash
-docker compose logs -f app
+docker build -f deploy/Dockerfile \
+  --build-arg PIP_INDEX_URL="$(pip config list | grep index-url | cut -d\' -f2)" \
+  -t lime-green-assistant .
 ```
 
-Expected output:
-- PostgreSQL schema applied
-- Ollama models loaded
-- Application listening on http://localhost:8000
+It defaults to PyPI, so an unproxied network needs no argument.
 
-### 4. Initialize the Index
+## Health, readiness and metrics
 
-First run only: the embedded SQLite index ships with the repository. To use PostgreSQL:
+| Endpoint | Question | Codes |
+|---|---|---|
+| `/health` | is the process running | always 200 |
+| `/ready` | could it answer a question | 200 or **503** |
+| `/ready?format=text` | the same, as a table | 200 or 503 |
+| `/metrics` | Prometheus exposition | 200 |
+
+The compose healthcheck runs `python -m assistant.health`, which is the same
+readiness check — not `/health`, which would keep a container in rotation while
+it had no index, a mismatched index, or no reachable Ollama.
+
+Real metric families, from `assistant/metrics.py`:
+
+```
+assistant_answers_total          assistant_outcomes_total
+assistant_span_duration_ms       assistant_span_errors_total
+assistant_retrieval_top_score    assistant_cache_lookups_total
+assistant_cache_hits_total       assistant_checks_runs_total
+assistant_check_failures_total   assistant_window_spans
+```
 
 ```bash
-docker compose exec app python -m assistant.cli \
-  --index-store postgres \
-  "What products are available?"
+curl -s http://127.0.0.1:8765/metrics | grep assistant_answers_total
+curl -s http://127.0.0.1:8765/ready?format=text
 ```
 
-The index will be created and populated on first query. Initialization takes 2–5 minutes.
-
-### 5. Verify End-to-End
+## Operating it
 
 ```bash
-# Ask a question via CLI
-docker compose exec app python -m assistant.cli \
-  "How much water does Solo Onecoat need per bag?"
-
-# Or open the web UI
-open http://localhost:8000
+docker compose -f deploy/compose.yaml logs -f app        # structured JSON on stderr
+docker compose -f deploy/compose.yaml ps
+docker compose -f deploy/compose.yaml exec app python -m assistant.trace
+docker compose -f deploy/compose.yaml exec app python -m assistant.index    # incremental refresh
+docker compose -f deploy/compose.yaml down               # keeps volumes
+docker compose -f deploy/compose.yaml down -v            # discards them
 ```
 
-### 6. Run Tests Against PostgreSQL
+Refreshing the index is incremental: unchanged documents are not re-extracted,
+re-chunked or re-embedded, a changed one supersedes the version it replaces and
+that version is retained, and a withdrawn one is deactivated rather than
+deleted. A failed run cannot replace a good release.
+
+### Backups
+
+The database and the versioned source archive must be backed up **together** —
+PostgreSQL holds identity, versions, chunks and provenance; the filesystem holds
+the original bytes those rows point at. A backup of one without the other cannot
+reproduce an answer.
 
 ```bash
-export ASSISTANT_POSTGRES_DSN="postgresql://postgres:postgres@localhost:5432/knowledge_assistant"
-python -m pytest tests/test_repository_contract.py::test_repo_initializes -v
+docker compose -f deploy/compose.yaml exec db \
+  pg_dump -U assistant assistant > backup.sql
+tar czf corpus.tgz data/cache
 ```
 
-## Stopping the Stack
+## Scaling — what is true
 
-### Clean Shutdown
+Generation is the bottleneck and it is serialised: one Ollama instance produces
+one answer at a time. Measured at 1, 3 and 5 concurrent questions, wall time
+scales with the number of questions and throughput does not improve; retrieval
+degrades too, because embedding the question queues behind generation on the
+same server. Numbers in [`demo-runbook.md`](demo-runbook.md) §7.
 
-```bash
-docker compose down
-```
+So the first move under load is **not** more application replicas — they would
+queue on the same model server. It is the serving layer the architecture already
+describes: a generation queue with a visible wait, per-session rate limiting, and
+extract-only degradation, which drops the compose path rather than a safety
+check. After that, more Ollama capacity.
 
-Keeps volumes (data persists):
-
-```bash
-docker compose down -v
-```
-
-Removes everything (clean slate on next startup).
-
-## Health Checks
-
-All services report health status:
-
-```bash
-docker compose ps
-```
-
-Expected output:
-```
-NAME          STATUS
-tka-postgres  healthy
-tka-ollama    healthy
-tka-app       healthy
-```
-
-## Production Deployment
-
-### Secrets Management
-
-Never commit `.env` to version control. Use a secrets manager:
-
-**AWS Secrets Manager**
-```bash
-aws secretsmanager get-secret-value --secret-id tka/postgres-password
-```
-
-**HashiCorp Vault**
-```bash
-vault kv get secret/tka/postgres
-```
-
-### Database Backup
-
-PostgreSQL data is stored in a Docker volume. Backup it:
-
-```bash
-docker compose exec db pg_dump -U postgres knowledge_assistant > backup.sql
-```
-
-Restore from backup:
-
-```bash
-docker compose exec -T db psql -U postgres knowledge_assistant < backup.sql
-```
-
-### Scaling
-
-For multiple application instances, use Docker Swarm or Kubernetes:
-
-**Docker Swarm**
-```bash
-docker swarm init
-docker stack deploy -c docker-compose.yml tka
-```
-
-**Kubernetes**
-Generate a Helm chart from docker-compose.yml:
-```bash
-kompose convert -f docker-compose.yml
-kubectl apply -f *.yaml
-```
+**No Kubernetes, no Swarm.** `CLAUDE.md` rules both out for this system, and
+nothing measured here argues for either.
 
 ## Troubleshooting
 
-### PostgreSQL Won't Start
+**`up` fails immediately on `POSTGRES_PASSWORD`.** Intended. `cp deploy/.env.example deploy/.env` and set one.
 
-**Error: "database ... does not exist"**
-- First startup, schema hasn't been created yet
-- Application will create it on first question
+**`index-init` exits non-zero.** Read its logs. A failed indexing run leaves the
+previous release serving; it cannot corrupt a good one.
 
-**Error: "password authentication failed"**
-- Check `.env` credentials match `POSTGRES_PASSWORD` and `ASSISTANT_POSTGRES_DSN`
+**`app` never becomes healthy.** Run the readiness check directly — it names the
+failing check and its remedy:
+`docker compose -f deploy/compose.yaml exec app python -m assistant.health`
 
-### Ollama Models Not Loading
+**`IndexMismatch` on start.** `EMBED_MODEL` changed since the index was built.
+Rebuild: `docker compose -f deploy/compose.yaml run --rm index-init`.
 
-**Error: "connection refused"**
-- Ollama service may not be healthy yet
-- Check: `docker compose logs ollama`
-- Wait 30–60 seconds for model pull to complete
+**A `COPY` fails during build with `not found`.** A path the Dockerfile copies is
+excluded by `.dockerignore`. See the comment at the top of that file.
 
-**Error: "out of memory"**
-- 24 GB RAM is the minimum
-- Reduce model size: change `qwen3.5:4b` to `qwen3:4b-instruct` in application configuration
-
-### Application Crashes on Startup
-
-**Error: "sqlite3.ProgrammingError: SQLite objects created in a thread..."**
-- Using SQLite from CLI in multi-threaded UI server
-- Must use PostgreSQL in production
-- Ensure `ASSISTANT_POSTGRES_DSN` is set
-
-**Error: "IndexMismatch"**
-- Embedding model changed but index was built with a different model
-- Rebuild index: delete volume and restart
-- Check `tests/test_health.py` for schema validation
-
-## Monitoring and Observability
-
-### Logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f app
-
-# Last 100 lines
-docker compose logs -n 100 app
-
-# Structured JSON (from application)
-docker compose logs app | grep -E '"level"|"message"'
-```
-
-### Metrics Endpoint
-
-Application exports Prometheus metrics:
-
-```bash
-curl http://localhost:8000/metrics
-```
-
-Metrics include:
-- `tka_questions_total` — total questions answered
-- `tka_generation_seconds` — model generation latency
-- `tka_retrieval_seconds` — database query latency
-- `tka_checks_failed_total` — safety check failures
-
-### Database Monitoring
-
-Connect directly to PostgreSQL:
-
-```bash
-docker compose exec db psql -U postgres -d knowledge_assistant -c \
-  "SELECT COUNT(*) as chunks, MIN(created_at) as oldest FROM chunks;"
-```
-
-## Schema and Data Management
-
-### View Current Index State
-
-```bash
-docker compose exec db psql -U postgres -d knowledge_assistant -c \
-  "SELECT snapshot_id, document_count, chunk_count, created_at FROM index_snapshots ORDER BY created_at DESC LIMIT 1;"
-```
-
-### Reset the Index
-
-```bash
-docker compose exec db psql -U postgres -d knowledge_assistant -c \
-  "TRUNCATE chunks, document_versions, documents CASCADE;"
-```
-
-Then restart the application — the index will be rebuilt on the next question.
-
-### Migrate from SQLite to PostgreSQL
-
-1. Start the Compose stack
-2. Index a question against the embedded SQLite (creates schema)
-3. Export from SQLite: `sqlite3 /path/to/index.db .dump > export.sql`
-4. Import to PostgreSQL: `psql -f export.sql` (with adjustments for pgvector)
-
-Easier path: let the application recreate the index on PostgreSQL. The embedded cache will reuse vectors and skip re-embedding.
-
-## Development
-
-### Run Tests in the Stack
-
-```bash
-docker compose exec app python -m pytest tests/test_repository_contract.py -v
-```
-
-### Access PostgreSQL CLI
-
-```bash
-docker compose exec db psql -U postgres -d knowledge_assistant
-```
-
-### Rebuild Application Image
-
-```bash
-docker compose build app --no-cache
-docker compose up -d app
-```
-
-### View Generated Application Config
-
-```bash
-docker compose config
-```
+**SQLite cross-thread errors.** Only reachable when a threaded server opens the
+store without `thread_safe=True`; `assistant/ui.py` passes it. In the container
+the store is PostgreSQL and this does not arise.
 
 ## References
 
-- [PostgreSQL + pgvector Docker Image](https://hub.docker.com/r/ankane/pgvector)
-- [Ollama Official Repository](https://github.com/ollama/ollama)
-- [Docker Compose Documentation](https://docs.docker.com/compose/)
-- DECISIONS.md — architecture and design rationale
-- CLAUDE.md — production requirements and safety gates
+- [`demo-runbook.md`](demo-runbook.md) — startup, readiness, traces, latency, recovery
+- [`knowledge-pipeline.md`](knowledge-pipeline.md) — ingestion lifecycle and scheduling
+- [`DECISIONS.md`](../DECISIONS.md) entry 19 — why the release model is shaped this way
+- [pgvector](https://github.com/pgvector/pgvector) · [Ollama](https://github.com/ollama/ollama)
