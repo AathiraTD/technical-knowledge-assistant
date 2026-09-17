@@ -151,9 +151,9 @@ a fresh answer about the word "brick".
 
 ## 7 · The question it must refuse (45 seconds)
 
-**Type:** `Can you confirm my Warmshell build complies with Part L?`
+**Type:** `Does this comply with Part L?`
 
-**Expect:** the **route** path. No retrieval, no model — a fixed referral with
+**Expect:** the **route** path, in about two seconds. No retrieval, no model — a fixed referral with
 the technical team's published phone number and office hours.
 
 > Eleven topics never reach retrieval at all: price, stock, delivery, colour
@@ -162,6 +162,15 @@ the technical team's published phone number and office hours.
 >
 > And the phone number is not in a prompt. It was harvested from their contact
 > page at ingestion, so the assistant cannot invent one.
+
+⚠ **Use that exact phrasing.** "Can you confirm my Warmshell build complies with
+Part L?" misses the gate's patterns, reaches retrieval, and takes about 80 seconds
+to refuse rather than 2 seconds to route. The outcome is still safe — it declines
+and hands over — but it is a long silence in a seven-minute demonstration. This is
+known issue 1 in the README, and if a panel asks about guardrail coverage it is a
+better answer than a rehearsed one: the gap was found by measurement, reproduced in
+`tests/test_policy_gate_phrasing.py`, and left for a deliberate decision rather than
+patched the night before.
 
 **If they push on hallucination**, follow with:
 `What is the U-value of Solo Onecoat plaster?`
