@@ -1,3 +1,18 @@
+# What the build context excludes, and the two things it must not exclude.
+#
+# This file and deploy/Dockerfile disagreed, and the disagreement was a broken
+# image rather than a slow one. The Dockerfile copies `tests/` (so the
+# repository contract can be run against the container's own PostgreSQL) and
+# `data/embeddings.db` (so a first build reuses the shipped vectors instead of
+# re-embedding 552 passages inside a CPU container). Both were excluded here,
+# so `COPY` failed on a path the context did not contain:
+#
+#     failed to compute cache key: "/tests": not found
+#
+# An exclusion that makes a COPY fail is not a smaller image, it is no image.
+# Anything added to this file that the Dockerfile copies has to be re-admitted
+# below with a `!` rule, and the CI container job is what proves it.
+
 .git
 .gitignore
 .venv
@@ -12,13 +27,25 @@ build
 .env
 .env.local
 .env.*.local
-*.sqlite
-*.db
 node_modules
 .idea
 .vscode
 *.md
 !README.md
 .github
-tests/
 .claude/
+
+# Databases are excluded as a class, because the built index is a machine-local
+# artefact tied to one embedding model and copying it in would ship an index the
+# container must rebuild anyway.
+*.sqlite
+*.db
+data/index/
+
+# The exception, and the reason the class rule above is not simply wrong: the
+# embedding cache is content-addressed by text, model tag and dimension, so a
+# vector comes back only for the exact text the exact model computed it from.
+# It is a lookup table that either hits or misses, never a stale index --
+# DECISIONS 17. Shipping it turns a first container build from about fifteen
+# minutes of CPU embedding into seconds.
+!data/embeddings.db
