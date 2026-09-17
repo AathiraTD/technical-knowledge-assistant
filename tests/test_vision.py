@@ -477,14 +477,29 @@ def test_an_unparseable_http_body_degrades(monkeypatch):
     {"attribute": "nonsense", "value": "brick", "confidence": 0.9},  # not a slot
     {"attribute": "substrate", "value": "", "confidence": 0.9},      # empty value
     {"attribute": "substrate", "value": 7, "confidence": 0.9},       # not a string
-    {"attribute": "substrate", "value": "brick", "confidence": "high"},
+    {"attribute": "substrate", "value": "brick", "confidence": "certain"},
     {"attribute": "substrate", "value": "brick", "confidence": True},
+    # A probability that overshot, not one and a bit per cent. Reading it as a
+    # percentage would file a malformed 1.4 as a confident-looking 0.014.
     {"attribute": "substrate", "value": "brick", "confidence": 1.4},
     {"attribute": "substrate", "value": "brick", "confidence": -0.1},
 ])
 def test_a_malformed_observation_is_dropped_not_guessed(monkeypatch, raw):
     fake_ollama(monkeypatch, response_text=body([raw]))
     assert observe(PIXEL).observations == ()
+
+
+def test_a_band_name_is_the_contract_rather_than_a_malformed_confidence(monkeypatch):
+    """`"confidence": "HIGH"` used to be dropped. It is now what the schema asks for.
+
+    Recorded here rather than left as a silent change to the list above,
+    because it is the one case in it that moved: the field is an enum of band
+    names now, for the reason `observation_schema` sets out.
+    """
+    fake_ollama(monkeypatch, response_text=body([
+        {"attribute": "substrate", "value": "brick", "confidence": "HIGH"}]))
+
+    assert observe(PIXEL).observations[0].value == "brick"
 
 
 def test_free_text_fields_are_optional_and_sanitised(monkeypatch):

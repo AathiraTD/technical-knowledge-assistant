@@ -292,6 +292,35 @@ def band_for(confidence: float) -> Band:
     return Band.NOT_DETERMINABLE
 
 
+# The float a named band is carried as, once the model names one directly.
+#
+# `Observation.confidence` stays a float because two things still read it that
+# a band cannot answer: `resolve()` orders competing readings of the same
+# attribute by it, and `perception_report` prints it. Using the band's own
+# floor keeps the mapping honest in both directions -- `band_for` returns the
+# band it came from, exactly, and what the reader sees is "at least this band"
+# rather than a precision the model never offered.
+BAND_FLOOR = {
+    Band.HIGH: HIGH_FLOOR,
+    Band.UNCERTAIN: UNCERTAIN_FLOOR,
+    Band.NOT_DETERMINABLE: 0.0,
+}
+
+# The range read as a percentage rather than refused. `qwen3.5:4b` answered
+# `100` where the contract asked for 0 to 1, and a reading of 100 is not a
+# malformed 1.0 -- it is the same claim on the scale a person would write.
+#
+# **Whole numbers only, and from 2 up.** The bound is not tidiness; it is the
+# difference between reading an answer and inventing one. A percentage is
+# written as a whole number -- 90, 95, 100 -- whereas a value like 1.4 is a
+# probability that has overshot, and rescaling *that* would turn a malformed
+# 1.4 into a confident-looking 0.014 and file it as NOT_DETERMINABLE. Refusing
+# it is what the old guard did and it was right to. Starting at 2 leaves 1.0
+# unambiguously a probability, which is what it has always been.
+PERCENT_FLOOR = 2
+PERCENT_CEILING = 100
+
+
 class Certainty(str, Enum):
     """How firmly the system holds one attribute, in the four words it reports.
 
@@ -502,7 +531,31 @@ class Resolution:
 # shape and not meaning — nothing here stops a model writing "Solo" into
 # `value`, and the vocabulary check is what makes that harmless.
 def observation_schema(slots: tuple[str, ...] = VISION_SLOTS) -> dict:
-    """The JSON schema the model is constrained to."""
+    """The JSON schema the model is constrained to.
+
+    `confidence` is the band by name and not a number, and that is the one
+    field in here whose type was chosen by measurement rather than by taste.
+
+    Asked to read a photograph of an exposed brick wall, `qwen3.5:4b` returned
+    two correct observations -- `exposed_masonry: yes` and
+    `existing_finish: render` -- and stamped **`"confidence": 100`** on both. A
+    schema typing that field as `number` accepts 100 happily: constrained
+    decoding enforces *types*, not ranges, so `minimum`/`maximum` would have
+    bought nothing. `_decode_observation` then dropped both readings on its
+    `0.0 <= c <= 1.0` guard, and a perception step that had in fact read the
+    wall correctly reported nothing at all.
+
+    An enum is the fix that makes the failure structurally impossible rather
+    than caught after the fact, because an enum is exactly what a grammar *can*
+    enforce. It is also what `Band` has always said the contract should be:
+    "nothing downstream reads the float". If nothing reads it, asking for it is
+    risk with no buyer.
+
+    The float remains accepted on the way in -- see `_decode_observation` --
+    because a model that ignores the enum and answers 0.9 is still telling us
+    something usable, and because every fixture written against the old shape
+    is still a valid response.
+    """
     return {
         "type": "object",
         "properties": {
@@ -514,7 +567,8 @@ def observation_schema(slots: tuple[str, ...] = VISION_SLOTS) -> dict:
                         "observation": {"type": "string"},
                         "attribute": {"type": "string", "enum": list(slots)},
                         "value": {"type": "string"},
-                        "confidence": {"type": "number"},
+                        "confidence": {"type": "string",
+                                       "enum": [b.value for b in Band]},
                         "region": {
                             "type": "array",
                             "items": {"type": "number"},
@@ -668,9 +722,18 @@ def prompt_for(slots: tuple[str, ...] = VISION_SLOTS) -> str:
         "Attributes, and the only values accepted for each:\n"
         f"{_value_menu(slots)}\n\n"
         "For each observation give the attribute, the value from the list "
-        "above, a short note of what you actually see, your confidence from 0 "
-        "to 1, and the region as [x0, y0, x1, y1] in fractions of the width "
-        "and height.\n\n"
+        "above, a short note of what you actually see, your confidence as one "
+        "of HIGH, UNCERTAIN or NOT_DETERMINABLE, and the region as "
+        "[x0, y0, x1, y1] in fractions of the width and height between 0 and "
+        "1 -- not in pixels.\n\n"
+        "Here is the exact shape of one observation. Follow it:\n"
+        '{"observation": "orange-red bricks in lime mortar, plaster removed", '
+        '"attribute": "substrate", "value": "brick", "confidence": "HIGH", '
+        '"region": [0.18, 0.02, 0.95, 0.60]}\n\n'
+        "Note what that example does: `attribute` is the attribute name from "
+        "the list, `value` is one of that attribute's permitted values, and "
+        "the free text goes in `observation`. Do not put the attribute name "
+        "in `observation`.\n\n"
         "Then list, in cannot_determine_from_image, everything this photograph "
         "cannot settle. A photograph usually cannot settle whether a wall is "
         "internal or external, how weather-exposed the site is, what is behind "
@@ -726,20 +789,68 @@ def _decode_region(raw) -> tuple[float, float, float, float] | None:
     return (x0, y0, x1, y1)
 
 
+def _decode_confidence(raw) -> float | None:
+    """How sure the model said it was, as a float, or None if it did not say.
+
+    Three shapes are read, and the order is the order of trust.
+
+    A **band name** is the contract `observation_schema` now asks for, and the
+    only one a grammar can enforce. It is carried as the band's floor.
+
+    A **float in 0 to 1** is the old contract, kept because every fixture
+    written against it is a valid response and because a model that answers
+    0.9 has told us something usable.
+
+    A **whole number from 2 to 100** is read as a percentage. This is the case
+    that made the function necessary. Asked for 0 to 1, `qwen3.5:4b` answered
+    `100` on two observations that were otherwise correct and
+    vocabulary-valid -- `exposed_masonry: yes`, `existing_finish: render` --
+    and the old guard dropped both, so a perception step that had read the
+    wall correctly reported nothing at all. Rescaling reads the model's answer
+    on the scale it plainly used; it does not invent one.
+
+    Anything else is refused, and refusing is still the common case worth
+    protecting: a missing confidence, a string that is not a band, a bool
+    (which `isinstance(True, int)` would otherwise let through as 1.0), a
+    number too large to be a percentage of anything, and -- the one worth
+    naming -- a value like `1.4`, which is a probability that overshot rather
+    than one and a bit per cent. Reading that as a percentage would turn a
+    malformed figure into a confident-looking 0.014, which is worse than
+    dropping it.
+
+    **This widens what is read, never what is trusted.** The band still decides
+    whether a slot may be filled, `HIGH` is still the only band that fills one,
+    and a model stamping its top confidence on everything is exactly why
+    `Band` exists. What changes is that a correct reading is no longer thrown
+    away for writing 100 where the schema said 1.
+    """
+    if isinstance(raw, str):
+        try:
+            return BAND_FLOOR[Band(raw.strip().upper())]
+        except (KeyError, ValueError):
+            return None
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return None
+    value = float(raw)
+    if 0.0 <= value <= 1.0:
+        return value
+    if PERCENT_FLOOR <= value <= PERCENT_CEILING and value == int(value):
+        return value / PERCENT_CEILING
+    return None
+
+
 def _decode_observation(raw, image: str, slots: tuple[str, ...]) -> Observation | None:
     """One observation from the model's JSON, or None if it is not one."""
     if not isinstance(raw, dict):
         return None
     attribute = raw.get("attribute")
     value = raw.get("value")
-    confidence = raw.get("confidence")
     if attribute not in slots:
         return None
     if not isinstance(value, str) or not value.strip():
         return None
-    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
-        return None
-    if not 0.0 <= float(confidence) <= 1.0:
+    confidence = _decode_confidence(raw.get("confidence"))
+    if confidence is None:
         return None
     interpretations = raw.get("possible_interpretations")
     if not isinstance(interpretations, list):
