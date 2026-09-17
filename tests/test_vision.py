@@ -182,8 +182,18 @@ def test_every_resolved_value_is_a_vocabulary_value(monkeypatch):
     for slot, value in resolution.slots.items():
         assert value in vocabulary[slot]
     assert resolution.slots["substrate"] == "brick"
-    assert resolution.slots["location"] == "external"
     assert resolution.slots["symptom"] == "salts"
+
+    # `location` is read, canonicalised and reported -- and does not route.
+    # "exterior elevation" at 0.95 is exactly the reading this tier exists to
+    # contain: a photograph of a wall surface does not show which side of the
+    # wall it is, however confident the model sounds about it, and a wrong
+    # answer here recommends an external render for a bedroom. It reaches
+    # `context`, the caller sees it, and the router asks instead.
+    assert "location" not in resolution.slots
+    context = {a.slot: a for a in resolution.context}
+    assert context["location"].value == "external"
+    assert context["location"].certainty is vision.Certainty.OBSERVED
 
 
 def test_a_cause_is_not_a_slot_a_photograph_may_fill(monkeypatch):
@@ -375,7 +385,17 @@ def test_an_observation_without_a_region_cannot_fill_a_slot(monkeypatch):
     resolution = resolve([observe(PIXEL)])
     assert resolution.slots == {}
     assert any("not auditable" in d for d in resolution.discarded)
-    assert resolution.attributes[0].status is Status.NOT_DETERMINABLE
+
+    # Reported as LIKELY rather than as not-determinable, and the distinction
+    # is worth the line. The model gave a 0.92 reading; what it did not give is
+    # a region to check it against. Printing that back as "cannot be
+    # determined" would misdescribe the evidence -- something was seen, it just
+    # cannot be audited -- so the certainty says likely and `withheld` says
+    # exactly why it was not acted on.
+    attribute = resolution.attributes[0]
+    assert attribute.certainty is vision.Certainty.LIKELY
+    assert "no region" in attribute.withheld
+    assert not attribute.routed
 
 
 @pytest.mark.parametrize("region", [
@@ -581,8 +601,14 @@ def test_slots_from_images_is_the_whole_module_in_one_call(monkeypatch):
         obs(attribute="exposure", value="coastal and exposed", confidence=0.9),
     ]))
     resolution = slots_from_images([PIXEL])
-    assert resolution.slots == {"substrate": "brick", "location": "internal",
-                                "exposure": "severe"}
+    # Only the substrate routes. `location` and `exposure` were read and
+    # canonicalised -- "coastal and exposed" became `severe` -- and both stay
+    # in `context`, because neither is a fact a photograph carries. A model
+    # calling a wall "coastal" from one frame is describing a site it cannot
+    # see.
+    assert resolution.slots == {"substrate": "brick"}
+    context = {a.slot: a.value for a in resolution.context}
+    assert context == {"location": "internal", "exposure": "severe"}
 
 
 def test_a_total_vision_failure_yields_the_empty_carried_dict(monkeypatch):
@@ -631,7 +657,7 @@ def test_restricting_the_slots_restricts_what_can_be_filled():
         Observation("location", "outside", 0.95, "IMG_001", (0.0, 0.0, 1.0, 1.0)),
     )
     resolution = resolve([Perception(observations=observations)],
-                         slots=("substrate",))
+                         slots=("substrate",), context=(), conditions=())
     assert resolution.slots == {"substrate": "brick"}
     assert any("not a slot a photograph may fill" in d for d in resolution.discarded)
 
