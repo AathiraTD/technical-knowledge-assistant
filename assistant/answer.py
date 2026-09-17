@@ -454,6 +454,37 @@ def evidence_binding(decision: Decision) -> dict[str, list[int]]:
     return bound
 
 
+def _distinguishes(bound: dict[str, list[int]]) -> bool:
+    """Do these bound sets actually tell the properties apart?
+
+    They do only when no passage supports two of them. A binding whose sets
+    overlap names where each half is stated and separates nothing, because the
+    shared passage is an answer to both — and the model could already see that
+    from the passages themselves.
+
+    Stated as a property rather than as a special case, because the cost of
+    getting it wrong is not a worse binding but a re-rendered figure. Gold
+    scenario GD2 asks for a thickness and a preparation on a very exposed wall.
+    Both bind to the rendering checklist's Design section, `preparation` also to
+    its Application section and `thickness` also to a background-preparation
+    article: two sets, overlapping on the one passage that carries the answer.
+    The block told the model nothing, and the generation it perturbed printed
+    the published "25mm" as "25 mm". Both forms pass check 2, which normalises
+    whitespace for comparison; the evaluation compares published figures with
+    whitespace collapsed and nothing else normalised, so the space was a failed
+    assertion about a figure the system had in fact got right.
+
+    So the rule is the same one `len(bound) > 1` applies for a single property,
+    generalised: say nothing unless saying it separates something.
+    """
+    seen: set[int] = set()
+    for markers in bound.values():
+        if seen & set(markers):
+            return False
+        seen |= set(markers)
+    return True
+
+
 def _binding_guidance(decision: Decision) -> str:
     """The binding and the substrate wording, as instructions to the model.
 
@@ -486,7 +517,12 @@ def _binding_guidance(decision: Decision) -> str:
     # on the brief's first test question, and the evaluation compares published
     # figures with whitespace collapsed and nothing else normalised, so a space
     # the model inserted is a failed assertion about a figure.
-    if len(bound) > 1:
+    #
+    # And only when the sets separate the properties — see `_distinguishes`.
+    # The substrate line below is independent of this and is emitted on its own
+    # terms: it closes a vocabulary gap rather than pointing at a passage, so a
+    # binding that says nothing useful must not take it down with it.
+    if len(bound) > 1 and _distinguishes(bound):
         lines.append("Where each thing asked about is stated:")
         lines += [f"- {prop}: "
                   + ", ".join(f"[{m}]" for m in markers)
