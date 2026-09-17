@@ -333,6 +333,22 @@ PAGE = """<!doctype html>
     font-size:11px; color:var(--muted);
   }}
 
+  .upload-note {{ background:var(--warnbg); color:var(--warn); }}
+  .error-bubble {{
+    background:var(--warnbg); color:var(--warn);
+    border:1px solid var(--warn);
+  }}
+  .error-id {{
+    margin-top:6px; font-size:11px; opacity:0.8;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }}
+  .sent-attachments {{ margin-top:6px; font-size:12px; opacity:0.85; }}
+  .attached-file {{ list-style:none; font-size:12px; color:var(--accent); }}
+  .upload-notes {{ margin:4px 0 0; padding:0; }}
+  .attach-btn.has-files {{
+    border-color:var(--accent); color:var(--accent); font-weight:700;
+  }}
+
   .thinking {{
     color:var(--muted); font-size:13px; font-style:italic;
     text-align:center; padding:8px;
@@ -382,6 +398,7 @@ PAGE = """<!doctype html>
 
 <footer>
   <div>Responses are grounded in Lime Green published material</div>
+  <div class="audience-display" id="index-meta">{meta}</div>
   <div class="audience-display" id="footer-audience">{footer_audience}</div>
 </footer>
 
@@ -398,6 +415,50 @@ function triggerFileInput() {{
   document.getElementById('file-input').click();
 }}
 
+// What is attached, shown before it is sent. The file input is `display:none`
+// and is cleared on send, so without this the only signal that a photograph is
+// attached at all is that the person remembers clicking `+`. A composing turn
+// costs tens of seconds, which is a long time to wonder.
+function showAttached() {{
+  const files = Array.from(document.getElementById('file-input').files);
+  const list = document.getElementById('upload-notes');
+  list.innerHTML = '';
+  document.querySelector('.attach-btn').classList.toggle('has-files', files.length > 0);
+  files.forEach(file => {{
+    const li = document.createElement('li');
+    li.className = 'attached-file';
+    li.textContent = '📎 ' + file.name;
+    list.appendChild(li);
+  }});
+}}
+
+function clearAttached() {{
+  document.getElementById('upload-notes').innerHTML = '';
+  document.querySelector('.attach-btn').classList.remove('has-files');
+}}
+
+// The only in-flight affordance used to be the send button going grey, which on
+// a question that composes is several dozen seconds of a page that looks like it
+// ignored the click. The `.thinking` style was already written and never
+// instantiated; this instantiates it.
+function showThinking(hasImages) {{
+  const container = document.getElementById('chat-messages');
+  if (container.querySelector('.landing')) {{ container.innerHTML = ''; }}
+  const el = document.createElement('div');
+  el.className = 'thinking';
+  el.id = 'thinking';
+  el.textContent = hasImages
+    ? 'Reading the photograph and searching Lime Green sources'
+    : 'Searching Lime Green sources';
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}}
+
+function hideThinking() {{
+  const el = document.getElementById('thinking');
+  if (el) el.remove();
+}}
+
 function sendMessage() {{
   const input = document.getElementById('question-input');
   const question = input.value.trim();
@@ -412,14 +473,16 @@ function sendMessage() {{
   const hasImages = files.length > 0;
 
   // Add user message to chat
-  addMessage('user', question);
+  addMessage('user', question, files.map(f => f.name));
   input.value = '';
   input.focus();
   document.getElementById('file-input').value = '';
+  clearAttached();
 
   // Send to server
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
+  showThinking(hasImages);
 
   if (hasImages) {{
     // Use FormData for image upload
@@ -435,8 +498,8 @@ function sendMessage() {{
     }})
     .then(r => r.json())
     .then(data => handleResponse(data))
-    .catch(err => addMessage('assistant', 'Error: ' + err.message))
-    .finally(() => btn.disabled = false);
+    .catch(err => showError(err.message))
+    .finally(() => {{ hideThinking(); btn.disabled = false; }});
   }} else {{
     // Use GET for text-only
     const q = encodeURIComponent(question);
@@ -445,12 +508,12 @@ function sendMessage() {{
     }})
     .then(r => r.json())
     .then(data => handleResponse(data))
-    .catch(err => addMessage('assistant', 'Error: ' + err.message))
-    .finally(() => btn.disabled = false);
+    .catch(err => showError(err.message))
+    .finally(() => {{ hideThinking(); btn.disabled = false; }});
   }}
 }}
 
-function addMessage(role, text) {{
+function addMessage(role, text, attachments) {{
   const container = document.getElementById('chat-messages');
   if (container.querySelector('.landing')) {{
     container.innerHTML = '';
@@ -458,14 +521,44 @@ function addMessage(role, text) {{
   }}
   const msgEl = document.createElement('div');
   msgEl.className = 'message ' + role;
-  msgEl.innerHTML = '<div class="message-bubble">' + escapeHtml(text) + '</div>';
+  let inner = escapeHtml(text);
+  // The person's own bubble says what they sent with it. Without this, an
+  // attached photograph left no trace on the page at all, so a reply that never
+  // mentioned the image was indistinguishable from one that never received it.
+  if (attachments && attachments.length > 0) {{
+    inner += '<div class="sent-attachments">📎 ' +
+             attachments.map(escapeHtml).join(', ') + '</div>';
+  }}
+  msgEl.innerHTML = '<div class="message-bubble">' + inner + '</div>';
   container.appendChild(msgEl);
   container.scrollTop = container.scrollHeight;
 }}
 
+// A failure the reader can act on: what went wrong, and the id that finds it in
+// the log. The server already returns both on a 500 and a 503; this page used to
+// discard them and print "No response received.", which told an operator nothing
+// and told a demo audience less.
+function showError(message, correlationId) {{
+  const container = document.getElementById('chat-messages');
+  if (container.querySelector('.landing')) {{ container.innerHTML = ''; }}
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  let inner = '<div class="message-bubble error-bubble">' + escapeHtml(message);
+  if (correlationId) {{
+    inner += '<div class="error-id">reference ' + escapeHtml(correlationId) + '</div>';
+  }}
+  el.innerHTML = inner + '</div>';
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}}
+
 function handleResponse(data) {{
+  if (data.error) {{
+    showError(data.error, data.correlation_id);
+    return;
+  }}
   if (!data.parts || data.parts.length === 0) {{
-    addMessage('assistant', 'No response received.');
+    showError('No answer came back for that question.', data.correlation_id);
     return;
   }}
 
@@ -491,7 +584,7 @@ function renderAnswer(answer, uploadNotes) {{
     uploadNotes.forEach(note => {{
       const noteEl = document.createElement('div');
       noteEl.className = 'message assistant';
-      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      noteEl.innerHTML = '<div class="message-bubble upload-note">' + escapeHtml(note) + '</div>';
       container.appendChild(noteEl);
     }});
   }}
@@ -566,7 +659,7 @@ function renderRefusal(answer, uploadNotes) {{
     uploadNotes.forEach(note => {{
       const noteEl = document.createElement('div');
       noteEl.className = 'message assistant';
-      noteEl.innerHTML = '<div class="message-bubble" style="background:var(--warnbg);color:var(--warn);">' + escapeHtml(note) + '</div>';
+      noteEl.innerHTML = '<div class="message-bubble upload-note">' + escapeHtml(note) + '</div>';
       container.appendChild(noteEl);
     }});
   }}
@@ -644,6 +737,10 @@ function escapeHtml(text) {{
 }}
 
 // Enter key to send
+// Attaching is a click into a hidden input, so the change event is the only
+// moment the page learns anything was chosen.
+document.getElementById('file-input').addEventListener('change', showAttached);
+
 document.getElementById('question-input').addEventListener('keydown', (e) => {{
   if (e.key === 'Enter' && !e.shiftKey) {{
     e.preventDefault();
@@ -669,19 +766,32 @@ def render_landing() -> str:
     )
 
 
-def render_html(reply, verbose: bool) -> str:
+def render_html(reply, verbose: bool, notes: list | None = None) -> str:
     """Render an answer as a chat message with collapsible sources and diagnostics.
 
     Unlike the old render_html, this outputs HTML/JS suitable for the chat
     interface with collapsible sections for sources and diagnostics.
+
+    `notes` is what happened to the caller's attachments. It is rendered here as
+    well as in the JSON because a POST to `/` is answered with a whole page and
+    never reaches the page's own script: without this, an attachment refused as
+    "not a recognised image" was dropped in silence on exactly the path a person
+    with scripting disabled -- or a reload -- takes. Rendered above the answer,
+    because what happened to an upload is a fact about the request rather than
+    about the published material.
     """
+    prelude = "".join(
+        f"<div class='message assistant'>"
+        f"<div class='message-bubble upload-note'>{_esc(note)}</div></div>"
+        for note in (notes or []))
+
     if not reply.parts:
-        return ""
+        return prelude
 
     # For now, render only the first part (single-turn response)
     part, answer = reply.parts[0]
 
-    blocks = []
+    blocks = [prelude]
 
     # Message container
     blocks.append('<div class="message assistant">')
@@ -754,7 +864,11 @@ def render_html(reply, verbose: bool) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     assistant: Assistant
-    meta: str
+    # The index this server is serving, stated in the footer so a demonstration
+    # cannot be given against an index nobody identified. `main` replaces it with
+    # the real snapshot; the default keeps a Handler built directly in a test
+    # from raising on an attribute it never set.
+    meta: str = ""
     # What this server was started to allow. A request may narrow this and can
     # never widen it, so `?a=staff` against a public instance stays public.
     audiences: tuple[str, ...] = PUBLIC_ONLY
@@ -1106,7 +1220,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 reply = self._answer(question, audiences, images)
                 self._remember(question, reply)
-                initial_content = render_html(reply, verbose)
+                initial_content = render_html(reply, verbose, notes)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 initial_content = (f"<div class='message assistant'>"
                                    f"<div class='message-bubble'>Error: {_esc(str(exc))}"
@@ -1117,6 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
         page = PAGE.format(
             initial_content=initial_content,
             audience_display=audience_display,
+            meta=_esc(self.meta),
             footer_audience=f"audience: {audience_display}")
         self._send(page.encode("utf-8"), "text/html; charset=utf-8")
 
