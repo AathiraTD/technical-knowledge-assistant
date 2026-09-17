@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
-from . import metrics, observability as obs, ollama, use_utf8
+from . import health, metrics, observability as obs, ollama, use_utf8
 from .answer import Provenance
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .engine import Assistant
@@ -764,6 +764,9 @@ class Handler(BaseHTTPRequestHandler):
     # How many photographs each session has sent. Separate from the session
     # store on purpose -- see UploadBudget.
     uploads: UploadBudget = UploadBudget()
+    # The store this server was started against, so `/ready` inspects the one
+    # actually serving rather than whatever the module default happens to be.
+    db_path: str = "data/index/knowledge.db"
     correlation_id: str
     session_id: str
 
@@ -793,9 +796,20 @@ class Handler(BaseHTTPRequestHandler):
         # greps for it, and every event the answer produced comes back together.
         self.correlation_id = obs.new_id()
         url = urlparse(self.path)
-        # Health check endpoint for load balancers and container orchestration.
+        # Liveness. Deliberately static and deliberately cheap: it answers
+        # "is this process running", nothing more, and a probe that hit the
+        # store would fail the process for a fault the process does not have.
         if url.path == "/health":
             self._send_plain(b"OK\n", "text/plain")
+            return
+        # Readiness, which is a different question and used to have no answer
+        # here. `/health` returns OK from a process that has no index, an index
+        # built by another embedding model, or no Ollama to reach -- so a
+        # container could report healthy while unable to answer anything. This
+        # runs the same checks `python -m assistant.health` runs and fails the
+        # probe, with 503, when any of them is false.
+        if url.path == "/ready":
+            self._send_ready(parse_qs(url.query).get("format", [""])[0])
             return
         # One line, delegating immediately. The renderer lives in
         # assistant/metrics.py rather than here because a later slice rewrites
@@ -1213,7 +1227,36 @@ class Handler(BaseHTTPRequestHandler):
         summary = "\n\n".join(answer.text for _part, answer in reply.parts)
         self.sessions.remember(self.session_id, question, summary, slots, pending)
 
-    def _send_plain(self, body: bytes, content_type: str) -> None:
+    # Keys `/ready` will publish over HTTP, and the omission is the point.
+    # `store_target` is a filesystem path or a DSN host, and this endpoint is
+    # unauthenticated: an orchestrator needs to know *whether* the store is
+    # reachable, never where it is. `assistant/trace.py` declines to be an
+    # endpoint at all for the same reason, and readiness only qualifies because
+    # what remains here is operational state -- counts, tags, booleans.
+    READY_FIELDS = ("ready", "checks", "snapshot", "documents", "chunks",
+                    "embedding_model", "embedding_dimensions",
+                    "chunking_version", "generation_model", "vision", "error")
+
+    def _send_ready(self, form: str = "") -> None:
+        """Readiness as JSON, or as the table `python -m assistant.health` prints.
+
+        200 when every check passes and 503 when any does not, because the
+        status code is the part an orchestrator reads. The body is for whoever
+        then has to fix it.
+        """
+        report = health.check(self.db_path,
+                              os.environ.get("ASSISTANT_POSTGRES_DSN", ""))
+        if form == "text":
+            body = (health.summary(report) + "\n").encode("utf-8")
+            kind = "text/plain; charset=utf-8"
+        else:
+            public = {k: report[k] for k in self.READY_FIELDS if k in report}
+            body = (json.dumps(public, indent=1) + "\n").encode("utf-8")
+            kind = "application/json"
+        self._send_plain(body, kind, status=200 if report["ready"] else 503)
+
+    def _send_plain(self, body: bytes, content_type: str,
+                    status: int = 200) -> None:
         """A response with no session cookie, for a scraper rather than a person.
 
         `_send` mints and returns a session on every response, which is right
@@ -1224,7 +1267,7 @@ class Handler(BaseHTTPRequestHandler):
         A scraper has no conversation. It gets the document and nothing else --
         no cookie, no correlation id, no state created by having asked.
         """
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -1286,6 +1329,7 @@ def main(argv: list[str] | None = None) -> int:
         dsn=os.environ.get("ASSISTANT_POSTGRES_DSN"),
     )
     Handler.uploads = UploadBudget()
+    Handler.db_path = args.db
     Handler.audiences = resolve(args.allow_audience, ("public", "trade", "staff"))
     Handler.meta = (
         f"{snapshot.document_count} documents · {snapshot.chunk_count} passages · "
