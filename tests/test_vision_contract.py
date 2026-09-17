@@ -575,3 +575,42 @@ def test_a_top_confidence_still_only_buys_a_band(monkeypatch):
     # And the reading that matters for routing is still absent: the model
     # reported conditions, never the `substrate` slot itself.
     assert "substrate" not in {o.attribute for o in perception.observations}
+
+
+# =====================================================================
+#  The context size, and the hang it caused
+# =====================================================================
+
+def test_the_vision_call_asks_for_the_same_context_as_the_text_call():
+    """Equal, not merely large enough. The difference is a hang.
+
+    Omitting `num_ctx` let Ollama size the vision instance at the model default
+    while every text answer asked for 8192 -- two sizes of one model, so two
+    resident instances. With no room for the second, this build does not evict,
+    error or resize: it blocks indefinitely. A five-token completion returned in
+    1.08 s with no `num_ctx` against a resident instance, never returned at all
+    with `num_ctx: 8192` against a 4096 one, and took 39 s after an unload.
+
+    The symptom was a photograph question that hung forever, because perception
+    loads the model and its own compose then asks for the other size. No error,
+    nothing in the log.
+
+    Asserted against `ollama.generate`'s own signature rather than a copy of the
+    number, so the two cannot drift apart again without this failing.
+    """
+    import inspect
+    from assistant import ollama
+
+    text_default = inspect.signature(ollama.generate).parameters["num_ctx"].default
+
+    assert vision.VISION_NUM_CTX == text_default, (
+        f"vision asks for {vision.VISION_NUM_CTX}, text asks for {text_default}; "
+        "two context sizes for one model is the hang this pins")
+
+
+def test_the_context_size_reaches_the_request_body(monkeypatch):
+    """A constant nothing sends is a constant that fixes nothing."""
+    fake_ollama(monkeypatch, response_text=body([obs()]))
+    observe(PIXEL)
+
+    assert _Client.sent["body"]["options"]["num_ctx"] == vision.VISION_NUM_CTX

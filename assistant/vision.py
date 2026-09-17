@@ -146,6 +146,15 @@ MAX_IMAGE_BYTES = int(os.environ.get("VISION_MAX_IMAGE_BYTES", str(8 * 1024 * 10
 
 VISION_MODEL = os.environ.get("VISION_MODEL", GENERATION_MODEL)
 
+# **Must equal `assistant.ollama.generate`'s `num_ctx`.** Not "be large
+# enough" — equal. Two different context sizes for the same model are two
+# resident instances, and the failure that produces is described in full beside
+# the request body in `observe`. Kept as a literal rather than imported so this
+# module keeps its own HTTP client and no dependency on `ollama.py`; the pair
+# is asserted in the vision tests instead, which is the thing that will
+# actually catch a future drift.
+VISION_NUM_CTX = int(os.environ.get("VISION_NUM_CTX", "8192"))
+
 # --------------------------------------------------- the demonstration flag
 #
 # `ASSISTANT_VISION_DEMO=1` turns image reading on. **Off is the default, and
@@ -1070,7 +1079,31 @@ def observe(
         "think": False,
         "keep_alive": KEEP_ALIVE,
         "format": observation_schema(slots),
+        # The same context size `assistant/ollama.py` asks for, and it has to
+        # be the same rather than merely large enough.
+        #
+        # Omitting it let Ollama size this instance at the model default, 4096,
+        # while every text answer asks for 8192 -- two different sizes of the
+        # same model. Serving both needs two resident instances, and on a
+        # machine with no room for the second, Ollama does not evict, error or
+        # resize: it **blocks, indefinitely**. Measured on this build, a five
+        # token completion returned in 1.08 s with no `num_ctx` against a
+        # resident instance and never returned at all with `num_ctx: 8192`
+        # against a 4096 one; unloading the model first, the same call took
+        # 39 s and succeeded.
+        #
+        # The effect was a photograph question that hung forever -- perception
+        # loads 4096, its own compose then asks 8192 -- with no error and
+        # nothing in the log, which is the worst shape a failure can take in
+        # front of a customer. It survived every test because the vision suite
+        # fakes the HTTP client, so no test had ever run perception and
+        # generation against one real Ollama.
+        #
+        # 8192 is also what this path needs on its own terms: prompt and image
+        # measured 1,958 tokens against a `MAX_VISION_TOKENS` budget of 900,
+        # which fits 4096 only while the photograph stays small.
         "options": {"temperature": 0, "top_p": 1, "seed": 0,
+                    "num_ctx": VISION_NUM_CTX,
                     "num_predict": MAX_VISION_TOKENS,
                     "repeat_penalty": VISION_REPEAT_PENALTY},
     }
