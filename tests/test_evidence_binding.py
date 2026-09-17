@@ -46,7 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.answer import (                                   # noqa: E402
-    _binding_guidance, evidence_binding, run_checks,
+    _binding_guidance, _distinguishes, evidence_binding, run_checks,
 )
 from assistant.model import Chunk, Document, Retrieved           # noqa: E402
 from assistant.repository import product_matches                 # noqa: E402
@@ -540,3 +540,126 @@ def test_a_property_outside_the_vocabulary_is_still_bindable():
 
     assert list(decision.evidence_terms) == ["pot life"]
     assert evidence_binding(decision) == {"pot life": [1]}
+
+
+# ------------------- a binding that separates nothing is not worth saying
+
+# The GD2 shape, with the rendering checklist's own words. Two properties are
+# asked -- a thickness and a preparation -- and the passage that answers the
+# thickness half also carries preparation language, so the two bound sets
+# overlap on it. Naming them separates nothing the model could not already see.
+GD2_QUESTION = ("I'm rendering an old masonry wall in a very exposed location. "
+                "How thick should the lime render be, and what preparation "
+                "does the background need?")
+
+# The checklist's own words, and the overlap is in them rather than contrived:
+# the Design section cites "BS 13914 Design, preparation and application of
+# external rendering", so the passage carrying the thickness specification is
+# also the best match for *preparation*.
+CHECKLIST_DESIGN = passage(
+    "Refer to British Standards BS 13914 Design, preparation and application "
+    "of external rendering and internal plastering. Specify 16mm minimum "
+    "thickness of lime render in moderately exposed locations, or 25mm in "
+    "very exposed locations.",
+    section="Design", product="Lime Rendering Checklist & Guide",
+    url="https://example/rendering-checklist", title="Lime Rendering Checklist",
+    document_type="knowledge_base", authority=3, score=0.770)
+
+BACKGROUND_PREP = passage(
+    "The background construction should be sufficiently true, in line and "
+    "plumb. As a guide the maximum correction is a deviation of 5 mm under a "
+    "2 m straight edge on a wall built to the specified thickness.",
+    section="1) Construction Issues", product="Background Preparation",
+    url="https://example/background-preparation",
+    title="Background Preparation For Lime Rendering",
+    document_type="knowledge_base", authority=3, score=0.725)
+
+CHECKLIST_APPLICATION = passage(
+    "Consult BS13914 Design, preparation and application of external "
+    "rendering and internal plastering and the product Technical Datasheets. "
+    "Add the same amount of water to each bag and mix for the same time.",
+    section="Application", product="Lime Rendering Checklist & Guide",
+    url="https://example/rendering-checklist", title="Lime Rendering Checklist",
+    document_type="knowledge_base", authority=3, score=0.715)
+
+GD2_HITS = [CHECKLIST_DESIGN, BACKGROUND_PREP, CHECKLIST_APPLICATION]
+
+
+def test_overlapping_evidence_suppresses_the_binding_block():
+    """Two properties, one passage answering both: the block says nothing.
+
+    This is the regression GD2 measured. The block that separated nothing still
+    perturbed the generation, and the published "25mm" came back as "25 mm" --
+    correct, cited, passing all six checks, and a failed assertion about a
+    figure, because the evaluation compares published figures with whitespace
+    collapsed and nothing else normalised.
+    """
+    decision = decide(GD2_QUESTION, GD2_HITS, product="")
+    bound = evidence_binding(decision)
+
+    assert len(bound) > 1, bound
+    assert not _distinguishes(bound), bound
+    assert "Where each thing asked about is stated" not in _binding_guidance(decision)
+
+
+def test_disjoint_evidence_keeps_the_binding_block():
+    """The case the binding exists for: each half stated in its own passage."""
+    decision = decide(COMPOUND)
+    bound = evidence_binding(decision)
+
+    assert bound == {"compatibility": [4], "thickness": [1]}
+    assert _distinguishes(bound)
+
+    guidance = _binding_guidance(decision)
+    assert "compatibility: [4]" in guidance
+    assert "thickness: [1]" in guidance
+
+
+def test_distinguishes_is_about_shared_passages_not_set_size():
+    """The rule is stated as a property, so it is worth testing as one."""
+    assert _distinguishes({})
+    assert _distinguishes({"a": [1]})
+    assert _distinguishes({"a": [1], "b": [2, 3]})
+    assert not _distinguishes({"a": [1, 2], "b": [2]})
+    assert not _distinguishes({"a": [1], "b": [1]})
+
+
+def test_a_suppressed_binding_does_not_take_the_substrate_line_with_it():
+    """The two halves of the guidance are independent.
+
+    The substrate line closes a vocabulary gap rather than pointing at a
+    passage, so a binding that separates nothing must not silence it.
+    """
+    one_passage_answers_both = [
+        passage("Suitable for most masonry and lath backgrounds. Apply in a "
+                "uniform thickness of between 10 and 30mm.",
+                section="Backgrounds", product=ULTRA_PAGE,
+                url="https://example/ultra-plaster", title=ULTRA_PAGE,
+                document_type="product_page", authority=3),
+    ]
+    decision = decide(COMPOUND, one_passage_answers_both)
+    bound = evidence_binding(decision)
+
+    assert len(bound) > 1 and not _distinguishes(bound), bound
+    guidance = _binding_guidance(decision)
+    assert "Where each thing asked about is stated" not in guidance
+    assert 'never say "brick"' in guidance
+
+
+def test_the_gb1_phrasing_is_untouched_by_the_overlap_rule():
+    """GB1 binds one property, so neither the old gate nor the new one applies.
+
+    What answers GB1 is the substrate line, not the binding block -- "would ...
+    be suitable" matches no compatibility *value* term, only the ask-only cue,
+    so `primary_properties` returns the thickness alone.
+    """
+    gb1 = ("I have an old solid brick wall and want to improve its insulation. "
+           "Would Lime Green Ultra be suitable internally, and what thickness "
+           "can it be applied at?")
+    decision = decide(gb1)
+
+    assert Router().slots.primary_properties(gb1) == ["thickness"]
+    assert list(evidence_binding(decision)) == ["thickness"]
+    guidance = _binding_guidance(decision)
+    assert "Where each thing asked about is stated" not in guidance
+    assert 'never say "brick"' in guidance
