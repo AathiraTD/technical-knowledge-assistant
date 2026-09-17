@@ -181,8 +181,12 @@ def ask(page, question: str, timeout: int = 60_000) -> None:
 # the router answers without generation, and the handful that genuinely need a
 # composed answer are marked `slow` and excluded from the smoke run.
 #
-#   python -m pytest tests/e2e -m smoke      # about a minute, pre-flight
+#   python -m pytest tests/e2e -m smoke      # ~3 min, pre-flight
 #   python -m pytest tests/e2e               # everything, pre-demo
+#
+# Measured: smoke is 11 tests in 2m45s, most of which is one server start and
+# one cold embedding load. The `slow` half composes or perceives and runs in
+# tens of minutes, which is why it is a pre-demo check and not a pre-commit one.
 
 def pytest_configure(config):
     config.addinivalue_line(
@@ -249,3 +253,30 @@ def expand(page, label: str):
     panel = button.locator("xpath=following-sibling::*[1]")
     panel.wait_for(state="visible", timeout=5_000)
     return panel
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warm(server):
+    """One retrieval before any browser test, so the first one is not the slow one.
+
+    The embedding model is loaded lazily by Ollama, so whichever test asks the
+    first question that reaches retrieval pays several tens of seconds that have
+    nothing to do with it -- and, being first, it is usually the one with the
+    tightest timeout. That is exactly how the ask-back journey failed at sixty
+    seconds while measuring 21.5 s against an already-warm server.
+
+    This is not a trick to make the suite look fast. It is the same step
+    `docs/DEMO-SCRIPT.md` puts at the top of its pre-demo checklist, for the
+    same reason, and doing it here means a timeout in this suite means something
+    is actually wrong rather than that Ollama was cold.
+
+    Deliberately not warming the *generation* model: the tests that compose are
+    marked `slow` and carry timeouts that expect to pay for it, and warming it
+    would hide a real regression in generation latency behind a fixture.
+    """
+    import httpx
+
+    try:
+        httpx.get(f"{server}/ask", params={"q": QUANTITY_QUESTION}, timeout=300)
+    except Exception:                                  # noqa: BLE001
+        pass          # a cold model is a slow suite, not a failed one
