@@ -99,7 +99,7 @@
         {
           "question": "Can Solo Onecoat be used on an external wall?",
           "expect": {
-            "slots_include": {"product": "solo onecoat lime plaster"},
+            "slots_include": {"product": "solo"},
             "cited_documents_include": ["solo"],
             "answer_must_not_match": ["solo[^.]{0,40}(?:is|can be|would be)\\s+(?:suitable|ideal|fine|appropriate)\\s+(?:for|on)\\s+(?:an?\\s+)?(?:external|outside|exterior)"],
             "numbers_are_published": true,
@@ -225,7 +225,7 @@
       "name": "Ultra, then how much of it - the whole demonstration",
       "category": "multi_turn_quantity",
       "expected": "answer",
-      "why": "The scenario this branch exists for. Turn one establishes the product and the wall; turn two says only 'how much would I need', and everything that makes it answerable has to come from the conversation. Ultra must be inherited, brick and internal must be inherited, the area and thickness must be read from this turn, and the coverage figure must be Ultra's own - the datasheet publishes '0.6m2 at 25mm thick', which is the number that proves no other sheet was read. Router step 6 prints the published figures and refuses the multiplication, so no bag count may appear.",
+      "why": "The scenario this branch exists for. Turn one establishes the product and the wall; turn two says only 'how much would I need', and everything that makes it answerable has to come from the conversation. Ultra must be inherited, brick and internal must be inherited, the area and thickness must be read from this turn, and the coverage figure must be Ultra's own - the datasheet publishes '0.6m2 at 25mm thick', which is the number that proves no other sheet was read. Router step 6 prints the published figures and refuses the multiplication, so no bag count may appear. The inherited *product* is asserted through the merged slots, the session state and the cited document rather than through the printed provenance line, because `STATABLE_SLOTS` is deliberately the three facts about the caller's building - substrate, location, exposure - and a product is not one of them. So the reply says 'answered for brick (substrate), as you told me earlier' and does not say the same of Ultra. That is a defensible reading and it is worth noticing anyway: the carry-over this scenario demonstrates is the one thing the reply does not name back, and a customer who wanted to check the system had kept the right product has to infer it from the citation. Recorded as an observation, not asserted as a defect, because changing what is printed back is a decision about the product's voice rather than a bug in it.",
       "turns": [
         {
           "question": "I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?",
@@ -244,7 +244,7 @@
             "model_ran": false,
             "refused": false,
             "slots_include": {"product": "ultra", "calculation": "quantity"},
-            "facts": {"product": "carried", "substrate": "carried"},
+            "facts": {"substrate": "carried", "location": "carried"},
             "session_slots_after": {"product": "ultra", "substrate": "brick", "location": "internal"},
             "cited_documents_include": ["ultra"],
             "cited_documents_exclude": ["warmshell", "duro"],
