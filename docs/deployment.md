@@ -170,7 +170,12 @@ assistant_span_duration_ms       assistant_span_errors_total
 assistant_retrieval_top_score    assistant_cache_lookups_total
 assistant_cache_hits_total       assistant_checks_runs_total
 assistant_check_failures_total   assistant_window_spans
+assistant_window_truncated
 ```
+
+That is the whole list, read off `# TYPE` lines from a running server rather
+than from the source — the previous version of this document listed names that
+did not exist, so this one is quoted from the endpoint.
 
 ```bash
 curl -s http://127.0.0.1:8765/metrics | grep assistant_answers_total

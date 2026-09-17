@@ -458,4 +458,13 @@ Recorded so nobody mistakes them for new:
   error that the shipping UI already avoids by passing it. A test-side defect.
 
 Baseline before this work: **1368 passed, 17 failed, 85 skipped, 17 errors.**
-This work adds 24 passing tests and changes no failure.
+This work adds **12** passing tests — ten in
+[`tests/test_readiness_endpoint.py`](../tests/test_readiness_endpoint.py) and
+two in [`tests/test_trace_reader.py`](../tests/test_trace_reader.py) — and
+changes no failure.
+
+Two existing trace-reader tests were edited rather than left alone, and that is
+a deliberate behaviour change rather than a test bent to fit: they asserted on
+`splitlines()[0]`, and the single-turn view now opens with the correlation,
+session and turn ids. They find the tree instead, and their assertions are
+otherwise untouched.
