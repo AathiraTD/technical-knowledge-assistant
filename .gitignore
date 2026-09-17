@@ -63,8 +63,8 @@ test-results/
 .mypy_cache/
 .ruff_cache/
 
-# Log output. `.env.example` suggests OTEL_LOG_FILE=logs/app.jsonl, which would
-# otherwise land in the working tree untracked and unignored.
+# Log output. Run output and any file-based logging land here; ignored so a
+# local run does not leave untracked files in the working tree.
 *.log
 logs/
 

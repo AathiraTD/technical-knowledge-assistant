@@ -142,6 +142,16 @@ class Assistant:
         """
         from .graph import checkpointer_for
 
+        # `ASSISTANT_CHECKPOINT_DSN`, not `ASSISTANT_POSTGRES_DSN`: where the
+        # knowledge lives and where a half-finished conversation lives are
+        # separate choices, and joining them would give a PostgreSQL knowledge
+        # store an unusable checkpointer for free. Unset -- the local and
+        # interview default -- is in-memory state: it does not survive a
+        # restart and is not shared between workers, which for one process
+        # answering one assessor is the right trade. A DSN here does not
+        # silently fall back; `checkpointer_for` raises, because a deployment
+        # that believed its conversations were durable and lost them would be
+        # worse than one that refuses to start.
         self.checkpointer = checkpointer or checkpointer_for(
             os.environ.get("ASSISTANT_CHECKPOINT_DSN", ""))
         self._services = None
