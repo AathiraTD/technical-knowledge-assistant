@@ -46,7 +46,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.answer import (                                   # noqa: E402
-    _binding_guidance, _distinguishes, evidence_binding, run_checks,
+    _binding_guidance, _distinguishes, evidence_binding, promote_bound,
+    run_checks,
 )
 from assistant.model import Chunk, Document, Retrieved           # noqa: E402
 from assistant.repository import product_matches                 # noqa: E402
@@ -663,3 +664,77 @@ def test_the_gb1_phrasing_is_untouched_by_the_overlap_rule():
     guidance = _binding_guidance(decision)
     assert "Where each thing asked about is stated" not in guidance
     assert 'never say "brick"' in guidance
+
+
+# ------------------- ordering: the bound passage read first, not talked about
+
+def test_the_single_bound_passage_is_promoted_to_the_front():
+    """The failing image case: one property, one passage, ranked fourth.
+
+    "Would Ultra be suitable internally" binds `compatibility` to the product
+    page that says "Suitable for most masonry and lath backgrounds" -- and the
+    block that would have said so is suppressed, because one claim cannot be
+    bound to the wrong half of itself. The model cited a different passage and
+    check 1 refused the answer. The evidence was there; nothing pointed at it.
+    """
+    ordered = promote_bound(HITS, {"compatibility": [4]})
+
+    assert ordered[0] is INSULATED_PAGE
+    assert ordered == [INSULATED_PAGE, APPLY, GENERAL, INSULATING_PAGE, MIX]
+
+
+def test_promotion_keeps_every_passage_and_their_relative_order():
+    """Ordering only: nothing added, nothing dropped, no duplicate."""
+    ordered = promote_bound(HITS, {"compatibility": [4]})
+
+    assert len(ordered) == len(HITS)
+    assert {id(h) for h in ordered} == {id(h) for h in HITS}
+    rest = [h for h in ordered if h is not INSULATED_PAGE]
+    assert rest == [h for h in HITS if h is not INSULATED_PAGE]
+
+
+def test_two_bound_properties_are_left_alone():
+    """The model needs both halves; promoting one says the other matters less."""
+    assert promote_bound(HITS, {"compatibility": [4], "thickness": [1]}) == HITS
+
+
+def test_a_property_bound_to_two_passages_is_left_alone():
+    """A tie the ranking declined to break is not broken here either."""
+    assert promote_bound(HITS, {"thickness": [1, 3]}) == HITS
+
+
+def test_a_passage_already_first_is_not_moved():
+    """No churn where there is nothing to gain: the list is returned as it was."""
+    assert promote_bound(HITS, {"thickness": [1]}) is HITS
+
+
+def test_an_empty_or_impossible_binding_changes_nothing():
+    assert promote_bound(HITS, {}) is HITS
+    assert promote_bound(HITS, {"thickness": [99]}) is HITS
+    assert promote_bound([], {"thickness": [1]}) == []
+
+
+def test_the_markers_the_checks_count_are_the_markers_the_prompt_used():
+    """The one way this change could do real harm, pinned.
+
+    Markers are positional. A list reordered for the prompt and not for
+    `run_checks` would renumber the evidence underneath the verification: an
+    answer citing [1] would be checked against whatever used to be first. So
+    the promoted order has to be the order the checks count, and this asserts
+    it by checking a sentence that is true of the promoted passage and false
+    of the one it displaced.
+    """
+    ordered = promote_bound(HITS, {"compatibility": [4]})
+
+    # Cited to [1], which is now the product page, so it must pass.
+    passing = run_checks(
+        "Ultra is suitable for most masonry and lath backgrounds [1].",
+        ordered, NAMES, [])
+    assert passing == [], passing
+
+    # The same sentence against the *unpromoted* order cites the datasheet's
+    # How to Apply section, which does not say it.
+    failing = run_checks(
+        "Ultra is suitable for most masonry and lath backgrounds [1].",
+        HITS, NAMES, [])
+    assert "check 1" in names_of(failing), failing
