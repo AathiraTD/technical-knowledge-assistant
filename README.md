@@ -93,7 +93,7 @@ full rehearsal script with timings, expected results and a failure playbook in
 
 **Use question 5 exactly as written.** The longer phrasing "Can you confirm my Warmshell build complies with Part L?" misses the policy gate and takes 80 s to refuse instead of 2 s to route — that is [known issue 1](#known-issues-in-this-branch), and it is worth knowing before a demonstration rather than during one.
 
-**Before demoing, warm the answer cache.** An uncached composed answer costs **35–200 seconds** on a machine with no graphics card; a repeat is **0.017 s**. Ask questions 1 and 6 once beforehand. The checklist in the demo script covers this and the rest of the pre-flight.
+**Before demoing, warm the answer cache — through the running server, not the CLI.** An uncached composed answer costs **35–200 seconds** on a machine with no graphics card. The cache is an in-process `OrderedDict`, so the CLI's cache and the server's are different objects; and its key includes the conversation history, so warming makes the **first question of a fresh chat** fast and does nothing for a repeat inside the same chat. Measured: the same question three times in one session cost 97.6 s, 12.2 s and 131.0 s, and 0.54 s from a fresh one. [The demo script](docs/DEMO-SCRIPT.md#pre-demo-checklist) has the exact sequence.
 
 ---
 
@@ -202,7 +202,7 @@ python -m coverage report --rcfile=.coveragerc
 
 ### Latency — the number that does not meet the target
 
-A five-passage compose on a question the model has not seen costs **35–90 s** on a quiet machine and **115–199 s** measured under load. The transcript's nine model calls read 1.66–75.47 s with a median of 3.8 s and **that median must not be quoted**: it is Ollama's prompt cache, earned by running the harness repeatedly against the same questions. Two questions never asked before cost 199 s and 115 s; an immediate repeat of the first cost 4.2 s. The exact-key answer cache takes a repeat to 0.017 s. Routed, extract and refused answers involve no generation and are fast.
+A five-passage compose on a question the model has not seen costs **35–90 s** on a quiet machine and **115–199 s** measured under load. The transcript's nine model calls read 1.66–75.47 s with a median of 3.8 s and **that median must not be quoted**: it is Ollama's prompt cache, earned by running the harness repeatedly against the same questions. Two questions never asked before cost 199 s and 115 s; an immediate repeat of the first cost 4.2 s. The exact-key answer cache takes a repeat to 0.017 s **when the conversation state matches** — its key includes the carried slots, their provenance and the conversation history, which is right (an answer cached without them would tell a caller they had said something they had not) and means a repeat inside one conversation misses. Measured on this build: three identical asks in one session cost 97.6 s, 12.2 s and 131.0 s; the same question from a fresh session, 0.54 s. Routed, extract and refused answers involve no generation and are fast.
 
 ### Index build — verified on this machine, 17 September 2026
 

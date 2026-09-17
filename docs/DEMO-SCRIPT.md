@@ -9,8 +9,11 @@ against remembered wording is how a demonstration breaks.
 
 Read [the pre-demo checklist](#pre-demo-checklist) first. The single most
 important line in it is the cache warm-up: a composed answer on a question the
-machine has not seen costs **35 to 200 seconds** on a processor with no
-graphics card, and 0.017 s once it is cached.
+machine has not seen costs **35 to 200 seconds** on a processor with no graphics
+card. Warming helps, with one catch measured on this build — the cache is keyed
+on conversation history, so it makes the *first* question of a fresh chat fast
+and does nothing for a repeat inside the same chat. The checklist says how to
+use that rather than fight it.
 
 ---
 
@@ -252,37 +255,64 @@ python -m assistant.index
 Expect `unchanged 94 · reprocessed 0` in a couple of seconds on a second run. If
 it reports 94 new and takes ~25 s, that is a first build and is fine.
 
-### 3. Warm the answer cache — **do not skip this**
-
-An uncached compose is 35–200 s. Ask each of the demo's composing questions once
-and throw the answers away:
+### 3. Smoke the surface
 
 ```
-python -m assistant.cli "How much water does Solo Onecoat need per bag?"
-python -m assistant.cli "I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?"
-python -m assistant.cli "How much would I need for 30 m² at 25 mm?"
-```
-
-The cache is keyed on the question, the audience set, the snapshot id, the
-generation model and the chunking version — so warm it **after** any re-index,
-never before.
-
-### 4. Smoke the surface
-
-```
-set ASSISTANT_E2E=1
+set ASSISTANT_E2E=1                 # PowerShell: $env:ASSISTANT_E2E=1
 python -m pytest tests/e2e -m smoke -q
 ```
 
-### 5. Start the server
+About three minutes, 11 tests, no generation. If this is green the page, the
+session, the upload boundary, the citations and the trace all work.
+
+### 4. Start the server — **before** warming, not after
 
 ```
 python -m assistant.ui
 ```
 
-Open the printed address. Check the footer names the index, ask one routed
-question (`How much does a bag cost?`) to confirm answers render, then click
-**New chat** so the panel starts on a clean page.
+Open the printed address and check the footer names the index.
+
+### 5. Warm the cache through the running server — **do not skip this**
+
+This is step 5 and not step 3 for a reason worth knowing. `assistant/cache.py`
+is an in-process `OrderedDict`: the CLI's cache and the server's are different
+objects, so warming with `python -m assistant.cli` does **not** put anything in
+the cache the browser will read. Warming has to go through the server that will
+answer on the day.
+
+Ask each composing question once, in the browser or with `curl`, and throw the
+answers away:
+
+```
+curl -G --data-urlencode "q=How much water does Solo Onecoat need per bag?" http://127.0.0.1:8765/ask
+curl -G --data-urlencode "q=I have an old solid brick wall and want to improve its insulation. Would Lime Green Ultra be suitable internally, and what thickness can it be applied at?" http://127.0.0.1:8765/ask
+curl -G --data-urlencode "q=How much would I need for 30 m² at 25 mm?" http://127.0.0.1:8765/ask
+```
+
+The first two take 35–200 s each. That is the whole point of doing it now.
+
+**Then click New chat, and ask each warmed question as the first question of a
+fresh chat.** This is the part that is easy to get wrong, and it was measured
+rather than assumed. The cache key includes the **conversation history**, which
+is correct — a cached answer that ignored what had already been said would tell
+somebody they had said something they had not — but it means a repeat *inside*
+one conversation has a different key and misses. Measured: the same question
+asked three times in one session cost 97.6 s, 12.2 s and 131.0 s; asked once
+more from a fresh session, **0.54 s**.
+
+So the warm-up buys you a fast *first* question per chat, not a fast repeat.
+Plan the demo that way: New chat before each warmed question.
+
+Two caches are being filled and only one of them is ours. The answer cache is an
+in-process `OrderedDict`, so it belongs to the running server and dies with it —
+warming with `python -m assistant.cli` fills a different process's cache and
+does nothing for the browser. **Ollama's prompt cache** is the larger effect, is
+not conversation-keyed, and survives a restart of our server; it is the reason
+the transcript's median latency looks better than the system is.
+
+The key also includes the audience set, the snapshot id, the generation model
+and the chunking version, so warm **after** any re-index, never before.
 
 ### 6. Have ready
 
