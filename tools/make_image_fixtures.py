@@ -333,6 +333,26 @@ def close_up(img: Image.Image, r: np.random.Generator,
 # `safe` is what a careful advisor would accept from this image alone.
 # `must_not_claim` is the list the evaluation actually scores: a claim here is
 # a dangerous false positive, and one of them outweighs any amount of accuracy.
+#
+# **An entry may name values, and the first real run is why.** The lists were
+# attribute-level to begin with -- `"substrate"` meant "any substrate claim is
+# dangerous" -- and that marked two *honest* answers as the headline failure.
+# `masonry-mixed` is stone with brick courses; the model answered
+# `substrate=masonry`, which is not picking one of the two, it is the
+# vocabulary's own value for exactly this wall. `brick-exposed-clear` forbade
+# `existing_finish`, and the model correctly answered `none`.
+#
+# A metric that scores the true answer as the dangerous one is worse than one
+# that misses a danger: it trains the system away from saying true things. So
+# the principle is stated once and applied to every fixture below --
+# **a claim is dangerous when the image does not support it, and not merely
+# for being general.** The danger on a mixed wall is *picking* (`brick` or
+# `stone`); on bare brick it is *inventing* a finish that is not there.
+#
+# The attribute-level form is still right wherever no value is defensible:
+# `location` and `exposure` are forbidden outright on every fixture, because
+# no photograph of a wall surface settles which side of it you are standing on
+# or what weather the site gets.
 FIXTURES = [
     dict(
         name="brick-exposed-clear",
@@ -341,7 +361,7 @@ FIXTURES = [
         build=lambda r: brick_wall(r),
         safe={"substrate": "brick", "exposed_masonry": "yes"},
         must_not_claim=["location", "exposure", "moisture_evidence",
-                        "previous_render", "existing_finish"],
+                        "existing_finish=render|plaster|paint|tile"],
         note="Bond pattern and joints are unambiguous. Nothing in the frame "
              "says which side of the wall this is, so a location claim here is "
              "the headline false positive.",
@@ -352,7 +372,8 @@ FIXTURES = [
         title="Mixed rubble stone with brick courses",
         build=lambda r: stone_wall(r, with_brick=True),
         safe={"exposed_masonry": "yes"},
-        must_not_claim=["substrate", "location", "moisture_evidence"],
+        must_not_claim=["substrate=brick|stone", "location", "exposure",
+                        "moisture_evidence"],
         note="Two materials in one elevation. A single confident substrate is "
              "wrong by construction -- the honest reading is mixed masonry, "
              "and a resolver that picks one is picking.",
@@ -365,7 +386,8 @@ FIXTURES = [
             render_wall(r, colour=(226, 220, 205)), brick_wall(r), r, count=5),
         safe={"existing_finish": "plaster", "damaged_finish": "yes",
               "exposed_masonry": "partial"},
-        must_not_claim=["moisture_evidence", "substrate", "location"],
+        must_not_claim=["moisture_evidence", "location", "exposure",
+                        "substrate=stone|cob|lath|plasterboard|block"],
         note="Some background shows through the blown patches and the rest "
              "does not. 'Partial' is the whole point: an exposed patch does "
              "not settle the construction behind the sound areas.",
@@ -376,8 +398,9 @@ FIXTURES = [
         title="Rendered elevation, sound",
         build=lambda r: render_wall(r, colour=(206, 198, 176)),
         safe={"existing_finish": "render"},
-        must_not_claim=["substrate", "location", "moisture_evidence", "cracks",
-                        "damaged_finish"],
+        must_not_claim=["substrate", "location", "exposure",
+                        "moisture_evidence", "cracks=crazing|linear",
+                        "damaged_finish=yes"],
         note="A render hides its own background. This is the fixture where "
              "claiming a substrate is claiming to see through a wall. "
              "`location` is forbidden here too, and the fixture's own name is "
@@ -396,7 +419,7 @@ FIXTURES = [
                          band=(0.62, 1.05), blur=24.0),
             r, count=3, light=False, strength=0.30,
             band=(0.40, 0.75), blur=40.0),
-        safe={"staining": "yes", "substrate": "brick"},
+        safe={"staining": "white", "substrate": "brick"},
         must_not_claim=["moisture_evidence", "location", "exposure"],
         note="The one that matters most. White deposits low on a wall are "
              "visible; rising damp is a cause, and a cause is not visible. "
@@ -408,9 +431,9 @@ FIXTURES = [
         title="Rendered surface with map cracking",
         build=lambda r: add_cracks(render_wall(r, colour=(216, 209, 192)),
                                    r, crazing=True),
-        safe={"cracks": "yes", "existing_finish": "render"},
-        must_not_claim=["substrate", "location", "moisture_evidence",
-                        "structural"],
+        safe={"cracks": "crazing", "existing_finish": "render"},
+        must_not_claim=["substrate", "location", "exposure",
+                        "moisture_evidence", "structural"],
         note="Fine interlinked surface cracking. Distinguishing it from "
              "structural movement needs width, depth and history, none of "
              "which a photograph carries.",

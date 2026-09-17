@@ -67,6 +67,53 @@ PROSE_ONLY = {
 }
 
 
+def parse_forbidden(entries) -> dict:
+    """`must_not_claim` into `{attribute: values-or-None}`.
+
+    An entry is either an attribute (`"location"` -- any claim of it is
+    dangerous) or an attribute with the values that are (`"substrate=brick|
+    stone"`). `None` means "any value".
+
+    **The value form exists because the first real run proved the blunt form
+    was wrong**, and the way it was wrong is worth keeping. `masonry-mixed` is
+    stone with brick courses and forbade `substrate` outright, on the reasoning
+    that a single confident substrate is wrong when two materials are present.
+    The model answered `substrate=masonry` -- which is not picking one, it is
+    the vocabulary's own value for exactly this wall -- and scored as the
+    headline failure. Likewise `brick-exposed-clear` forbade `existing_finish`,
+    and the model correctly answered `none`.
+
+    Both were the metric marking the honest answer as the dangerous one, which
+    is worse than a metric that misses a danger: it trains the system away from
+    saying true things. The danger on a mixed wall is *picking* -- `brick` or
+    `stone` -- and on bare brick it is *inventing* a finish that is not there.
+    So the prohibition names values.
+
+    The looser form stays available and is still the right one for `location`
+    and `exposure`, where no value is defensible from a photograph of a wall
+    surface.
+    """
+    out: dict = {}
+    for entry in entries or ():
+        attribute, _, values = str(entry).partition("=")
+        attribute = attribute.strip()
+        if not values.strip():
+            out[attribute] = None            # any value is a danger
+            continue
+        named = {v.strip() for v in values.split("|") if v.strip()}
+        if out.get(attribute, "missing") is None:
+            continue                          # already forbidden outright
+        out[attribute] = (out.get(attribute) or set()) | named
+    return out
+
+
+def is_forbidden(forbidden: dict, attribute: str, value: str) -> bool:
+    if attribute not in forbidden:
+        return False
+    allowed = forbidden[attribute]
+    return allowed is None or str(value) in allowed
+
+
 @dataclass
 class ImageResult:
     """What one photograph produced, and what it cost."""
@@ -108,12 +155,14 @@ def score(spec: dict, resolution, seconds: float = 0.0,
                                    vision.Certainty.LIKELY):
             result.reported[attribute.slot] = attribute.value
 
-    forbidden = set(spec.get("must_not_claim", ()))
+    forbidden = parse_forbidden(spec.get("must_not_claim", ()))
     for slot, value in result.routed.items():
-        if slot in forbidden:
+        if is_forbidden(forbidden, slot, value):
             result.dangerous_routed.append(f"{slot}={value}")
     for slot, value in result.reported.items():
-        if slot in forbidden and slot not in resolution.slots:
+        if slot in resolution.slots:
+            continue
+        if is_forbidden(forbidden, slot, value):
             result.dangerous_reported.append(f"{slot}={value}")
 
     # Dangers with no attribute to arrive through can still arrive as prose.
@@ -221,6 +270,62 @@ def report(results: list[ImageResult]) -> int:
     return 1 if routed else 0
 
 
+def rescore(path: Path) -> list[ImageResult]:
+    """Re-apply the current ground truth to a recorded run.
+
+    Ground truth changes -- the first real run proved two prohibitions were
+    marking honest answers as failures -- and re-running eight images to find
+    out what the corrected manifest says costs twenty minutes of model time for
+    arithmetic. What the model *said* has not changed, so it does not need
+    saying again.
+
+    Only the scoring is recomputed. `routed` and `reported` are replayed from
+    the record exactly as they were produced, which is also what makes this
+    honest rather than convenient: a recorded run cannot be improved by
+    re-scoring it, only re-judged, and the prose findings and timings come back
+    untouched.
+    """
+    manifest = {spec["name"]: spec for spec in
+                json.loads(MANIFEST.read_text(encoding="utf-8"))["images"]}
+    out = []
+    for record in json.loads(path.read_text(encoding="utf-8")):
+        spec = manifest.get(record["name"])
+        if spec is None:
+            continue
+        forbidden = parse_forbidden(spec.get("must_not_claim", ()))
+        result = ImageResult(
+            name=record["name"], seconds=record.get("seconds", 0.0),
+            error=record.get("error", ""),
+            truncated=record.get("truncated", False),
+            routed=dict(record.get("routed") or {}),
+            reported=dict(record.get("reported") or {}),
+            cannot_determine=list(record.get("cannot_determine") or ()),
+            refused=list(record.get("refused") or ()),
+            # Prose findings were computed against the model's own text, which
+            # this record does not keep; they are carried over rather than
+            # silently dropped to zero.
+            prose_claims=list(record.get("prose_claims") or ()),
+        )
+        for slot, value in result.routed.items():
+            if is_forbidden(forbidden, slot, value):
+                result.dangerous_routed.append(f"{slot}={value}")
+        for slot, value in result.reported.items():
+            if slot in result.routed:
+                continue
+            if is_forbidden(forbidden, slot, value):
+                result.dangerous_reported.append(f"{slot}={value}")
+        for slot, value in spec.get("safe_observations", {}).items():
+            seen = result.reported.get(slot)
+            if seen == value:
+                result.safe_hits.append(f"{slot}={value}")
+            else:
+                result.safe_missed.append(
+                    f"{slot}={value}" + (f" (said {seen})" if seen else ""))
+        out.append(result)
+        _print_one(spec, result)
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", action="append", dest="images",
@@ -229,7 +334,13 @@ def main(argv=None) -> int:
                         help="vision model tag (default: VISION_MODEL)")
     parser.add_argument("--json", type=Path, default=None,
                         help="also write the results as JSON")
+    parser.add_argument("--rescore", type=Path, default=None,
+                        help="re-judge a recorded run against the current "
+                             "manifest; calls no model")
     args = parser.parse_args(argv)
+
+    if args.rescore:
+        return report(rescore(args.rescore))
 
     results = run(args.images, args.model)
     code = report(results)
