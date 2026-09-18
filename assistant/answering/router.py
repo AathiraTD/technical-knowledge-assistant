@@ -741,19 +741,6 @@ class Router:
                             "7s", slots=slots, hits=hits, photograph=photo,
                             **carry)
 
-        # Step 7.5 — "For [product]" phrasing: explicit product + property lookup.
-        # When a user says "For Ultra, tell me the thickness and water ratio" they
-        # are asking for a factual lookup, not a recommendation. Route to EXTRACT
-        # to avoid generating prose with recommending language that triggers the
-        # unapproved recommendation guard. The "For [product]:" phrasing itself is
-        # the signal that this is a property lookup, not a suitability assessment.
-        if re.search(r"\bfor\s+(?:lime\s+)?green\s+\w+[,:]", question, re.I):
-            return Decision(Path_.EXTRACT,
-                            "explicit product naming with 'For [product]:' phrasing; "
-                            "print the passages rather than paraphrasing",
-                            "7.5", slots=slots, hits=hits,
-                            per_option=per_option, photograph=photo, **carry)
-
         # Step 8 — otherwise the model composes over what was retrieved.
         return Decision(Path_.COMPOSE, "several passages bear on the question",
                         "8", slots=slots, hits=hits,
@@ -852,35 +839,3 @@ class Router:
     @staticmethod
     def _single_document(hits: list[Retrieved]) -> bool:
         return len({h.chunk.canonical_url for h in hits}) == 1
-
-    def _explicit_product_property_lookup(self, question: str, asked: str) -> bool:
-        """Is this a factual property lookup of an explicitly named product?
-
-        When the user says "For Ultra, tell me the thickness and water ratio",
-        they are asking for a factual lookup, not a recommendation. The question
-        explicitly names a product and asks for concrete properties. Route to
-        EXTRACT to avoid generating prose with recommending language that would
-        trigger the unapproved recommendation guard.
-
-        This is detected by the absence of product-choice language like "suitable",
-        "recommend", "which product", etc. and the presence of property names.
-        """
-        # If the question contains strong product-choice language, it's a
-        # recommendation question, not a property lookup.
-        if self._STRONG_PRODUCT_CHOICE.search(question):
-            return False
-
-        # If there's no property being asked about, it's not a property lookup.
-        if not asked:
-            return False
-
-        # If the question starts with "For [product]" or names the product
-        # explicitly, and asks for properties, treat it as a lookup.
-        # The key signal is: explicit product name + property names + no
-        # recommendation language = factual lookup, not "is this suitable for me?"
-        product_prefix = re.search(r"\bfor\s+(?:lime\s+)?green\s+\w+", question, re.I)
-        if product_prefix:
-            # The question explicitly names the product upfront
-            return True
-
-        return False

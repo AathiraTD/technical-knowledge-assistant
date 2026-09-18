@@ -49,7 +49,8 @@ from enum import Enum
 
 from ..infrastructure import observability as obs
 from ..infrastructure import ollama
-from .answer import Answer, Provenance, SlotFact, _named_aliases, _product_aliases
+from .answer import (Answer, Provenance, SlotFact, _named_aliases,
+                     _product_aliases, _without_brand)
 from ..turn.conversation import ConversationState, Denial, FactStatus, SessionFact
 
 # The model is asked for one small object and nothing else, so the budget is a
@@ -250,10 +251,14 @@ class ResolvedRequest:
 
 # ------------------------------------------------------------- deterministic
 
-_SELECT_SHAPE = re.compile(
+# Words that ask the system to choose. "Suitable" is kept apart because it
+# reads both ways: "which is suitable" chooses, "compare X and Y for suitable
+# backgrounds" asks what each sheet publishes.
+_CHOICE_SHAPE = re.compile(
     r"\b(which|what)\s+(product|plaster|render|mortar|system|one)\b"
-    r"|\brecommend\b|\bshould i use\b|\bbest for\b|\bwhat do i (use|need)\b"
-    r"|\bsuitable\b", re.I)
+    r"|\brecommend\b|\bshould i use\b|\bbest for\b|\bwhat do i (use|need)\b",
+    re.I)
+_SELECT_SHAPE = re.compile(_CHOICE_SHAPE.pattern + r"|\bsuitable\b", re.I)
 
 _AREA = re.compile(r"(\d+(?:\.\d+)?)\s*(?:square\s*met(?:re|er)s?|m2|m²|sqm)", re.I)
 _THICKNESS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:mm|millimet(?:re|er)s?)", re.I)
@@ -312,10 +317,80 @@ def asserted_text(question: str) -> str:
                          r"what (?:is|are))\b", part, re.I))
 
 
+_ALTERNATIVE = re.compile(r"\bor\b", re.I)
+_EXPLICIT_COMPARISON = re.compile(
+    r"\b(?:compare|comparison|versus|vs|difference|different|differ|"
+    r"rather than|better than|instead of)\b", re.I)
+# How far, in words, a product name may sit from an "or" and still be one of
+# the things it weighs: exactly a brand-prefixed name ("Lime Green Duro"). Any
+# wider and "Can Ultra go on brick or stone?" reads the substrates as products.
+_ALTERNATIVE_WINDOW = 3
+
+
+def compares_products(text: str, registry) -> bool:
+    """Does this sentence weigh one product against another?
+
+    `_COMPARISON` is the right filter for building facts, where "brick or
+    stone" asserts neither substrate. It is the wrong one for the discussion
+    target. "Curing or application conditions" lists two things asked about one
+    product, and reading its "or" as a comparison left `topic_product` empty --
+    so the recommendation guard in `assistant/graph.py`, which exempts only the
+    product the caller named, refused the answer's own mention of that product
+    as an unapproved recommendation. A bare "or" therefore counts only when a
+    product name sits within a few words of it; the explicit comparison words
+    count anywhere.
+    """
+    if _EXPLICIT_COMPARISON.search(text):
+        return True
+    aliases = _product_aliases(registry)
+    words = text.split()
+    for index, word in enumerate(words):
+        if not _ALTERNATIVE.fullmatch(word.strip(",.;:?!")):
+            continue
+        beside = words[max(0, index - _ALTERNATIVE_WINDOW):index] \
+            + words[index + 1:index + 1 + _ALTERNATIVE_WINDOW]
+        if _named_aliases(" ".join(beside), aliases):
+            return True
+    return False
+
+
 def topic_product(question: str, registry) -> str:
     """One named discussion target; alternatives and recall establish none."""
     text = reference_text(question)
-    return "" if _COMPARISON.search(text) else _named_in(text, registry)
+    return "" if compares_products(text, registry) else _named_in(text, registry)
+
+
+def compared_products(question: str, registry) -> set[str]:
+    """The products an explicit comparison sets side by side, or nothing.
+
+    "Compare Ultra and Solo for suitable backgrounds" asks what each sheet
+    publishes about each, not which to put on a wall. The router already holds
+    that substrate is not load-bearing in a comparison; reading the same
+    sentence as a selection here sent acceptance case T14 to an ask-back for a
+    substrate nobody needed. A choice word keeps it a selection: "compare them
+    and tell me which plaster I should use" still has to survive the evidence
+    gate.
+    """
+    if _CHOICE_SHAPE.search(question) or not _EXPLICIT_COMPARISON.search(question):
+        return set()
+    named = _named_aliases(reference_text(question), _product_aliases(registry))
+    return named if len(named) >= 2 else set()
+
+
+def named_products(question: str, registry) -> set[str]:
+    """Every product the question is about, in each spelling the registry holds.
+
+    Spelling-complete on purpose. The recommendation guard compares these
+    against `candidates.recommends_a_product`, which reports whichever registry
+    spelling the answer used, and "ultra" must excuse "Ultra: Insulated Lime
+    Plaster Base Coat" as readily as the reverse. Read through `reference_text`
+    so a product named in order to be excluded is not one the caller asked
+    about.
+    """
+    aliases = _product_aliases(registry)
+    found = _named_aliases(reference_text(question), aliases)
+    return {normalise_product(p) for p in registry
+            if aliases.get(_without_brand((p or "").lower()).strip()) in found}
 
 
 def stated_product(question: str, registry) -> str:
@@ -558,7 +633,9 @@ def deterministic(question: str, detector, gate=None,
         # where a non-assertion clause establishes nothing, and it keeps the
         # comparison rule: "is Solo or Duro better" still names no target and
         # is still a selection.
-        intent = (Intent.VERIFY if topic_product(question, registry)
+        intent = (Intent.VERIFY
+                  if topic_product(question, registry)
+                  or compared_products(question, registry)
                   else Intent.SELECT)
     elif "property_asked" in slots:
         intent = Intent.LOOKUP
@@ -1052,7 +1129,7 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
         provenance["product"] = (
             Provenance.STATED if stated_product(question, registry) == product
             else Provenance.ASSUMED)
-    elif active_product and not _COMPARISON.search(question):
+    elif active_product and not compares_products(question, registry):
         product = active_product
         provenance["product"] = Provenance.ASSUMED
 
@@ -1086,7 +1163,7 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
             # the person has just withdrawn -- which is what made the denial
             # inert rather than merely unrecorded.
             continue
-        if (slot == "product" and not _COMPARISON.search(question)
+        if (slot == "product" and not compares_products(question, registry)
                 and (not product or (product == value
                      and provenance.get("product") is Provenance.ASSUMED))):
             product = value

@@ -309,3 +309,23 @@ def test_the_exemption_does_not_cover_a_different_product(assistant, monkeypatch
     assert reply.parts[0][1].refused, (
         "a product nobody asked about was recommended without assessment")
 
+
+def test_the_exemption_covers_every_product_the_caller_named(assistant, monkeypatch):
+    """Acceptance case T14: both products are allowed because the caller named them.
+
+    A comparison has two subjects and therefore no single resolved product, so
+    the exemption used to cover neither -- and the guard refused a comparison
+    for naming the products it had been asked to compare.
+    """
+    misclassify_as(monkeypatch, und.Intent.LOOKUP)
+    monkeypatch.setattr(ollama, "generate", recommending_but_well_cited("Duro"))
+
+    reply, _ = assistant.ask_turn(
+        turn("Compare Solo and Duro for backgrounds and application thickness."))
+    answer = reply.parts[0][1]
+
+    assert not answer.refused, answer.text[:200]
+    # The stub's recommendation is what printed, so the guard was exercised
+    # rather than bypassed by a path that never called the model.
+    assert "You should use" in answer.text, answer.text[:200]
+
