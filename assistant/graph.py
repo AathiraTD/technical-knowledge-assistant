@@ -108,6 +108,8 @@ from langgraph.graph import END, START, StateGraph                  # noqa: E402
 from langgraph.types import interrupt                               # noqa: E402
 
 from .retrieval import candidates as cand
+from . import answer as ans                                         # noqa: E402
+from . import conversation as conv                                  # noqa: E402
 from . import observability as obs                                  # noqa: E402
 from . import understanding as und                                  # noqa: E402
 from .answer import Provenance                                      # noqa: E402
@@ -121,35 +123,43 @@ from .router import Path_, split_by_topic                           # noqa: E402
 # permissive default: a checkpoint is data, and a deserialiser that will
 # construct any class it is told to is a deserialisation bug waiting for a
 # writable checkpoint store.
-ALLOWED_TYPES = [
-    ("assistant.conversation", "SessionFact"),
-    ("assistant.conversation", "FactHistory"),
-    ("assistant.conversation", "FactStatus"),
-    ("assistant.conversation", "ConversationState"),
-    ("assistant.understanding", "TurnUnderstanding"),
-    ("assistant.understanding", "ResolvedRequest"),
-    ("assistant.understanding", "Intent"),
-    ("assistant.candidates", "CandidateAssessment"),
-    ("assistant.candidates", "RecommendationDecision"),
-    ("assistant.candidates", "Sufficiency"),
-    ("assistant.candidates", "Outcome"),
-    ("assistant.answer", "Provenance"),
+#
+# The dotted path of each is read off the class rather than typed out beside
+# it. Typed out, the two drift: moving `candidates` into `assistant.retrieval`
+# left four entries pointing at a module that no longer existed, and nothing
+# failed loudly -- the allowlist simply stopped matching, which is the silent
+# half of failing closed. Derived, a module that moves takes its entry with it.
+_CHECKPOINT_TYPES = (
+    conv.SessionFact,
+    conv.FactHistory,
+    conv.FactStatus,
+    conv.ConversationState,
+    und.TurnUnderstanding,
+    und.ResolvedRequest,
+    und.Intent,
+    cand.CandidateAssessment,
+    cand.RecommendationDecision,
+    cand.Sufficiency,
+    cand.Outcome,
+    ans.Provenance,
     # The finished answer travels in the `answer` channel and is checkpointed
     # with the rest of the turn. These two were missing, and the checkpointer
     # said so on every turn -- "Blocked deserialization of assistant.answer.
     # Answer" -- while nothing failed, because until now nothing read a
     # checkpoint back. The moment the checkpointer became the source of
     # continuity that silence would have become an answer coming back as None.
-    ("assistant.answer", "Answer"),
-    ("assistant.answer", "SlotFact"),
-    ("assistant.conversation", "NewCase"),
+    ans.Answer,
+    ans.SlotFact,
+    conv.NewCase,
     # The other reducer instruction, and listed for the same reason: a node's
     # pending writes are checkpointed alongside the channel values, so a turn
     # interrupted between `resolve_state` and the reducer has one in the store.
-    ("assistant.conversation", "Denial"),
-    ("assistant.conversation", "Case"),
-    ("assistant.router", "Path_"),
-]
+    conv.Denial,
+    conv.Case,
+    Path_,
+)
+
+ALLOWED_TYPES = [(cls.__module__, cls.__name__) for cls in _CHECKPOINT_TYPES]
 
 
 def serializer() -> JsonPlusSerializer:

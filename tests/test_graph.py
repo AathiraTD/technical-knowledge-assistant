@@ -17,6 +17,7 @@ opt-in suite; this one must never need Ollama.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from assistant.retrieval import candidates as cand
 from assistant import graph as g                                    # noqa: E402
 from assistant import ollama                                        # noqa: E402
 from assistant import understanding as und                          # noqa: E402
-from assistant.answer import Provenance                             # noqa: E402
+from assistant.answer import Answer, Provenance, SlotFact           # noqa: E402
 from assistant.conversation import (                                # noqa: E402
     ConversationState, FactStatus, SessionFact, TurnInput,
 )
@@ -143,17 +144,36 @@ def test_the_hosted_tracing_client_is_inert():
 def test_the_checkpointer_will_not_rehydrate_arbitrary_classes():
     """A checkpoint is data. A deserialiser that constructs anything it is told
     to is a deserialisation bug waiting for a writable checkpoint store."""
-    allowed = dict.fromkeys(module for module, _name in g.ALLOWED_TYPES)
+    modules = {module for module, _name in g.ALLOWED_TYPES}
 
     # Only this application's own domain types. Nothing from the standard
     # library, nothing from a dependency, and no wildcard.
-    assert set(allowed) <= {"assistant.conversation", "assistant.understanding",
-                            "assistant.candidates", "assistant.answer",
-                            "assistant.router"}
-    assert ("assistant.conversation", "SessionFact") in g.ALLOWED_TYPES
-    # The two that were missing until the checkpointer started being read back.
-    assert ("assistant.answer", "Answer") in g.ALLOWED_TYPES
-    assert ("assistant.answer", "SlotFact") in g.ALLOWED_TYPES
+    assert modules
+    assert all(m == "assistant" or m.startswith("assistant.") for m in modules)
+
+
+def test_every_allowed_checkpoint_type_actually_resolves():
+    """Each entry must name a class that exists, at the path it claims.
+
+    Regression test. The allowlist used to be dotted paths typed out beside
+    the class names, and moving `candidates` into `assistant.retrieval` left
+    four entries pointing at a module that no longer existed. Nothing failed
+    loudly: an entry that matches nothing simply stops permitting anything,
+    so the checkpointer would have refused to rehydrate a candidate
+    assessment and returned None in its place. The old test asserted the
+    literal contents of the list, so it agreed with the stale strings.
+    """
+    for module, name in g.ALLOWED_TYPES:
+        resolved = getattr(importlib.import_module(module), name, None)
+        assert resolved is not None, f"{module}.{name} does not exist"
+        assert resolved.__module__ == module, (
+            f"{name} is listed under {module} but lives in {resolved.__module__}")
+
+    # The types whose absence the checkpointer reported on every turn.
+    listed = {(m, n) for m, n in g.ALLOWED_TYPES}
+    assert (Answer.__module__, "Answer") in listed
+    assert (SlotFact.__module__, "SlotFact") in listed
+    assert (SessionFact.__module__, "SessionFact") in listed
 
 
 # --------------------------------------------------------- existing routes
