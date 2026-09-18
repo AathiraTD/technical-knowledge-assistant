@@ -1460,6 +1460,26 @@ _FIELD_EVIDENCE = {
     "watertight": r"\bwatertight\b",
     "certification": r"\b(?:certification|certified)\b",
     "structural": r"\bstructural\b",
+    # `_requested_fields` can name a field this table has no rule for, and the
+    # consequence is not an error but a lie: `_field_sentences` returns nothing
+    # for an unknown key, and the row prints "the retrieved evidence does not
+    # establish this".
+    #
+    # Asked Duro's temperature range, the answer said exactly that while "Use
+    # Duro in temperatures of 5°C and rising or 30°C and falling" sat at rank 1
+    # of what had just been retrieved -- and printed that same fact one line
+    # above under `conditions`, because that key exists and its pattern already
+    # matches the word temperature. The vocabulary was present; the key was not.
+    #
+    # A false refusal is the worst failure available to a system whose
+    # credibility rests on honest refusal: indistinguishable from the real
+    # thing, and no post-generation check fires, because refusing always looks
+    # safe. Any field `_requested_fields` can emit needs an entry here.
+    "temperature": r"\b(?:temperature|degrees|frost|freezing|hot|cold)\b"
+                   r"|\d\s*(?:°|o\s*)?c\b",
+    "finish": r"\b(?:finish\w*|top\s*coats?|skim)\b",
+    "compatibility": r"\b(?:compatible|compatibility|suitable|can be used|"
+                     r"can be applied|apply over|applied over|onto)\b",
 }
 _PURCHASE = re.compile(r"\bhow many (?:bags|sacks)\b|\b(?:bags|sacks)\b.*"
                        r"\b(?:buy|need|require)\b", re.I)
@@ -1481,8 +1501,18 @@ def _requested_fields(question: str, decision: Decision) -> list[str]:
     if not fields and decision.slots.get("property_asked") in _FIELD_EVIDENCE:
         fields = [decision.slots["property_asked"]]
     for prop in decision.evidence_terms:
-        if prop not in _FIELD_EVIDENCE and re.search(
-                rf"\b{re.escape(prop.replace('_', ' '))}\b", question, re.I):
+        # Serviceable only. This used to require the opposite -- `not in
+        # _FIELD_EVIDENCE` -- which admitted exactly the fields nothing can
+        # answer and skipped the ones something can. `_field_sentences` returns
+        # nothing for a key it has no rule for, so every field added here was
+        # guaranteed to print "the retrieved evidence does not establish this",
+        # however plainly the evidence established it.
+        #
+        # Asked Duro's temperature range, that produced five such lines from a
+        # retrieval whose top passage reads "Use Duro in temperatures of 5°C and
+        # rising or 30°C and falling".
+        if (prop in _FIELD_EVIDENCE and prop not in fields and re.search(
+                rf"\b{re.escape(prop.replace('_', ' '))}\b", question, re.I)):
             fields.append(prop)
     return fields
 

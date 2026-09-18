@@ -765,7 +765,7 @@ class Router:
             return Decision(Path_.REFUSE,
                             f"the published material does not state whether "
                             f"this product suits {wall}",
-                            "4b", slots=slots, hits=hits, missing_term=wall,
+                            "4s", slots=slots, hits=hits, missing_term=wall,
                             photograph=photo)
 
         # Everything past step 4 carries the gate's own word list, so check 6
