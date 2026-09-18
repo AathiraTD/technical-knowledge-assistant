@@ -753,6 +753,16 @@ class Router:
         re.I,
     )
 
+    # The subset of `_PRODUCT_CHOICE` that asks for a choice or a judgement
+    # about a wall however the product is phrased. `should i use` and `what do
+    # i use|need` are left out because they also phrase a question about a
+    # product already chosen; see `_needs_substrate`.
+    _STRONG_PRODUCT_CHOICE = re.compile(
+        r"\b(which|what) (product|plaster|render|mortar|system)\b"
+        r"|\brecommend\b|\bsuitable\b|\bbest for\b",
+        re.I,
+    )
+
     # Whether the question is about the asker's own building. A first person, a
     # possessive, a symptom they can see, or a photograph they have taken all
     # say "this is my wall"; their absence says the question is about the range.
@@ -778,6 +788,25 @@ class Router:
         crazing or attaches a picture about a product range in the abstract.
         """
         if not self._PRODUCT_CHOICE.search(question):
+            return False
+        # Asking what thickness to apply a product at is not asking which
+        # product to use. "Should I use" is the one phrase in
+        # `_PRODUCT_CHOICE` that reads both ways -- "which plaster should I
+        # use" is a choice, "what thickness should I use" is a property of a
+        # choice already made -- and when the person has named the product and
+        # asked for a published figure, treating it as a choice asked for a
+        # substrate before it would print two numbers the datasheet states
+        # unconditionally.
+        #
+        # Deliberately not "the product is known": the strong signals stay
+        # load-bearing, so "is Ultra suitable for my wall" still asks, because
+        # suitability genuinely depends on the wall and that is the costly
+        # error decision 10 exists to prevent. What is exempted is a concrete
+        # published property of a named product, which the sheet states
+        # whatever the wall is.
+        if (slots.get("product")
+                and not self._STRONG_PRODUCT_CHOICE.search(question)
+                and self.slots.primary_properties(question)):
             return False
         return bool(
             self._ABOUT_MY_BUILDING.search(question)

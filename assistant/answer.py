@@ -1579,7 +1579,21 @@ class AnswerEngine:
         aliases = _product_aliases([*self.names.get("products", []),
                                    decision.slots.get("product", ""),
                                    *(h.document.product for h in decision.hits)])
-        products = _named_aliases(question, aliases)
+        # The products this question is *about*, which is not the same as the
+        # products it mentions. "Please don't give me figures for Solo or
+        # Duro" names two products in order to exclude them, and reading the
+        # raw sentence turned that into a three-product breakdown -- two of
+        # them printed only to say the evidence established nothing for them,
+        # which is an odd way to honour a request not to mention them.
+        #
+        # `reference_text` is the existing boundary for this: it drops
+        # non-assertion clauses and keeps everything else, so a genuine
+        # comparison ("is Solo or Duro better", "the coverage of Solo and
+        # Duro") still names both and still compares. Imported here rather
+        # than at module scope because `understanding` imports this module.
+        from .understanding import reference_text
+
+        products = _named_aliases(reference_text(question), aliases)
         resolved = decision.slots.get("product", "")
         if not products and resolved:
             products = {_without_brand(resolved.lower())}
@@ -1980,6 +1994,29 @@ class AnswerEngine:
                   missing_term=decision.missing_term,
                   top_score=decision.hits[0].score if decision.hits else 0.0)
 
+        # Router step 1 is "nothing retrieved was close enough", and for that
+        # refusal the nearest passage is not evidence of anything -- it is the
+        # least-distant row in a corpus that has nothing to say. Naming it as
+        # "the closest guidance" and quoting it is worse than saying nothing:
+        # asked who won the league, the assistant answered with the Solo
+        # primer's disclaimer, cited it as a source, and -- because `_finish`
+        # recites the slots a decision carries -- told a passing visitor it had
+        # answered for their brick wall. The third summary branch below already
+        # says the honest thing and was simply unreachable, because `hits` is
+        # populated whether or not anything cleared the threshold.
+        #
+        # Dropping the slots with the hits is deliberate: an out-of-scope
+        # question was not answered for any wall, so reciting one would be a
+        # false sentence. `photograph` survives, because "I cannot see
+        # photographs" is keyed on the slot rather than on the path and is owed
+        # to anyone who attached one (decision 8).
+        # What was nearest is still recorded, just not printed: the score is
+        # put back into `diagnostics` below so an operator reading a trace can
+        # still see how far off the corpus was.
+        nearest_score = round(decision.hits[0].score, 3) if decision.hits else 0.0
+        if decision.step == "1":
+            decision = replace(decision, slots={}, origins={}, hits=[])
+
         top = decision.hits[0] if decision.hits else None
         # "Solo Onecoat Lime Plaster datasheet, Mixing" — enough for the reader
         # to know which document was nearest without reading it first.
@@ -2035,6 +2072,7 @@ class AnswerEngine:
         answer.path = Path_.REFUSE.value
         answer.refused = True
         answer.diagnostics["refusal_reason"] = why
+        answer.diagnostics["top_score"] = nearest_score
         return answer
 
     # -- shared ------------------------------------------------------------

@@ -8,7 +8,8 @@ import pytest
 from assistant import graph, observability as obs, ollama
 from assistant import understanding as und
 from assistant.answer import Answer, Provenance
-from assistant.conversation import ConversationState, SessionFact, merge_facts
+from assistant.conversation import (
+    ConversationState, FactStatus, SessionFact, merge_facts)
 from assistant.router import PolicyGate, SlotDetector
 
 
@@ -85,6 +86,88 @@ def test_recall_reads_checkpoint_not_transcript(app, question):
     assert result["answer"].facts[0].provenance is Provenance.CARRIED
     assert all(h.current.source_turn == 1 for h in result["facts"].values())
     services.engine.answer_part.assert_not_called()
+
+
+def test_a_retraction_is_acknowledged_without_retrieving_anything(app):
+    """"Actually, my wall is not brick" is a state instruction, not a question.
+
+    It used to fall through to retrieval -- `asserted_text` empties a sentence
+    containing "not", by design, so the acknowledgement could not see it -- and
+    the person correcting their wall was answered with the nearest passage that
+    happened to mention brick. The `app` fixture fails on any model or
+    retrieval call, so this asserts the absence of both.
+    """
+    compiled, services = app
+    invoke(compiled, "My wall is brick.")
+    result = invoke(compiled, "Actually, my wall is not brick.", 2)
+
+    assert result["answer"].path == "acknowledge"
+    assert result["answer"].sources == []
+    # A denial asserts nothing: the slot becomes unknown, not known to be
+    # something else.
+    assert result["answer"].facts == []
+    assert "brick" not in result["answer"].text.lower()
+    services.engine.answer_part.assert_not_called()
+    services.retriever.search.assert_not_called()
+
+
+def test_a_retracted_substrate_is_no_longer_trusted_but_is_still_history(app):
+    compiled, _services = app
+    invoke(compiled, "My wall is brick.")
+    invoke(compiled, "Actually, my wall is not brick.", 2)
+    result = invoke(compiled, "What substrate did I say my wall was?", 3)
+
+    history = result["facts"]["substrate"]
+    # Retired, so no later turn may inherit it...
+    assert history.current.status is FactStatus.SUPERSEDED
+    assert ConversationState(facts=result["facts"]).active() == {}
+    # ...but kept, because an answer given while brick was believed still has
+    # to be explicable.
+    assert history.current.value == "brick"
+    assert [f.value for f in history.superseded] == ["brick"]
+
+
+def test_recall_after_a_retraction_does_not_speak_for_the_withdrawn_value(app):
+    """The defect: turn three still reported the value turn two took back."""
+    compiled, services = app
+    invoke(compiled, "My wall is brick.")
+    invoke(compiled, "Actually, my wall is not brick.", 2)
+    result = invoke(compiled, "What substrate did I say my wall was?", 3)
+
+    answer = result["answer"]
+    assert answer.path == "state"
+    assert "brick" not in answer.text.lower()
+    assert "You said your substrate was" not in answer.text
+    assert "not stated" in answer.text and "current chat" in answer.text
+    assert answer.facts == []
+    services.engine.answer_part.assert_not_called()
+    services.retriever.search.assert_not_called()
+
+
+@pytest.mark.parametrize("question, acknowledged", [
+    ("Actually, my wall is not brick.", True),
+    ("My wall is not brick.", True),           # a bare retraction, opener or not
+    ("My wall is not brick. What should I use?", False),
+    ("My wall is not brick. What thickness do I need?", False),
+])
+def test_only_a_bare_retraction_is_answered_by_an_acknowledgement(question, acknowledged):
+    """A correction carrying a question must still reach the answering path.
+
+    Asserted at the boundary rather than through the graph, because a turn that
+    is allowed past it goes on to call the model, which is exactly what the
+    `app` fixture forbids.
+    """
+    state = ConversationState(facts=merge_facts(
+        {}, {"substrate": SessionFact("substrate", "brick", Provenance.STATED, 1)}))
+    answer = und.state_only_answer(
+        question, SlotDetector(), REGISTRY, state, 2, gate=PolicyGate())
+
+    if acknowledged:
+        assert answer is not None and answer.path == "acknowledge"
+        assert "no longer recorded" in answer.text
+        assert answer.facts == []
+    else:
+        assert answer is None or answer.path != "acknowledge"
 
 
 @pytest.mark.parametrize("question", [

@@ -50,7 +50,7 @@ from enum import Enum
 from . import observability as obs
 from . import ollama
 from .answer import Answer, Provenance, SlotFact, _named_aliases, _product_aliases
-from .conversation import ConversationState, Denial, SessionFact
+from .conversation import ConversationState, Denial, FactStatus, SessionFact
 
 # The model is asked for one small object and nothing else, so the budget is a
 # fraction of an answer's. A reply longer than this is a malfunction, not a
@@ -329,6 +329,11 @@ def stated_product(question: str, registry) -> str:
     return ""
 
 
+_ASKS_SOMETHING = re.compile(
+    r"\?|\b(?:what|which|how|why|when|where|should|can|could|recommend|"
+    r"suitable|tell|explain|give)\b", re.I)
+
+
 def state_request_slot(question: str) -> str:
     """Recognise personal-state questions, not product selection or properties."""
     text = re.sub(r"\s+", " ", question.strip().rstrip("?.!")).lower()
@@ -376,6 +381,21 @@ def state_only_answer(question: str, detector, registry,
     if slot:
         history = state.facts.get(slot)
         fact = history.current if history else None
+        # A retracted value is history, not testimony. `merge_facts` retires a
+        # denied fact by marking `current` superseded and asserting nothing in
+        # its place -- which is why `ConversationState.active()` stops
+        # inheriting it -- but reading `current` without its status reported
+        # the withdrawn value straight back as "you said your substrate was
+        # brick", one turn after the person had said it was not. The history
+        # is deliberately still there; what changes is that recall no longer
+        # speaks for it.
+        #
+        # `SUPERSEDED` rather than "not `ACTIVE`" on purpose: `CONFLICTING` is
+        # also not active, and it has its own wording below -- a photograph
+        # disagreeing with the person is something to confirm, not something
+        # the person took back.
+        if fact is not None and fact.status is FactStatus.SUPERSEDED:
+            fact = None
         facts = []
         if fact is None or fact.provenance is Provenance.ASSUMED:
             text = f"You have not stated a {slot} in this current chat."
@@ -406,6 +426,31 @@ def state_only_answer(question: str, detector, registry,
                              for name, value in resolved.slots().items()],
                       diagnostics={"step": "product reference", "missing": ["product"],
                                    "slots": resolved.slots(),
+                                   "cached": False})
+
+    # A retraction is a state instruction, and it has to be acknowledged here
+    # or not at all. The acknowledgement below cannot see it: a sentence
+    # containing "not" is emptied by `asserted_text`, by design, so `clean`
+    # comes back blank and the turn falls through to retrieval -- which is how
+    # "actually, my wall is not brick" came to be answered with the nearest
+    # passage about external wall insulation. What this returns asserts
+    # nothing, exactly as `Denial` does: the slot becomes unknown rather than
+    # known to be something else, and the caller still persists the `Denial`
+    # through `merge_facts`, which is the only thing that retires the fact.
+    retractions = {slot: instruction
+                   for slot, instruction in facts_from(resolved, turn_index).items()
+                   if isinstance(instruction, Denial)}
+    withdrawn = [
+        slot for slot, instruction in retractions.items()
+        if (held := state.facts.get(slot)) is not None
+        and (not instruction.value or held.current.value == instruction.value)]
+    if withdrawn and not _ASKS_SOMETHING.search(question):
+        text = ("Noted for this chat: " + "; ".join(
+            f"{slot} is no longer recorded" for slot in sorted(withdrawn)) + ".")
+        return Answer(path="acknowledge", text=text, facts=[],
+                      diagnostics={"step": "conversation state",
+                                   "retracted": sorted(withdrawn),
+                                   "slots": {},
                                    "cached": False})
 
     # An acknowledgement must not swallow an accompanying technical question.
@@ -501,7 +546,19 @@ def deterministic(question: str, detector, gate=None,
         # substrate suitability was independently established, and refused a
         # question the corpus answers with citations. The gate was working; it
         # was being asked the wrong question.
-        intent = (Intent.VERIFY if _named_in(question, registry)
+        #
+        # `topic_product` rather than `_named_in` on the raw question, because
+        # a named product the sentence *excludes* is not a product the person
+        # has chosen. "I'm using Ultra ... please don't give me figures for
+        # Solo or Duro" names three, so `_named_in` found no single target,
+        # returned "" and sent a question about one stated product to the
+        # selection gate -- which asked for a substrate before it would choose
+        # anything, and so refused two figures the Ultra datasheet publishes.
+        # `topic_product` reads the same question through `reference_text`,
+        # where a non-assertion clause establishes nothing, and it keeps the
+        # comparison rule: "is Solo or Duro better" still names no target and
+        # is still a selection.
+        intent = (Intent.VERIFY if topic_product(question, registry)
                   else Intent.SELECT)
     elif "property_asked" in slots:
         intent = Intent.LOOKUP

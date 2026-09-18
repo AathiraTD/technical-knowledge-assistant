@@ -268,6 +268,46 @@ def test_step_5_does_not_fire_on_a_factual_lookup():
     assert d.path is not Path_.ASK_BACK
 
 
+def test_step_5_does_not_fire_on_a_property_of_an_already_chosen_product():
+    """"What thickness should I use" is not "which product should I use".
+
+    The phrase "should I use" reads both ways. With the product already named
+    and a published figure asked for, treating it as a choice asked for a
+    substrate before printing two numbers the datasheet states unconditionally.
+    """
+    d = Router().route(
+        "I'm using Ultra. What thickness and mixing water should I use?",
+        [SOLO], True, ("public",), {"product": "ultra"})
+    assert d.path is not Path_.ASK_BACK
+    assert d.step != "5"
+
+
+@pytest.mark.parametrize("question", [
+    "Is Ultra suitable for my wall?",
+    "Is Ultra suitable for my wall, and what thickness?",
+    "Which plaster should I use?",
+    "What product do I need for my wall?",
+])
+def test_substrate_stays_load_bearing_for_a_choice_or_a_suitability_question(question):
+    """The exemption covers a published property, not a judgement about a wall.
+
+    Asserted on the predicate rather than through `route`, because step 4 fires
+    first on some of these and step 5 is then never reached -- which is correct
+    precedence, and would hide what this is checking.
+    """
+    assert Router()._needs_substrate(question, {"product": "ultra"}) is True
+
+
+def test_step_5_still_fires_when_a_choice_is_asked_with_a_product_in_memory():
+    """A carried product must not exempt an actual request to choose."""
+    for question in ("Which plaster should I use?",
+                     "What product do I need for my wall?",
+                     "Can you recommend a render for my wall?"):
+        d = Router().route(question, [OTHER], True, ("public",),
+                           {"product": "ultra"})
+        assert d.path is Path_.ASK_BACK and d.step == "5", question
+
+
 def test_step_6_a_quantity_question_extracts_and_refuses_the_sum():
     """The arithmetic depends on background and thickness, so the system prints, not multiplies."""
     d = route("How many bags do I need for 20 m2 of coverage?", [COVERAGE])

@@ -73,9 +73,13 @@ def page_html(content=""):
 
 @pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
 def test_server_keeps_internal_path_out_of_prose(path):
+    # The routing view is the operator's, asked for with `?v=1`; the panel it
+    # lives in is not rendered for a customer at all. The property this test
+    # has always guarded is unchanged: wherever the label appears, it is never
+    # in the prose.
     answer = Answer(text="Safe published words [1].", path=path,
                     refused=path == "refuse", sources=[SOURCE])
-    soup = BeautifulSoup(ui.render_html(Reply("q", [("q", answer)]), False, REFERENCE),
+    soup = BeautifulSoup(ui.render_html(Reply("q", [("q", answer)]), True, REFERENCE),
                          "html.parser")
     assert soup.select_one(".answer-text").get_text() == answer.text
     assert not soup.select(".answer-text .tag")
@@ -85,9 +89,38 @@ def test_server_keeps_internal_path_out_of_prose(path):
     assert soup.select_one(".answer-response")["data-state"] == "complete"
 
 
+@pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
+def test_customer_view_renders_no_diagnostics_disclosure(path):
+    """The normal page shows the answer and its sources, not the routing view."""
+    answer = Answer(text="Safe published words [1].", path=path,
+                    refused=path == "refuse", sources=[SOURCE],
+                    diagnostics={"step": "8", "top_score": 0.62,
+                                 "reason": "several passages bear on the question"})
+    html = ui.render_html(Reply("q", [("q", answer)]), False, REFERENCE)
+    soup = BeautifulSoup(html, "html.parser")
+
+    assert "Why this answer?" not in html
+    assert not soup.select(".diagnostics-disclosure")
+    assert not soup.select(".diagnostics-list")
+    # Nothing a person reads: the internal view is absent rather than folded
+    # away behind a button. The correlation id stays on `data-correlation-id`,
+    # where the page's own script reads it and no reader sees it.
+    visible = soup.get_text()
+    assert path not in visible
+    assert REFERENCE not in visible
+    assert "several passages bear on the question" not in visible
+    assert "0.62" not in visible
+
+    # What the customer is owed is still there.
+    assert soup.select_one(".answer-text").get_text() == answer.text
+    assert soup.select_one(".source-link")["href"] == SOURCE["url"]
+
+
 def test_server_preserves_all_t22_parts_and_refusal_evidence():
     reply = multipart_reply()
-    soup = BeautifulSoup(ui.render_html(reply, False, REFERENCE), "html.parser")
+    # Verbose: the failed-check evidence asserted below lives in the operator's
+    # diagnostics panel, which a customer-facing render no longer draws.
+    soup = BeautifulSoup(ui.render_html(reply, True, REFERENCE), "html.parser")
     assert [p.get_text() for p in soup.select(".answer-text")] == [
         answer.text for _, answer in reply.parts]
     assert [p["data-part-index"] for p in soup.select("[data-part-index]")] == ["0", "1"]
@@ -119,7 +152,10 @@ def test_server_keeps_vision_panels_outside_diagnostics(perception):
 
 @pytest.mark.parametrize("reference", ["x" * 10000, '<img src=x onerror="alert(1)">', None])
 def test_server_drops_invalid_reference_without_echoing_it(reference):
-    soup = BeautifulSoup(ui.render_html(multipart_reply(), False, reference), "html.parser")
+    # Verbose, because the reference is only ever printed in the diagnostics
+    # panel: rendering without it would assert the absence of a line in a
+    # section that does not exist, which would pass however broken this got.
+    soup = BeautifulSoup(ui.render_html(multipart_reply(), True, reference), "html.parser")
     assert soup.select_one(".answer-response")["data-correlation-id"] == ""
     assert not soup.select("img")
     assert "reference" not in soup.select_one(".diagnostics-list").get_text()
@@ -162,8 +198,25 @@ def page(browser):
 
 
 @pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
+def test_client_renders_no_diagnostics_for_a_customer(page, path):
+    """The client renderer draws no routing panel unless `?v=1` asked for one."""
+    answer = Answer("Published words [1].", path, sources=[SOURCE], refused=path == "refuse")
+    page.evaluate("handleResponse", payload(Reply("q", [("q", answer)])))
+    assert page.locator(".answer-text").inner_text() == answer.text
+    assert page.locator(".diagnostics-disclosure").count() == 0
+    assert page.locator(".tag").count() == 0
+    assert path not in page.locator(".message-bubble").inner_text()
+    # The answer and its sources are untouched by the gate.
+    page.locator(".sources-disclosure .disclosure-btn").click()
+    assert page.locator(".source-link").is_visible()
+
+
+@pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
 def test_client_path_is_hidden_until_diagnostics_open(page, path):
     answer = Answer("Published words [1].", path, sources=[SOURCE], refused=path == "refuse")
+    # The operator's view. Set here rather than loaded from a query string
+    # because `set_content` gives the page no URL to carry one.
+    page.evaluate("DIAGNOSTICS_VISIBLE = true")
     page.evaluate("handleResponse", payload(Reply("q", [("q", answer)])))
     assert page.locator(".answer-text").inner_text() == answer.text
     assert page.locator(".answer-text .tag").count() == 0

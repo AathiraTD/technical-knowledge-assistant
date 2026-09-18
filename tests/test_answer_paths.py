@@ -170,6 +170,54 @@ def test_a_refusal_with_nothing_retrieved_still_hands_over():
     assert a.sources == []
 
 
+def test_an_out_of_scope_question_is_not_handed_the_nearest_passage():
+    """Step 1 means nothing cleared the threshold, so there is no "closest guidance".
+
+    Asked who won the league, the assistant used to name the Solo primer's
+    disclaimer as the closest guidance, quote it, cite it as a source, and --
+    because a decision's slots are recited by `_finish` -- tell the asker it
+    had answered for their brick wall. None of that is evidence of anything;
+    the nearest row in a corpus with nothing to say is not guidance.
+    """
+    a = engine().refuse(
+        decision(Path_.REFUSE, [MIXING], step="1",
+                 slots={"substrate": "brick", "location": "internal"}),
+        "nothing retrieved above the threshold")
+
+    assert a.refused is True
+    # No nearest passage, under any of the three names it went by.
+    assert "closest guidance" not in a.text
+    assert "5 and 6 litres" not in a.text
+    assert "Source passage" not in a.text
+    assert a.disclosure == ""
+    assert a.sources == []
+    # No wall the asker never brought up.
+    assert "brick" not in a.text.lower()
+    assert "Answered for" not in a.text
+    assert a.assumptions == []
+    # Still a refusal that hands over, and still legible in a trace.
+    assert "could not find this in Lime Green's published material" in a.text
+    assert "0800 538 5746" in a.text
+    assert a.diagnostics["top_score"] == round(MIXING.score, 3)
+
+
+def test_an_out_of_scope_refusal_still_says_it_cannot_see_a_photograph():
+    """Decision 8: that line is keyed on the slot, not on the path taken."""
+    a = engine().refuse(
+        decision(Path_.REFUSE, [MIXING], step="1", photograph=True), "off topic")
+    assert PHOTO_LINE in a.text
+
+
+def test_a_near_miss_refusal_still_names_the_closest_guidance():
+    """The step-1 exemption must not reach step 4, where the passage is the point."""
+    a = engine().refuse(
+        decision(Path_.REFUSE, [MIXING], step="4", missing_term="pot life"),
+        "the asked-for term was in no passage")
+    assert "closest guidance" in a.text
+    assert "5 and 6 litres" in a.text
+    assert a.sources
+
+
 # ---------------------------------------------------------- deferral and diagnosis
 
 

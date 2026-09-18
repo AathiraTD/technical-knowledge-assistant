@@ -248,6 +248,46 @@ def test_comparison_keeps_fields_and_unknowns_separate(engine):
     assert "Solo is suitable for lath backgrounds.” [3]" in solo_block
 
 
+def test_a_product_named_only_to_exclude_it_is_not_reported_on(engine):
+    """"Don't give me figures for Solo or Duro" is not a request to cover them.
+
+    Reading the raw sentence turned the exclusion into a three-product
+    breakdown, two of them printed only to say the evidence established nothing
+    for them -- an odd way to honour a request not to mention them.
+    """
+    hits = [
+        passage("Ultra should be applied in a uniform thickness of between 10 "
+                "and 30mm.", section="How to Apply"),
+        passage("Mix with approximately 4 to 4.5 litres of clean water per bag.",
+                section="How to Mix"),
+    ]
+    answer = engine.factual(
+        decision(hits),
+        "I'm using Lime Green Ultra. What thickness and mixing water should I "
+        "use? Please don't give me figures for Solo or Duro.")
+
+    assert answer and not answer.refused
+    # The Ultra figures the datasheet publishes.
+    assert "between 10 and 30mm" in answer.text
+    assert "4 to 4.5 litres of clean water per bag" in answer.text
+    # And no per-product block for a product named only to rule it out.
+    assert "ultra:" in answer.text
+    assert "solo:" not in answer.text and "duro:" not in answer.text
+    assert "does not establish this for solo" not in answer.text
+    assert "does not establish this for duro" not in answer.text
+
+
+def test_an_exclusion_clause_does_not_disable_a_genuine_comparison(engine):
+    """The narrowing must not cost the comparison it sits next to."""
+    hits = [
+        passage("Apply Ultra at a thickness of 12 to 28mm."),
+        passage("Solo is suitable for lath backgrounds.", "Solo", "Description"),
+    ]
+    answer = engine.factual(decision(hits),
+                            "Compare Ultra and Solo for suitable backgrounds and thickness.")
+    assert answer and "solo:" in answer.text and "ultra:" in answer.text
+
+
 @pytest.mark.parametrize("question", [
     "I have 42 square metres at 20mm. Exactly how many bags of Ultra do I need?",
     "I have 15 square metres at 10mm. How many bags should I buy?",

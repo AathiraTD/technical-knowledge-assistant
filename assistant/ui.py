@@ -431,6 +431,15 @@ PAGE = """<!doctype html>
 <script>
 let conversationActive = false;
 
+// The operator's routing view, off for a customer. Read from this page's own
+// query string, which is where the server reads it from too, so the two
+// renderers cannot disagree about whether this is a diagnostic session.
+//
+// `let` rather than `const` so it can be switched on from a console, and by a
+// browser test that has no URL to carry a query string.
+let DIAGNOSTICS_VISIBLE =
+  new URLSearchParams(window.location.search).get('v') === '1';
+
 function newChat() {{
   // The server ends the session, not this. The cookie is HttpOnly, so a
   // `document.cookie` write here is silently discarded by the browser.
@@ -734,9 +743,15 @@ function renderAnswer(answer, uploadNotes, container, index = 0) {{
     bubble.appendChild(sourcesDiv);
   }}
 
-  // Add diagnostics disclosure
-  if (answer.path || answer.diagnostics || answer.failed_checks ||
-      container.dataset.correlationId) {{
+  // Add diagnostics disclosure. Gated on the same `?v=1` the server reads,
+  // taken from the page's own URL so the client and the server agree without
+  // a second switch to keep in step: a customer sees the answer and its
+  // sources, an operator who asked for the routing view sees it on every turn
+  // of the conversation rather than only the first. The payload still carries
+  // `diagnostics`; this decides whether the page draws them.
+  if (DIAGNOSTICS_VISIBLE &&
+      (answer.path || answer.diagnostics || answer.failed_checks ||
+       container.dataset.correlationId)) {{
     const diagDiv = document.createElement('div');
     diagDiv.className = 'diagnostics-disclosure';
     const btn = document.createElement('button');
@@ -925,12 +940,13 @@ def render_html(reply, verbose: bool, correlation_id: str = "") -> str:
               f' data-correlation-id="{reference}">']
     blocks.append(render_perception(reply.parts[0][1].diagnostics.get("perception")))
     for index, (_part, answer) in enumerate(reply.parts):
-        blocks.append(_render_answer_html(answer, index, reference))
+        blocks.append(_render_answer_html(answer, index, reference, verbose))
     blocks.append('</div>')
     return "".join(blocks)
 
 
-def _render_answer_html(answer, index: int, reference: str) -> str:
+def _render_answer_html(answer, index: int, reference: str,
+                        verbose: bool = False) -> str:
 
     blocks = []
 
@@ -964,8 +980,16 @@ def _render_answer_html(answer, index: int, reference: str) -> str:
         blocks.append('</div>')
         blocks.append('</div>')
 
-    # Diagnostics disclosure section
-    if answer.path or answer.diagnostics or answer.failed_checks or reference:
+    # Diagnostics disclosure section. Off unless this request asked for it
+    # with `?v=1`, which is the same switch the CLI's `-v` throws and the same
+    # one the server already parses. A customer is shown the answer, its
+    # sources and the provenance sentences; the route, the step, the score and
+    # the reference are an operator's view of the same turn and are not
+    # explanation a person asked for. Nothing is recomputed or discarded --
+    # `answer.diagnostics` is untouched, the JSON branch still returns it, and
+    # the structured log still records it.
+    if verbose and (answer.path or answer.diagnostics
+                    or answer.failed_checks or reference):
         blocks.append('<div class="diagnostics-disclosure">')
         blocks.append('<button class="disclosure-btn" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\');">Why this answer?</button>')
         blocks.append('<div class="diagnostics-list">')
