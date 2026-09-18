@@ -119,9 +119,11 @@ class Provenance(Enum):
 
     ``STATED``   the caller's own words, in the question being answered.
     ``CARRIED``  the caller's own words, in an earlier turn of the same
-                 conversation — `assistant/turn/session.py` holds exactly these three
-                 slots forward. Still stated, just not in this sentence, so it
-                 is printed as something they told us rather than as a guess.
+                 conversation — `assistant/turn/session.py` carries exactly the
+                 slots in its `CARRIED_SLOTS`, which today are product,
+                 substrate, location and exposure. Still stated, just not in
+                 this sentence, so it is printed as something they told us
+                 rather than as a guess.
     ``OBSERVED`` read off a photograph attached to this turn. Not stated, not
                  assumed, and the distinction is the whole reason this member
                  exists — see below.
@@ -362,8 +364,8 @@ def _mentions_coverage(text: str) -> bool:
 #
 # So the correspondence is computed here, deterministically, from the same
 # vocabulary the relevance gate uses, and the model is told it. This is a
-# generation control and not a safety boundary: checks 1 to 6 are unchanged and
-# remain the enforcement. What it removes is the *opportunity* to misbind,
+# generation control and not a safety boundary: every check below is unchanged
+# and remains the enforcement. What it removes is the *opportunity* to misbind,
 # which is the same bargain `recommend` already makes by filtering passages to
 # the approved products before generation.
 
@@ -1730,7 +1732,7 @@ class AnswerEngine:
         if decision.sum_refused:
             # Say what was actually printed. Claiming to have shown coverage
             # when the retrieved evidence does not contain any is the kind of
-            # unsupported sentence the six checks exist to stop, and it arrived
+            # unsupported sentence the eight checks exist to stop, and it arrived
             # here by a different door — written by code, so never checked.
             if _mentions_coverage(top.chunk.content):
                 body += ["", "I have printed the published coverage and pack size rather "
@@ -1853,7 +1855,7 @@ class AnswerEngine:
         terms = list(getattr(decision, "asked_terms", None) or [])
         if not terms and hasattr(self.retriever, "slots"):
             terms = self.retriever.slots.terms_for("property_asked", asked)
-        # A span around the checks and not inside them. The six checks are a
+        # A span around the checks and not inside them. The eight checks are a
         # safety boundary and this slice observes them rather than touching
         # them: `run_checks` is called exactly as before and decides exactly
         # what it decided before. What the span adds is how long they cost and
@@ -2131,7 +2133,7 @@ class AnswerEngine:
         would catch that attribution afterwards; removing the opportunity is
         better than catching the attempt.
 
-        And the answer is produced by `compose`, so the **six checks run
+        And the answer is produced by `compose`, so the **eight checks run
         unchanged**. A recommendation is not a privileged kind of answer that
         skips them. It is an ordinary composed answer whose candidate set was
         settled first. Containment -- that no product outside the approved set

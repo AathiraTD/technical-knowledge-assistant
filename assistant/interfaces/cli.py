@@ -43,10 +43,58 @@ Type a question, or 'quit'. Add -v for the routing diagnostics."""
 
 
 def _open(args) -> EmbeddedRepository:
+    """The store this session will read, chosen by the factory and not here.
+
+    One line, and it stays a named function rather than being inlined because
+    it is the seam the tests replace. Which backend opens is decided entirely
+    by `assistant/knowledge/store/factory.py` from `ASSISTANT_POSTGRES_DSN`; no
+    interface picks a store for itself, which is what keeps the CLI and the web
+    page answering out of the same index by construction.
+
+    Not thread-safe, deliberately — a session asks one question at a time, and
+    the serialising wrapper the web server needs would cost a lock acquisition
+    per call here for nothing. See the `thread_safe` note in the factory.
+    """
     return open_repository(args.db)
 
 
 def main(argv: list[str] | None = None) -> int:
+    """One question and out, or a session — the same code path either way.
+
+    `-q` answers once and returns its exit code; with no `-q` the same
+    arguments open a prompt loop. The two share everything below `_ask_once`,
+    so the transcript the evaluation harness captures and the session an
+    assessor types into cannot diverge in how they route, retrieve or check.
+
+    Three things this function decides, in order, and each of them is a
+    deliberate call rather than a default.
+
+    **Where logging goes.** `--log` configures observability onto stderr and
+    nothing ever writes it to stdout, because stdout is the artefact: the
+    harness parses it and the submission quotes it, so a log line interleaved
+    with an answer is a corrupted piece of evidence rather than noise.
+
+    **What happens when the store and the engine disagree.** `Assistant`
+    construction is where an index built by a different embedding model, or a
+    missing Ollama, is detected — the engine refuses to query a snapshot it
+    cannot honestly query. The store is closed before returning 1. Process exit
+    would release it anyway; the reason to be explicit is that the operator's
+    next command after an index mismatch is a rebuild into this very file, and
+    an open handle is what would make that fail too, on Windows with an error
+    naming neither cause.
+
+    **What the audience flag means.** It is split into a set and passed down,
+    and it is asserted rather than authenticated — stated in the banner instead
+    of hidden, because the honest description of this surface is that it trusts
+    whoever can run it. Production resolves the audience from a signed-in
+    session; see the `identity` container in `docs/architecture.md`. The filter
+    itself is real either way: it is applied inside retrieval, in code, before
+    ranking, and no flag reaches a prompt.
+
+    The interactive loop accepts a trailing ` -v` on any question so diagnostics
+    can be turned on for one answer without restarting, and treats EOF or
+    Ctrl-C as a clean exit rather than a traceback.
+    """
     use_utf8()
     parser = argparse.ArgumentParser(
         prog="assistant.interfaces.cli", description="Ask the Lime Green technical assistant.")
@@ -126,6 +174,25 @@ def main(argv: list[str] | None = None) -> int:
 
 def _ask_once(assistant, question: str, audiences, verbose: bool,
               images=None) -> int:
+    """One question, printed — the whole of what this interface contributes.
+
+    Everything that decides the answer happens elsewhere. This builds a
+    `TurnInput`, hands it to the graph, and renders what comes back; there is
+    no routing, no filtering and no policy here, which is the property the web
+    page relies on when it claims to be a view over the same library.
+
+    The session id is the process id, and that is an accurate description of
+    the lifetime rather than a placeholder: each invocation is a new process,
+    so there is nothing for the checkpointer to continue. The turn still goes
+    through the graph, because what the graph provides is not only memory —
+    structured understanding, the case boundary, the SELECT flow and the
+    evidence gate all live in it, and a command-line question must not be
+    answered by a shorter pipeline than a browser one.
+
+    An unreachable model is reported to stderr and returns 1, leaving stdout
+    holding only answers. Nothing else is caught: a failure inside the engine
+    is a defect to see, not a refusal to print.
+    """
     try:
         # Through the graph, like every other surface. The CLI is still
         # single-turn -- each invocation is a new process, so there is nothing

@@ -7,7 +7,7 @@ to stop, not against its implementation, so the assertions are mostly about
 **which document supported which claim** rather than about what the prose says.
 
 That distinction is the point of the file. An answer can name Ultra, cite a
-passage, pass all six checks and still be wrong, if the figure it cited was
+passage, pass all eight checks and still be wrong, if the figure it cited was
 published for Warmshell. `answer_contains: ["Ultra"]` cannot tell the
 difference; `assessment.evidence["thickness"]` can.
 

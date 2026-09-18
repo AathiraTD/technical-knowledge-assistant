@@ -231,7 +231,7 @@ def test_an_instruction_inside_a_passage_is_quoted_and_not_obeyed(tmp_path,
     every check passed.
 
     That is worth stating plainly rather than restoring the old assertion: **the
-    six checks cannot detect poisoned corpus content, and never could.** They
+    eight checks cannot detect poisoned corpus content, and never could.** They
     verify that an answer is faithful to the passage it cites. If the passage
     itself is false, a faithful answer is a false answer, and the checks are
     working exactly as designed.

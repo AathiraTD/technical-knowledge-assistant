@@ -237,7 +237,7 @@ def quoting(prompt: str, **_kwargs) -> tuple[str, float]:
     """A model that does the one thing this system wants: quote and cite.
 
     It reads the passages out of the prompt it was given and returns the first
-    sentence of each with the marker it arrived under, so the six checks pass
+    sentence of each with the marker it arrived under, so the eight checks pass
     and the Compose path actually prints. Hard-coding an answer instead would
     pin the test to whichever order retrieval happened to return.
     """

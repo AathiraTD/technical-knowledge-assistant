@@ -1,4 +1,46 @@
-"""Source freshness, immutable provenance, and isolated crawler behavior."""
+"""The crawler's contract: never lose an original, never publish half a run.
+
+Everything the assistant can ever cite enters here, which makes this the one
+stage whose failures are not recoverable by anything downstream. A datasheet
+overwritten by a 503 page is gone; a release published from a partly failed
+crawl is a corpus nobody can describe. So the tests are organised around the
+three promises `assistant/indexing/crawl.py` makes rather than around its
+functions.
+
+**A failure never touches what is already held.** `load_or_fetch` returns the
+status rather than raising, and every failing-status test asserts the cached
+bytes afterwards — 404, 410, 429, 500 and 503 all leave the previous source
+exactly as it was. The refresh lifecycle test takes this furthest: it captures
+`crawl-current.json`, the ledger and the crawl log as **bytes** before a run
+that fails, and compares them byte for byte afterwards, because "the previous
+release is still there" is a stronger statement than "a release is still
+there".
+
+**Originals are immutable and content-addressed.** `archive_source` writes
+under `versions/` keyed by content, so archiving the same bytes twice is the
+same path and archiving different bytes cannot overwrite the first. Decision 19
+turns on that: the mutable cache file is a convenience, the archive is the
+evidence. A corrupted archive is detected rather than silently re-served, and a
+document withdrawn from the site (410) is deactivated with its original still
+readable — the record that it was once published survives its removal.
+
+**The default is offline.** The corpus ships, so a clean clone must index
+without a network, and `test_default_cache_reuse_never_contacts_network`
+installs a transport that fails the test if it is called at all. Freshness is
+opt-in through `--refresh`, and then it is conditional: `If-None-Match` and
+`If-Modified-Since` are asserted on the outgoing request, and a `304` reuses
+the body already on disk instead of re-downloading it.
+
+`reconcile` carries the version semantics — `supersedes`, retained history,
+and the distinction that matters most: identical content updates the HTTP
+validators and the active flag **without** creating a version, so unchanged
+documents cost nothing downstream.
+
+Every response in this file comes from `httpx.MockTransport` and every path
+from `tmp_path`; the real site is never contacted and the shipped cache is
+never touched. What is not tested here is extraction, chunking or anything
+about answers.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +57,7 @@ HTTP_CLIENT = httpx.Client
 
 @pytest.fixture
 def isolated_cache(tmp_path, monkeypatch):
+    """Redirect the cache, ledger and root at a temporary tree, and make delays free."""
     monkeypatch.setattr(crawl, "ROOT", tmp_path)
     monkeypatch.setattr(crawl, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(crawl, "LEDGER", tmp_path / "cache" / "versions.json")
@@ -24,6 +67,7 @@ def isolated_cache(tmp_path, monkeypatch):
 
 @pytest.fixture
 def config():
+    """A miniature `sources.json`: one site, the include and exclude rules, link-text classes."""
     return {
         "site": "https://example.test", "sitemap": "https://example.test/sitemap.xml",
         "user_agent": "test-crawler", "timeout_seconds": 1, "delay_seconds": 0,
@@ -42,6 +86,7 @@ def config():
     ("/other", "commercial"),
 ])
 def test_page_classification(path, expected, config):
+    """URL prefix decides the document type, and anything unmatched is commercial."""
     assert crawl.classify_page(path, config) == expected
 
 
@@ -52,6 +97,13 @@ def test_page_classification(path, expected, config):
     ("/products/good", (True, "")), ("/other", (False, "outside the corpus boundary")),
 ])
 def test_corpus_boundaries(path, expected, config):
+    """Decision 1's boundary as a rule: what is in, what is out, and the reason recorded for it.
+
+    An exclusion with a configured reason keeps that reason; one excluded by a
+    prefix alone falls back to a generic phrase; anything outside the include
+    prefixes is outside the corpus boundary. All three are quotable when
+    someone asks why a document is missing.
+    """
     assert crawl.wanted(path, config) == expected
 
 
@@ -60,10 +112,17 @@ def test_corpus_boundaries(path, expected, config):
     ("Safety datasheet", None), ("Download brochure", None),
 ])
 def test_link_text_controls_document_classification(text, expected, config):
+    """Datasheets are identified by link text, case- and whitespace-insensitively.
+
+    The site's filenames are inconsistent and its link text varies, so the
+    classification reads the words a human wrote — and "Safety datasheet"
+    contains "datasheet" and must still be excluded.
+    """
     assert crawl.document_kind(text, config) == expected
 
 
 def test_cache_paths_and_hashes(isolated_cache):
+    """Cache paths are derived from the URL safely, and the hash is over bytes not text."""
     assert crawl.cache_path("https://example.test/") == isolated_cache / "pages/index.html"
     assert crawl.cache_path("https://example.test/products/a%20b") == isolated_cache / "pages/products-a-b.html"
     assert crawl.cache_path("https://example.test/docs/A%20B.PDF") == isolated_cache / "documents/A-B.PDF"
@@ -72,6 +131,7 @@ def test_cache_paths_and_hashes(isolated_cache):
 
 
 def test_config_and_ledger_reading(isolated_cache, tmp_path, monkeypatch, config):
+    """Configuration loads from disk, and an absent ledger reads as empty rather than failing."""
     cfg_path = tmp_path / "sources.json"
     cfg_path.write_text(json.dumps(config), encoding="utf-8")
     monkeypatch.setattr(crawl, "CONFIG", cfg_path)
@@ -84,6 +144,11 @@ def test_config_and_ledger_reading(isolated_cache, tmp_path, monkeypatch, config
 
 @pytest.mark.parametrize("binary", [False, True])
 def test_default_cache_reuse_never_contacts_network(tmp_path, binary):
+    """Without `--refresh`, a cached source is reused and the network is not touched.
+
+    The transport fails the test if it is called, so this asserts the absence
+    of a request rather than the presence of the right bytes.
+    """
     dest = tmp_path / "source"
     dest.write_bytes(b"original")
     def refuse(request):
@@ -96,6 +161,7 @@ def test_default_cache_reuse_never_contacts_network(tmp_path, binary):
 
 @pytest.mark.parametrize("binary", [False, True])
 def test_initial_fetch_returns_content_and_http_validators(tmp_path, binary):
+    """A first fetch returns the body and keeps `ETag` and `Last-Modified` for next time."""
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(
         200, content=b"fresh", headers={"ETag": '"v1"', "Last-Modified": "yesterday"},
     ))) as client:
@@ -105,6 +171,7 @@ def test_initial_fetch_returns_content_and_http_validators(tmp_path, binary):
 
 
 def test_empty_cache_file_is_refetched(tmp_path):
+    """A zero-length cache file is treated as absent, not as a document with no content."""
     dest = tmp_path / "empty"
     dest.touch()
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, text="fresh"))) as client:
@@ -113,6 +180,11 @@ def test_empty_cache_file_is_refetched(tmp_path):
 
 @pytest.mark.parametrize("status", [404, 410, 429, 500, 503])
 def test_failed_fetch_reports_status_without_overwriting_cache(tmp_path, status):
+    """Missing, gone, throttled and both server errors are reported, and nothing is written.
+
+    The status is returned rather than raised because the run has to
+    distinguish a withdrawal from a transient fault, and both from a success.
+    """
     dest = tmp_path / "missing"
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(status))) as client:
         assert crawl.load_or_fetch(client, "https://example.test/a", dest, 0)[:3] == (None, False, status)
@@ -121,6 +193,7 @@ def test_failed_fetch_reports_status_without_overwriting_cache(tmp_path, status)
 
 @pytest.mark.parametrize("binary", [False, True])
 def test_refresh_uses_conditional_get_and_reuses_304_body(tmp_path, binary):
+    """A refresh sends both validators, and a `304` serves the body already on disk."""
     dest = tmp_path / "source"
     dest.write_bytes(b"original")
     prior = {"etag": '"v1"', "last_modified": "Mon, 01 Jun 2026 00:00:00 GMT"}
@@ -138,6 +211,7 @@ def test_refresh_uses_conditional_get_and_reuses_304_body(tmp_path, binary):
 
 
 def test_refresh_discovers_changed_content(tmp_path):
+    """A `200` on refresh returns the new body and the new validator."""
     dest = tmp_path / "source"
     dest.write_text("original", encoding="utf-8")
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(
@@ -149,6 +223,7 @@ def test_refresh_discovers_changed_content(tmp_path):
 
 
 def test_transient_refresh_failure_preserves_previous_source(tmp_path):
+    """A 503 during refresh leaves the previously fetched source untouched on disk."""
     dest = tmp_path / "source"
     dest.write_text("original", encoding="utf-8")
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:
@@ -158,6 +233,11 @@ def test_transient_refresh_failure_preserves_previous_source(tmp_path):
 
 
 def test_version_reconciliation_retains_every_immutable_original(isolated_cache):
+    """Each change creates a version, links what it supersedes, and leaves the old bytes readable.
+
+    History is flattened deliberately: the entries inside `history` carry no
+    nested history of their own, so the ledger does not grow quadratically.
+    """
     ledger = {}
     url = "https://example.test/products/a"
     first = crawl.reconcile(ledger, url, "first", {"etag": '"v1"'})
@@ -175,6 +255,12 @@ def test_version_reconciliation_retains_every_immutable_original(isolated_cache)
 
 
 def test_unchanged_source_updates_validators_without_creating_version(isolated_cache):
+    """Identical content refreshes the validators and reactivates, without a new version.
+
+    This is the behaviour that makes an unchanged crawl cheap. `first_seen_at`
+    and `fetched_at` must not move either, or every run would look like a
+    change to anything reading the ledger.
+    """
     ledger = {}
     url = "https://example.test/products/a"
     first = crawl.reconcile(ledger, url, "same", {"etag": '"v1"'})
@@ -194,6 +280,11 @@ def test_unchanged_source_updates_validators_without_creating_version(isolated_c
     ("https://example.test/docs/A.PDF", b"%PDF-original", ".pdf"),
 ])
 def test_archive_is_content_addressed_and_repeatable(isolated_cache, url, content, suffix):
+    """Archiving the same bytes twice is one file; different bytes never overwrite it.
+
+    The extension is preserved so an archived original is still openable, and
+    a different URL with the same content is a different archive entry.
+    """
     first = crawl.archive_source(url, content)
     assert first == crawl.archive_source(url, content)
     assert first.is_relative_to(isolated_cache / "versions") and first.suffix == suffix
@@ -204,6 +295,7 @@ def test_archive_is_content_addressed_and_repeatable(isolated_cache, url, conten
 
 
 def test_corrupted_archive_is_rejected(isolated_cache):
+    """An archived original whose bytes no longer match its address is refused, not re-served."""
     path = crawl.archive_source('https://example.test/a', b'original')
     path.write_bytes(b'corrupt')
     with pytest.raises(ValueError, match='corrupt'):
@@ -211,6 +303,7 @@ def test_corrupted_archive_is_rejected(isolated_cache):
 
 
 def test_revalidation_with_only_last_modified(isolated_cache):
+    """With no stored `ETag`, only `If-Modified-Since` is sent — no empty validator header."""
     path = isolated_cache / 'page.html'
     path.parent.mkdir(parents=True)
     path.write_text('old')
@@ -224,6 +317,11 @@ def test_revalidation_with_only_last_modified(isolated_cache):
 
 
 def test_legacy_source_archive_survives_confirmed_deletion(isolated_cache, monkeypatch, config):
+    """A withdrawn document is deactivated and its original stays readable.
+
+    Deletion would also destroy the record that it was ever published, and an
+    answer given while it was live still has to be explicable.
+    """
     isolated_cache.mkdir(parents=True)
     url = 'https://example.test/products/a'
     path = crawl.cache_path(url)
@@ -241,6 +339,7 @@ def test_legacy_source_archive_survives_confirmed_deletion(isolated_cache, monke
 
 
 def test_malformed_discovery_does_not_publish(isolated_cache, monkeypatch, config):
+    """An empty sitemap fails the run rather than publishing a release of nothing."""
     with pytest.raises(ValueError, match='sitemap'):
         run_crawler(monkeypatch, config, {config['sitemap']: httpx.Response(200, text='<urlset/>')})
     assert not (isolated_cache / 'crawl-current.json').exists()
@@ -270,6 +369,12 @@ def run_crawler(monkeypatch, config, responses, *, robots_failure=False, refresh
 
 
 def test_main_records_pages_datasheets_guides_and_exclusions(isolated_cache, monkeypatch, config):
+    """One full run: classified counts, duplicate links collapsed, and every skip explained.
+
+    The page deliberately links the same datasheet twice under two spellings,
+    a safety sheet that must be excluded, an empty link, and a system guide
+    that is included by URL rather than by link text.
+    """
     html = '''<html><title>Product A</title><a href="/other">Other</a>
       <a href="/docs/data.pdf">Technical datasheet</a><a href="/docs/data.pdf">Datasheet</a>
       <a href="/docs/safety.pdf">Safety datasheet</a><a href="/docs/safety.pdf">Safety</a>
@@ -292,6 +397,7 @@ def test_main_records_pages_datasheets_guides_and_exclusions(isolated_cache, mon
 
 
 def test_main_uses_cached_page_and_document(isolated_cache, monkeypatch, config):
+    """A run over an already-cached page and document still produces a complete ledger."""
     (isolated_cache / "pages").mkdir(parents=True)
     (isolated_cache / "documents").mkdir()
     crawl.cache_path("https://example.test/products/a").write_text("<title>Cached</title>", encoding="utf-8")
@@ -303,6 +409,12 @@ def test_main_uses_cached_page_and_document(isolated_cache, monkeypatch, config)
 
 
 def test_main_reports_fetch_failures_without_publishing_success(isolated_cache, monkeypatch, config):
+    """A run where everything failed exits non-zero, writes a failure report, and publishes nothing.
+
+    Neither `crawl-log.json` nor the ledger is written, so nothing downstream
+    can mistake the failure for a crawl that found an empty site. An
+    unreachable `robots.txt` is recorded as a skip reason rather than ignored.
+    """
     config["system_guides"]["include_urls"] = ["/docs/failed.pdf", "/docs/error.pdf", "/docs/blocked.pdf"]
     responses = {
         config["sitemap"]: httpx.Response(200, text="""<loc>https://example.test/products/failed</loc>
@@ -321,6 +433,14 @@ def test_main_reports_fetch_failures_without_publishing_success(isolated_cache, 
 
 
 def test_complete_refresh_lifecycle_preserves_previous_release_on_failure(isolated_cache, monkeypatch, config):
+    """Four refreshes end to end: unchanged, changed, failed, withdrawn.
+
+    The failed run is the point of the test. Its release pointer, ledger and
+    crawl log are compared as bytes against what they were before it, so a run
+    that rewrote them with equivalent content would still fail here. The
+    withdrawal that follows removes the document from what is served while its
+    first archived original remains byte-identical on disk.
+    """
     config["system_guides"]["include_urls"] = []
     page = "https://example.test/products/a"
     doc = "https://example.test/docs/data.pdf"

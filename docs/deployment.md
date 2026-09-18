@@ -73,9 +73,11 @@ variable rather than starting a database with a password someone committed.
 | `GENERATION_MODEL` | `qwen3.5:4b` | recorded in the index header |
 | `EMBED_MODEL` | `qwen3-embedding:0.6b` | changing it means rebuilding the index |
 | `EMBED_DIMENSIONS` | `1024` | must match the model |
-| `ASSISTANT_POSTGRES_DSN` | set by compose | selects PostgreSQL at every entry point |
+| `ASSISTANT_POSTGRES_DSN` | set by compose | selects PostgreSQL at every entry point — indexer, CLI, UI and readiness, through one backend factory. Empty selects SQLite |
+| `ASSISTANT_CHECKPOINT_DSN` | empty, and compose does not set it | **A different variable from the one above, deliberately.** It chooses where LangGraph conversation checkpoints live, read in `assistant/answering/engine.py`; the knowledge store and the checkpoint store are separate decisions. Empty means `InMemorySaver`. Setting it raises rather than falling back, because `langgraph-checkpoint-postgres` 3.0.1 is incompatible with the pinned `langgraph==1.2.11` — so leave it empty until that pin lifts |
+| `ASSISTANT_EMBEDDING_CACHE` | `data/embeddings.db` | The shipped content-addressed embedding cache, keyed by passage text, model tag and dimensions (`assistant/indexing/embedcache.py`). Point it elsewhere to build against a different cache; a miss recomputes rather than returning a vector from another model. Not the live index — that is `data/index/knowledge.db` |
 | `OLLAMA_HOST` | `http://ollama:11434` | service DNS, never `localhost` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | opt-in OTLP export; empty disables it |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | opt-in OTLP export; empty disables it. Compose does not set it |
 
 Never commit `deploy/.env`. Inside the compose network, services are reached as
 `db:5432` and `ollama:11434` — `localhost` inside a container is the container.
@@ -99,7 +101,9 @@ Startup is ordered and each step must complete before the next begins:
    does not re-check a 4 GB download, and a failed pull shows as a failed
    service rather than as a slow start.
 4. `index-init` builds the index against PostgreSQL and exits.
-5. `app` starts, and its healthcheck is readiness rather than liveness.
+5. `app` starts, and its healthcheck is readiness rather than liveness — but see
+   the entry-point defect under *Verifying it*: on the current `deploy/Dockerfile`
+   this step is where the stack stops.
 
 The corpus is bind-mounted from `../data` rather than held in a named volume. A
 named volume starts empty, so the indexer had nothing to index and the stack
@@ -131,9 +135,43 @@ Measured on the build machine, 17 September 2026 — image-level checks:
   ok    hosted tracing stays off under a hostile environment
 ```
 
-**Not claimed:** a full live-model `up` has not been completed on this machine.
-The image build, the compose validation, the non-root user, the copied contents
-and the in-image import are verified; the running stack is not.
+> **That transcript was recorded against an earlier revision and the current
+> scripts do not reproduce it.** Saying so is the point of this document. The
+> package was restructured on 18 September 2026 and neither verification script
+> followed: `scripts/verify-docker-deployment.ps1` and its `.sh` counterpart
+> still probe `/app/assistant/health.py` (the transcript above has already been
+> retyped to the real path, `/app/assistant/infrastructure/health.py`, which the
+> script does not print), still run
+> `import assistant.ui, assistant.health, assistant.graph` for the in-image
+> import check, and still call `python -m assistant.health` and
+> `python -m assistant.cli` in `-Full`, along with
+> `from assistant.store.factory import open_repository` for the document count.
+> None of those module names exist. Every line of the transcript is therefore a
+> claim about a revision you cannot re-run today. **Repairing the two scripts is
+> outstanding work**; until then, verify by hand with the working entry points —
+> `python -m assistant.infrastructure.health`, `python -m assistant.interfaces.cli`
+> and `assistant.knowledge.store.factory`.
+
+**The application container cannot serve as it stands, either, and for the same
+reason.** `deploy/Dockerfile` ends with
+
+```dockerfile
+CMD ["python", "-m", "assistant.ui", "--no-browser", "--host", "0.0.0.0"]
+```
+
+— a module that no longer exists — and `deploy/compose.yaml` sets no `command:`
+on the `app` service, so nothing overrides it. The rest of the stack is current:
+`index-init` runs `python -m assistant.indexing.index` and the healthcheck runs
+`python -m assistant.infrastructure.health`, both correct. It is the entry point
+alone. So `up` builds, validates, pulls, indexes — and then the application
+container exits. The one-line fix is `assistant.interfaces.ui`, and it is named
+here rather than made, because this pass corrects documentation only.
+
+**Not claimed:** a full live-model `up` has not been completed on this machine,
+and on the present `CMD` it could not succeed. The image build, the compose
+validation, the non-root user, the copied contents and the in-image import were
+verified against the pre-restructuring revision; the running stack is not
+verified, then or now.
 
 ### On a TLS-intercepting network
 
@@ -235,8 +273,12 @@ nothing measured here argues for either.
 **`index-init` exits non-zero.** Read its logs. A failed indexing run leaves the
 previous release serving; it cannot corrupt a good one.
 
-**`app` never becomes healthy.** Run the readiness check directly — it names the
-failing check and its remedy:
+**`app` never becomes healthy, or exits immediately.** Check the `CMD` first —
+on the current `deploy/Dockerfile` it names `assistant.ui`, which no longer
+exists, and the container dies before the healthcheck ever runs
+(`No module named assistant.ui` in `logs app`). If the entry point has been
+repaired and the container is up, run the readiness check directly — it names
+the failing check and its remedy:
 `docker compose -f deploy/compose.yaml exec app python -m assistant.infrastructure.health`
 
 **`IndexMismatch` on start.** `EMBED_MODEL` changed since the index was built.

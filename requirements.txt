@@ -31,9 +31,11 @@ numpy==2.5.3
 # It is the largest dependency in this file by a wide margin: 28 packages
 # install with it, including `langchain-core` and `langsmith`. Two things make
 # that acceptable and both are enforced rather than documented --
-# `assistant/graph.py` disables the hosted tracing client in code before the
-# import, and `tests/test_graph.py` asserts it is inert. No domain logic moved
-# into the graph: the repository, retrieval, the six checks, the policy gate,
+# `assistant/__init__.py` disables the hosted tracing client in code before
+# anything imports it and `assistant/turn/graph.py` closes the process-global
+# fallback as well, while `tests/test_privacy_tracing.py` proves it stays off
+# under hostile environment values. No domain logic moved
+# into the graph: the repository, retrieval, the eight checks, the policy gate,
 # the calculations and the audience filter are called by nodes, not absorbed
 # into them.
 langgraph==1.2.11

@@ -1,4 +1,41 @@
-"""Knowledge lifecycle failures reproduced with a disposable corpus and real SQLite."""
+"""Every way a bad run could replace a good release, reproduced on a one-page corpus.
+
+The claim decision 18 and decision 19 make is that a failed crawl or a failed
+indexing attempt never corrupts what is currently being served. That claim is
+about the *unhappy* paths, so it cannot be demonstrated by a build that works —
+it has to be demonstrated by builds that break in each of the ways a real one
+breaks: the source could not be fetched, the source was fetched but extracts to
+nothing, storage rejects a write halfway through a rebuild, or the processing
+configuration changed underneath an unchanged corpus.
+
+The fixture is the design of this file. Extraction, chunking, the embedding
+cache, the delta computation and a real `SQLiteKnowledgeRepository` all run for
+real; the **only** thing replaced is the model, which returns a fixed
+four-element vector. Substituting the repository with a fake would move the
+tests off the invariant they exist for, because "the previous version is still
+active" is a database fact. The corpus is a single hand-written page whose
+mixing figure reads `5 to 6 litres` before and `7 to 8 litres` after, so every
+assertion about what is served can be made by looking for a figure rather than
+by counting rows.
+
+`served_text` is what makes those assertions honest: it retrieves rather than
+querying the tables directly, so a superseded version that remained reachable
+would show up as text in an answer, which is the way a reader would actually
+meet it.
+
+Two details are worth pointing out because they are easy to write weaker. The
+rollback test installs a SQLite trigger that aborts inserts into `chunks`
+during a `--rebuild`, which reaches the one path where the store is cleared
+before it is refilled; the assertion is that both the snapshot and the active
+hashes are *identical* to before, not merely non-empty. And the configuration
+tests assert `len(repo.versions(URL)) == 2` — reprocessing for a new embedding
+model or chunking version must create an auditable new version of an unchanged
+source, not quietly rewrite the old one.
+
+This file does not test the crawler, the HTTP layer or answer quality. The
+crawl log and version ledger it stages are files on disk, written by the
+fixture, standing in for a crawl that has already happened.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +56,13 @@ URL = "https://example.test/products/plaster"
 
 @pytest.fixture
 def pipeline(tmp_path, monkeypatch):
-    """Use real extraction, caching, indexing and storage; replace only the model."""
+    """Use real extraction, caching, indexing and storage; replace only the model.
+
+    Yields `(stage, repo)`. Calling `stage()` writes the one-page corpus, its
+    crawl log and its version ledger into a temporary cache; `stage(water=...)`
+    changes the published figure so the next build sees a changed document, and
+    `stage(failed=True)` writes a log in which the fetch errored instead.
+    """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     monkeypatch.setattr(index, "ROOT", tmp_path)
@@ -60,11 +103,18 @@ def pipeline(tmp_path, monkeypatch):
 
 
 def served_text(repo):
+    """What a reader would actually be shown: retrieved passages, not raw rows."""
     query = [1.0] + [0.0] * (index.ollama.EMBED_DIMENSIONS - 1)
     return " ".join(hit.chunk.content for hit in repo.retrieve(query, top_k=50))
 
 
 def test_separate_reader_refreshes_vectors_after_publication(pipeline, tmp_path):
+    """A second connection picks up the new release and stops serving the old figure.
+
+    The SQLite adapter holds vectors in memory, so a reader that never
+    reloaded them would keep answering from the superseded version — visibly,
+    and with a citation.
+    """
     stage, writer = pipeline
     stage()
     index.build(repo=writer, verbose=False)
@@ -79,6 +129,7 @@ def test_separate_reader_refreshes_vectors_after_publication(pipeline, tmp_path)
 
 
 def test_transient_crawl_error_preserves_last_published_document(pipeline):
+    """A 503 is a failure, not a withdrawal: the document stays active and counts as failed."""
     stage, repo = pipeline
     stage()
     index.build(repo=repo, verbose=False)
@@ -97,6 +148,13 @@ def test_transient_crawl_error_preserves_last_published_document(pipeline):
 def test_unusable_extraction_cannot_supersede_published_evidence(
     pipeline, monkeypatch, quality
 ):
+    """A changed source that extracts to nothing must not create a version.
+
+    Both unusable qualities are covered — `failed` and `flat` — because a
+    scanned PDF and a page whose text layer collapsed are the same hazard: a
+    real change arrives, the bytes hash differently, and the replacement
+    carries no evidence. The published version count stays at one.
+    """
     stage, repo = pipeline
     stage()
     index.build(repo=repo, verbose=False)
@@ -115,6 +173,11 @@ def test_unusable_extraction_cannot_supersede_published_evidence(
 
 
 def test_failed_rebuild_rolls_back_to_the_complete_previous_index(pipeline):
+    """A storage fault during `--rebuild` rolls back the clear as well as the write.
+
+    Rebuild is the only path that empties the store before refilling it, so it
+    is the only path where a partial failure could leave nothing being served.
+    """
     stage, repo = pipeline
     stage()
     index.build(repo=repo, verbose=False)
@@ -138,6 +201,13 @@ def test_failed_rebuild_rolls_back_to_the_complete_previous_index(pipeline):
 def test_processing_configuration_change_reprocesses_unchanged_sources(
     pipeline, monkeypatch, setting
 ):
+    """A new model, dimension or chunking version reprocesses a source that did not change.
+
+    Vectors from two embedding models in one index return confident nonsense,
+    so the delta cannot be computed from the content hash alone. The source
+    hash is unchanged and must stay unchanged; what changes is that a second,
+    auditable version is published under the new configuration.
+    """
     stage, repo = pipeline
     stage()
     index.build(repo=repo, verbose=False)

@@ -4,7 +4,7 @@ Every node in this file is a thin adapter. `understand_turn` calls
 `assistant/answering/understanding.py`; `retrieve_candidates` calls the existing
 `Retriever`; `assess_evidence` calls `assistant/retrieval/candidates.py`; the printing
 nodes call the existing `AnswerEngine`. **No domain truth lives here.** The
-repository, retrieval, the six checks, the policy gate, the calculations and the
+repository, retrieval, the eight checks, the policy gate, the calculations and the
 audience filter are unchanged and are called, not absorbed — which is the
 condition under which adopting an orchestration library is safe at all.
 
@@ -144,9 +144,12 @@ _CHECKPOINT_TYPES = (
     ans.Provenance,
     # The finished answer travels in the `answer` channel and is checkpointed
     # with the rest of the turn. These two were missing, and the checkpointer
-    # said so on every turn -- "Blocked deserialization of assistant.answer.
-    # Answer" -- while nothing failed, because until now nothing read a
-    # checkpoint back. The moment the checkpointer became the source of
+    # said so on every turn -- "Blocked deserialization of
+    # assistant.answering.answer.Answer" -- while nothing failed, because until
+    # now nothing read a checkpoint back. (The message was first seen before the
+    # restructure, when the class was `assistant.answer.Answer`; it is quoted
+    # here at the path it would name today, so that searching for it finds
+    # something.) The moment the checkpointer became the source of
     # continuity that silence would have become an answer coming back as None.
     ans.Answer,
     ans.SlotFact,
@@ -750,7 +753,7 @@ def build(services: Services):
             # is not a loophole -- it is the difference between answering a
             # question and making a recommendation. "Would Ultra work on my
             # brick wall?" is answered about Ultra by definition, and that
-            # answer is already bound by the relevance gate and the six checks.
+            # answer is already bound by the relevance gate and the eight checks.
             # Without the exemption this guard refuses every VERIFY question
             # whose honest answer contains the word "suitable", which is most of
             # them: an over-refusal on the commonest shape of question, traded

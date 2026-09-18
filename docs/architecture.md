@@ -1,6 +1,6 @@
 # Architecture — Technical Knowledge Assistant
 
-**What the system is**: two diagrams, a component reference, and the site inventory they rest on. **Why it is this way** — every decision, its alternatives and its cost — is in [`DECISIONS.md`](../DECISIONS.md).
+**What the system is**: three diagrams, a component reference, and the site inventory they rest on. **Why it is this way** — every decision, its alternatives and its cost — is in [`DECISIONS.md`](../DECISIONS.md).
 
 The shape in one sentence: a question is answered only from retrieved passages, every fact cited, with a refusal that still hands over whatever is published when the material runs out — and the knowledge pipeline validates changed sources and publishes controlled releases on either backend.
 
@@ -33,14 +33,14 @@ C4Container
 
     Container_Boundary(assistant, "Technical Knowledge Assistant") {
         Container_Boundary(indexing, "Indexing path") {
-            Container(receiver, "Refresh trigger", "Scheduled CLI", "Revalidates with ETag and Last-Modified; compares content hashes")
+            Container(receiver, "Refresh trigger", "Scheduled CLI — built; cron or Task Scheduler supplies the cadence", "Revalidates with ETag and Last-Modified; compares content hashes")
             ContainerQueue(queue, "Indexing queue", "Local durable SQLite jobs", "Buffers jobs, retries with backoff, and dead-letters failures")
             Container(indexer, "Indexer", "Python", "Crawls, caches, extracts, chunks, tags caveats, embeds, and atomically publishes the index")
             ContainerDb(cache, "Source document store", "Versioned filesystem — ships with the submission", "Original HTML and PDFs as fetched, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history")
         }
 
         Container_Boundary(data, "Retrieval data") {
-            ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks, embeddings, caveats, excluded documents, crawl runs, index snapshots. Exactly one active version per document, enforced by the database")
+            ContainerDb(store, "Knowledge store", "SQLite for assessment; PostgreSQL + pgvector in production — one schema, two dialects", "documents, document_versions, chunks — the vector is a column on the chunk, not a table of its own — document_caveats, excluded_documents, crawl_runs, index_snapshots, and the operational three: answer_log, turn_traces, sessions. Exactly one active version per document, enforced by the database")
             ContainerDb(config, "Authored configuration", "Hand-written files", "Routing, vocabulary with synonyms, deferrals, authority, audience, and exclusion rules")
             ContainerDb(answercache, "Answer cache", "Built — exact-key, in process", "Finished answers keyed on the normalised question, audience set, snapshot id, generation model, and chunking version; the template-keyed form is roadmap")
         }
@@ -52,7 +52,7 @@ C4Container
                 Container(channels, "Channel adapters", "Production only", "Website widget, CRM, and training platform")
                 Container(identity, "Identity and audience", "Production only", "Resolves the caller to an audience set: public, trade, or staff; anonymous callers get public only")
                 Container(serving, "Serving layer", "Production only", "Generation queue with a visible wait, per-session rate limiting, and extract-only degradation under load")
-                Container(vision, "Vision perception", "Production only — VLM", "Reads uploaded photographs into structured observations: value, confidence, source image, region, and what cannot be determined. Never names a product")
+                Container(vision, "Vision perception", "Built — VLM, off by default behind ASSISTANT_VISION_DEMO=1", "Reads uploaded photographs into structured observations: value, confidence, source image, region, and what cannot be determined. Only substrate and symptom may reach a slot. Never names a product")
             }
 
             Container_Boundary(core, "Answering and evaluation") {
@@ -76,6 +76,7 @@ C4Container
     Rel_R(cli, engine, "Question and audience set")
     Rel_R(ui, engine, "Question and audience set")
     Rel_D(ui, vision, "Uploaded photographs")
+    Rel_D(cli, vision, "Photographs passed with --image")
     Rel_R(vision, engine, "Observations fill slots; below the confidence floor the slot stays uncued")
     Rel_D(staff, vision, "Labelled failure library, for fine-tuning")
     Rel_R(channels, identity, "Request with session")
@@ -103,12 +104,12 @@ C4Container
     UpdateElementStyle(engine, $bgColor="#eef2ff", $borderColor="#818cf8", $fontColor="#3730a3")
     UpdateElementStyle(eval, $bgColor="#f0f9ff", $borderColor="#38bdf8", $fontColor="#0c4a6e")
 
-    UpdateElementStyle(receiver, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(receiver, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(queue, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(channels, $bgColor="#fffafd", $borderColor="#f0abfc", $fontColor="#86198f")
     UpdateElementStyle(identity, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
     UpdateElementStyle(serving, $bgColor="#fff8fa", $borderColor="#fda4af", $fontColor="#9f1239")
-    UpdateElementStyle(vision, $bgColor="#fffdf5", $borderColor="#fcd34d", $fontColor="#92400e")
+    UpdateElementStyle(vision, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
     UpdateElementStyle(answercache, $bgColor="#f0fdf4", $borderColor="#4ade80", $fontColor="#166534")
 
     UpdateRelStyle(website, indexer, $textColor="#155e75", $lineColor="#22d3ee", $offsetX="-34", $offsetY="-18")
@@ -162,16 +163,16 @@ flowchart TD
     SPLIT["Split by topic<br/>policy patterns + slot vocabularies; each part is gated and routed on its own;<br/>a published lead time or cut-off becomes its own part and takes the retrieval path;<br/>the symptom part of a complaint takes the diagnosis path"]
     POLICY{"Policy gate — pattern?<br/>price · stock · delivery · where to buy · colour matching · warranty ·<br/>structural judgement · compliance sign-off · health · complaint escalation · document request"}
     ROUTE["Route<br/>fixed referral text per topic from the routing table; no retrieval;<br/>document requests answered from the manifest, filtered by audience tags: name, date, link"]
-    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom · cause asked · photograph · property asked for;<br/>the photograph slot adds the cannot-see-photographs line to whatever path is taken; it does not by itself route to diagnosis;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions<br/>[production] a vision model fills substrate, coatings, symptom and exposure from photographs,<br/>each with a confidence; below the floor the slot stays uncued and the flow is unchanged"]
+    SLOTS["Slot detection (vocabularies, with synonyms)<br/>substrate · location · exposure · calculation words · symptom · cause asked · photograph · property asked for;<br/>the photograph slot adds the cannot-see-photographs line to whatever path is taken; it does not by itself route to diagnosis;<br/>load-bearing slots (substrate, inside / outside): cued → value used, uncued → decided at router step 5;<br/>other missing slots become stated assumptions; slots carried from an earlier turn or from a photograph merge under what this question states, never over it<br/>[built, off by default] a vision model reads photographs into three tiers, each reading with a confidence:<br/>tier 1 (substrate, symptom) may fill a router slot; tier 2 (location, exposure) and tier 3 (wall condition) are reported and never routed;<br/>below the floor, or where a finish hides the masonry, the slot stays uncued and the flow is unchanged"]
     RETRIEVE["Retrieval [via KnowledgeRepository]<br/>embed the question (Ollama); similarity over the knowledge store; top-k with a per-document cap;<br/>active versions only; filtered to the caller's audience set in code before ranking, never by prompt<br/>(a WHERE clause in the PostgreSQL adapter; a row filter inside the SQLite adapter, which is the one that ships);<br/>ranked by authority (datasheet > product page > knowledge-base article > FAQ), newest wins within a type;<br/>refuses to run if the snapshot's embedding model or chunking version does not match"]
-    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 a cause or defect is asked → diagnosis (a photograph alone is not a diagnosis request) · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated'<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
+    ROUTER{"Deterministic router — evaluated in order<br/>1 below threshold → refuse · 2 top passage defers → cited hand-off (a published deferral beats a computed quantity)<br/>3 a cause or defect is asked → diagnosis (a photograph alone is not a diagnosis request) · 4 asked-for term absent from every passage, synonyms applied → refuse: 'not stated' · 4s the asked-for substrate absent → refuse<br/>5 load-bearing slot uncued → per option (inside / outside) or ask back (substrate) · 6 calculation words → extract, sum refused<br/>7 one document and a factual ask → extract · 8 otherwise → compose · staff audience: extract (compose on request is roadmap)"}
     DIAG["Diagnosis — composite: published causes + hand-off<br/>published causes quoted with source; 'cannot see photographs'"]
     EXTR["Extract — by code, no model<br/>the top passage (coverage and pack-size passages on the calculation edge), whole, with its citation;<br/>a passage is a section or a bullet, so its caveats stay attached;<br/>document caveats appended by code, at most three"]
     COMPOSE["Compose — the model composes with [n] markers<br/>per option when inside / outside is uncued;<br/>regulatory asks: explained from the knowledge base, never certified; building control named;<br/>document caveats appended by code, at most three"]
     DEFER["Cited hand-off<br/>the deferral sentence quoted and cited"]
     REFUSE["Refuse"]
     MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
-    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage<br/>7 the answer is about the product that was asked about, not a different product"]
+    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage<br/>7 the answer is about the product that was asked about, not a different product<br/>8 a relationship between two products — which goes over which, and on what condition — is supported that way round by a cited passage;<br/>waterproof, watertight, structural and certified claims are explicitly supported, and a requested layer order is actually established"]
     HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest<br/>(a richer staff-only refusal view — nearest candidates with scores and passage text — is roadmap, not built)"]
     OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
@@ -209,24 +210,25 @@ Four things to say out loud from this diagram:
 
 - **The route is decided by code, before the model sees anything, in a stated order.** Below threshold, then a published deferral (which beats a computed quantity — "how much Solo for MgO board" gets the sheet's "contact us", not a bag count), then symptoms, then the relevance gate, then uncued load-bearing slots, then calculation words, then one document with a factual ask, otherwise compose. Slots are detected before retrieval, but the retrieval-shape steps are evaluated first because a below-threshold or deferring result must not be overridden by a slot-driven branch — and a photograph question that retrieves nothing still gets "cannot see photographs", because the hand-off renderer keys that line on the slot, not the path. Instructions inside a question or a passage change nothing.
 - **The model runs on one path only — Compose — and never originates a fact.** Five paths as the record defines them (route, extract, compose, cited hand-off, refuse); diagnosis is a composite of quoted causes plus hand-off, and calculation is extract over the coverage and pack-size passages with the sum refused. Temperature zero and a fixed seed keep the run repeatable.
-- **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose). Product-scope correctness is verified by check 7. A confident retrieval and citation are not enough.
+- **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose). Product-scope correctness is verified by check 7, and a claimed relationship between two products — which goes over which — by check 8. A confident retrieval and citation are not enough.
 - **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
 
 ## 3. Multimodal perception — built and gated
 
-Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. **Vision perception is built and testable** (assistant/answering/vision.py); it is disabled by default via the `ASSISTANT_VISION_DEMO=1` capability flag because latency on CPU (191.9s per image) is prohibitive for a demonstration. When enabled, the architecture below is fully functional. Production roadmap items (fine-tuning on failure library, hosted inference, browser-based UI) remain.
+Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. **Vision perception is built and testable** (assistant/answering/vision.py); it is disabled by default, and enabled with the `ASSISTANT_VISION_DEMO=1` capability flag, because latency on a processor is prohibitive for a demonstration. One 512x512 image through `qwen3.5:4b` on the build machine took 191.9 s — a single measured observation rather than a benchmark, and the same order as the 115-199 s the text path costs on a question the model has not seen. When enabled, the architecture below is fully functional. Production roadmap items (fine-tuning on failure library, hosted inference, browser-based UI) remain.
 
 Three properties make it consistent with what is already built rather than a parallel system:
 
 - **The vision model never names a product.** Perception, interpretation and recommendation stay separate stages. Collapsing them — "I see rising damp, therefore use Product X" — fuses an uncertain visual inference to a commercial recommendation.
-- **Every observation is auditable.** Value, confidence, source image and the region within it. A bounding box is to a visual claim what a cited passage is to a textual one, which is the same discipline the seven post-generation checks enforce today.
-- **It feeds the existing router.** Profile values fill slots; below the confidence floor a slot stays uncued and the load-bearing-slot rule already handles it. No new answer path, no new guardrail surface.
+- **Every observation is auditable.** Value, confidence, source image and the region within it. A bounding box is to a visual claim what a cited passage is to a textual one, which is the same discipline the eight post-generation checks enforce today.
+- **It feeds the existing router, and only two readings are allowed to.** Substrate and symptom may fill a slot; location and exposure are read and shown to the caller but never routed, because whether a wall is inside or outside is decided by things that are usually out of frame. Below the confidence floor a slot stays uncued and the load-bearing-slot rule already handles it. No new answer path, no new guardrail surface.
 
 Source: [`diagrams/multimodal-roadmap.mmd`](diagrams/multimodal-roadmap.mmd)
 
 ```mermaid
 flowchart TD
     classDef roadmap fill:#fffdf5,stroke:#fcd34d,color:#92400e,stroke-width:2px
+    classDef gated fill:#fffdf5,stroke:#d97706,color:#92400e,stroke-width:2px
     classDef built fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
     classDef gate fill:#fff8fa,stroke:#fda4af,color:#9f1239,stroke-width:2px
     classDef human fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
@@ -235,9 +237,9 @@ flowchart TD
 
     USER(("Customer or trade<br/>photographs · question · whatever detail they already know"))
 
-    subgraph PERCEPTION["ROADMAP — perception: what can actually be seen"]
+    subgraph PERCEPTION["BUILT, OFF BY DEFAULT — perception: what can actually be seen"]
         direction TB
-        VLM["Vision model<br/>qwen3.5:4b or qwen3-vl:4b, fine-tuned on the failure library<br/>reads pixels; never names a product"]
+        VLM["Vision model<br/>qwen3.5:4b today, VISION_MODEL overrides it; qwen3-vl:4b is the alternative<br/>fine-tuning on the failure library is roadmap<br/>reads pixels; never names a product"]
         OBS["Structured observations<br/>each carries: value · confidence · source image · region<br/>plus an explicit cannot_determine_from_image list"]
         PROFILE["Building profile<br/>substrate · masonry type · existing finish · moisture evidence<br/>cracking · deterioration · interior or exterior<br/>every attribute with its own confidence"]
         VLM --> OBS --> PROFILE
@@ -246,11 +248,11 @@ flowchart TD
     GATE{"Confidence gate<br/>are the load-bearing facts known?<br/>substrate and interior / exterior decide the product"}
     ELICIT["Guided visual survey<br/>ask for one specific thing, not 'send more photos':<br/>an exposed section where the render has fallen away ·<br/>the ground line and drainage · a wider elevation ·<br/>or the two details no photograph can show"]
 
-    subgraph BUILTPIPE["BUILT — the existing pipeline, unchanged"]
+    subgraph BUILTPIPE["BUILT — the existing text pipeline, unchanged"]
         direction TB
-        SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
+        SLOTS2["Slot detection<br/>only tier-1 readings — substrate and symptom — may fill a slot;<br/>location and exposure are reported and asked back for, never routed;<br/>below the confidence floor a slot stays uncued"]
         RETR["Retrieval over the knowledge store<br/>on the structured profile, not on the raw question"]
-        ENGINE["Deterministic router → extract or compose<br/>seven checks before anything prints"]
+        ENGINE["Deterministic router → extract or compose<br/>eight checks before anything prints"]
         SLOTS2 --> RETR --> ENGINE
     end
 
@@ -270,13 +272,14 @@ flowchart TD
     LIB -.->|"fine-tuning, once enough pairs exist"| VLM
 
     class USER person
-    class VLM,OBS,PROFILE,ELICIT roadmap
+    class VLM,OBS,PROFILE gated
+    class ELICIT roadmap
     class SLOTS2,RETR,ENGINE,OUT built
     class GATE gate
     class HUMAN human
     class LIB data
 
-    style PERCEPTION fill:#fffbeb,stroke:#d97706,stroke-width:3px,stroke-dasharray:6 4
+    style PERCEPTION fill:#fffbeb,stroke:#d97706,stroke-width:3px
     style BUILTPIPE fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
 ```
 
@@ -296,17 +299,17 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Source document store** | Built, shipped | Original HTML and PDFs as fetched, on a versioned filesystem, with SHA-256, ETag and Last-Modified per version. The filesystem holds the evidence; the knowledge store holds its identity and history. Ships so the assessors run offline without repeating the crawl |
 | **Refresh trigger** | Built | Scheduled CLI jobs invoke conditional crawl and indexing. A configured cron or Task Scheduler job supplies cadence |
 | **Indexing queue** | Built | Durable local SQLite jobs, idempotent enqueue, backoff, expiring leases and dead-letter evidence; one ingestion host |
-| **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics, and both implement the same delta contract: `apply_delta`, `active_content_hashes`, `versions` and `crawl_runs` |
+| **Knowledge store** | Built | `documents`, `document_versions`, `chunks` — the embedding is a column on the chunk, not a table — `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`, and the three operational tables the same schemas define: `answer_log`, `turn_traces` and `sessions`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics, and both implement the same delta contract: `apply_delta`, `active_content_hashes`, `versions` and `crawl_runs` |
 | **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
 | **Answer cache** | Built, exact-key | Finished answers keyed on the normalised question, the audience set, the snapshot id, the generation model and the chunking version. Refusals cached too. The template-keyed form decision 14 designs is roadmap; this is the weaker exact-match form, identical on safety and poorer on hit rate |
-| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → seven checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
+| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → eight checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
 | **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
 | **Web UI** | Built | A thin standard-library HTTP page over the same library, for the demonstration |
 | **Evaluation harness** | Built | Nine transcript situations — including the two multi-source ones decision 7.3 scores grounded reasoning on — plus the probe suite, threshold sweep, pass/fail, self-describing header, and one synthetic staff-tagged fixture that must be invisible in public mode |
 | **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
 | **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
 | **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |
-| **Vision perception** | Built, gated | Reads uploaded photographs into structured observations — value, confidence, source image, region, and an explicit list of what cannot be determined. Fills slots on the existing router; never names a product. Enabled with `ASSISTANT_VISION_DEMO=1`; disabled by default due to CPU latency (191.9s per image). Production roadmap: fine-tuning on failure library, hosted inference, browser VLM. See DECISIONS 16.1 |
+| **Vision perception** | Built, gated | Reads uploaded photographs into structured observations — value, confidence, source image, region, and an explicit list of what cannot be determined. Fills slots on the existing router; never names a product. Enabled with `ASSISTANT_VISION_DEMO=1`; disabled by default because a vision encoder on a processor is slow — one image measured at 191.9 s, a single observation rather than a benchmark. Production roadmap: fine-tuning on failure library, hosted inference, browser VLM. See DECISIONS 16.1 |
 
 ## Appendix: live site inventory (the record's decision 0, confirmed 15 September 2026)
 

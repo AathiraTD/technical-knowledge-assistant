@@ -1,4 +1,12 @@
-"""The six checks, tested against the failures they exist to catch.
+"""Checks 1 to 7, tested against the failures they exist to catch.
+
+The engine runs **eight** — `assistant/answering/answer.py` opens its span as
+`obs.span("checks", count=8, ...)` — and check 8, the product-relationship and
+property-predicate check, is not exercised here. It is covered instead in
+`tests/test_acceptance_evidence_boundaries.py`, which is the only suite that
+names it. Worth knowing before reading this file as the complete picture: the
+title said "the six checks" for some time after there were seven, which is how
+a file like this comes to be trusted for more than it covers.
 
 These run without Ollama and without an index: the checks are pure functions
 over text and passages, which is deliberate — the part of the system that

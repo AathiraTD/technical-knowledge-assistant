@@ -1,4 +1,37 @@
-"""Regressions for T11 (multi-source) and T14 (comparison) acceptance failures."""
+"""The two acceptance rows that used to refuse, kept refusing-proof by regression.
+
+`T11` and `T14` are not internal names: they are `test_id` values in the
+supplied acceptance set, `eval/evalset/Set 1/lime_green_ui_acceptance_tests.csv`,
+which this module reads rather than restates so the questions cannot drift from
+the ones the assessment asks. T11 is the file's *multi-source synthesis* row —
+"for Lime Green Ultra, tell me the preparation required, application thickness,
+mixing water and curing or application conditions" — and T14 is its
+*cross-product comparison* row, "compare Lime Green Ultra and Solo for suitable
+backgrounds and application thickness".
+
+Both failed the same way, and it is a failure mode worth naming because it is
+the cost of the safety machinery rather than a bug in it. A question naming
+several fields, or several products, presents the router with a load-bearing
+slot it cannot fill from a single carried value, and the honest response to an
+uncued substrate is an ask-back. Applied to these two rows it produced a
+refusal for questions whose evidence was entirely present: the substrate is not
+load-bearing when the caller has already named the product and asked only what
+its own datasheet publishes. T14 is the sharper case, because a carried
+`product` of `Duro` is deliberately supplied — a comparison names its own
+products and **must not inherit one from the conversation**.
+
+The fixture publishes Ultra, Solo, Duro and Bond passages into a real SQLite
+repository and then forbids `ollama.generate` outright, so both rows have to be
+answered by the deterministic extraction path; a model that composed its way to
+a passing string would fail the test rather than satisfy it. Retrieval is
+stubbed to return every passage on every call, which is the hostile version:
+Duro's mixing figure is always in front of the engine, so an answer that leaks
+it has leaked it by choice.
+
+This file proves those two rows no longer refuse and keep their products'
+figures apart. It is not a grader — it does not score citation quality or
+prose, which is what the harness and the technical read of C3 are for.
+"""
 
 import csv
 from pathlib import Path
@@ -76,7 +109,12 @@ def assistant(tmp_path, monkeypatch):
 
 
 def test_t11_multisource_synthesis(assistant):
-    """T11: Multi-source synthesis should compose without asking for substrate."""
+    """T11: a four-field question about one named product answers instead of asking back.
+
+    Preparation, thickness and mixing water must all appear, each from its own
+    passage, so the reply has to cite at least two documents rather than
+    quoting whichever section retrieved best.
+    """
     # "For Lime Green Ultra, tell me the preparation required, application thickness,
     # mixing water and curing or application conditions."
     answer = assistant.answer_part(CASES["T11"])
@@ -90,7 +128,12 @@ def test_t11_multisource_synthesis(assistant):
 
 
 def test_t14_product_comparison(assistant):
-    """T14: Comparison of Ultra and Solo should not ask for substrate."""
+    """T14: a comparison answers on the products it names, not the one carried in.
+
+    `carried={"product": "Duro"}` is the trap: the conversation believes Duro,
+    the question names Ultra and Solo, and each product must keep its own
+    thickness range — 10-30 mm and 3-6 mm — with Duro absent from the reply.
+    """
     # "Compare Lime Green Ultra and Solo for suitable backgrounds and application thickness."
     answer = assistant.answer_part(CASES["T14"], carried={"product": "Duro"})
 

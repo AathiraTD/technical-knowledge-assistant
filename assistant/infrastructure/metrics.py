@@ -214,9 +214,25 @@ SPAN_NAMES = (
 )
 OTHER_SPAN = "other"
 
-# The six checks, so a check that never fails still reports a zero rather than
+# Enumerated, so a check that never fails still reports a zero rather than
 # vanishing from the output. A missing series and a zero series read very
 # differently on a dashboard, and only one of them is true.
+#
+# **This list is short by two, and the omission is the exact failure the
+# paragraph above warns about, turned on itself.** `assistant/answering/answer.py`
+# opens its span as `obs.span("checks", count=8, ...)` and emits failures from
+# `check 1:` to `check 8:`; checks 7 (the answer is about the product that was
+# asked about) and 8 (a product relationship holds that way round) are missing
+# here. A dashboard built on this tuple therefore cannot show a check 7 or
+# check 8 failure at all -- not as a spike, and not as a zero. The two newest
+# checks, guarding product scope and relationship direction, are the two that
+# are invisible.
+#
+# Left as-is rather than corrected in passing: the `assistant_checks_*` series
+# are an operational contract, and extending them is a change to make
+# deliberately with the dashboards in view, not a side effect of a
+# documentation pass. Recorded here so it is found before a dashboard is
+# trusted, rather than after.
 CHECKS = ("check 1", "check 2", "check 3", "check 4", "check 5", "check 6")
 
 

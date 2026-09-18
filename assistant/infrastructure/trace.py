@@ -166,6 +166,27 @@ def recent(spans: list[TraceSpan], limit: int = 20) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Three readings of the same stored spans, chosen by what the caller has.
+
+    With no arguments it lists recent turns, because the common starting point
+    is not knowing the id yet. With a trace id — the value the page returns in
+    `X-Correlation-Id`, so it is the value already in the browser's network tab
+    — it renders that one answer as a tree. With `--session` it renders every
+    turn of a conversation, which is the question "what else did they ask
+    before this went wrong".
+
+    `--json` exists for tests rather than for people: a browser test proving
+    the correlation header maps to a real trace asserts through this reader
+    against the same database, instead of the server having to grow an endpoint
+    that would then need its own audience gate.
+
+    Two decisions in the body. `apply_schema=False`, because reading a trace
+    must never migrate the store it is inspecting. And the exit code is 1 when
+    a specific id returned nothing — an id that does not resolve is a failed
+    lookup a script should be able to act on — while the unfiltered listing
+    always exits 0, since "no traces yet" is a true answer to the question that
+    was asked.
+    """
     use_utf8()
     parser = argparse.ArgumentParser(
         prog="assistant.infrastructure.trace",

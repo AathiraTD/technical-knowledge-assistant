@@ -258,6 +258,38 @@ class PolicyGate:
         }
 
     def match(self, question: str) -> tuple[str, dict] | None:
+        """Is this a topic the published corpus is not allowed to answer?
+
+        Returns the topic and its routing entry, or `None` to let the question
+        continue to retrieval. This runs **before anything is retrieved**,
+        which is the point: a price, a stock level or a compliance sign-off is
+        not a retrieval failure to be caught downstream, it is a question the
+        company has already decided a person answers, so no evidence is
+        gathered and no model is asked.
+
+        Two details in the body carry weight. The first is the order the
+        patterns are tried in. `safety_precedence` from `routing.json` is laid
+        down ahead of the table's own order, because a broad commercial keyword
+        would otherwise capture a structural or compliance request that happens
+        to contain it — "guarantee" appearing in a question about a load-
+        bearing wall must route as the structural question, not as a warranty
+        enquiry. Everything not named in that list keeps table order, so the
+        configuration reads as written.
+
+        The second is the source-instruction filter. A clause that only names
+        which documents to use ("ignore the warranty documents") is stripped
+        before matching, because it supplies no policy intent — matching on it
+        would route a perfectly ordinary question to a referral on the strength
+        of a word about sources. Note the direction of the guard: it removes
+        only the source-only clauses and never trusts them; a question with
+        nothing else in it falls through with `parts` empty and is matched
+        whole.
+
+        Matching is regular expressions over configuration, not a classifier.
+        That is deliberate — this is a gate someone can read, disagree with and
+        edit, and the cost of the choice is that an unanticipated phrasing
+        falls through to retrieval rather than being caught here.
+        """
         # Source-only instructions cannot supply the substantive policy intent
         # ("ignore the warranty documents" is not a warranty question).
         parts = [part for part in _SPLIT.split(question)
@@ -714,6 +746,74 @@ class Router:
         audiences: tuple[str, ...] = ("public",),
         carried: dict | None = None,
     ) -> Decision:
+        """Which path this question takes, decided by code before the model runs.
+
+        Ten branches, evaluated in the order written, first match wins, and the
+        step number that fired is recorded on the `Decision` so an answer can
+        be explained afterwards rather than reconstructed. Nothing below
+        consults a model, and no instruction inside the question or inside a
+        retrieved passage changes any of it.
+
+        As implemented, in order:
+
+        1. **Nothing close enough was found** — below the threshold, or no hits
+           at all. Refuse.
+        2. **The top passage itself defers.** If the company's own material
+           says to contact the technical team, that beats anything the system
+           could assemble, including a quantity it could compute. Cited
+           hand-off.
+        3. **A cause or a defect is asked.** Diagnosis is a human judgement, so
+           this takes the diagnosis composite. A photograph alone is not this
+           condition — `photograph` is carried on every decision instead, so
+           the hand-off renderer can say the assistant cannot see images
+           whatever path was taken.
+        4. **The relevance gate on the property asked for.** Every word the
+           question's properties accept is ORed together; if none of them
+           appears in any retrieved passage, refuse with the term named. This
+           is the near-miss catch — the right product, the wrong property — and
+           it is the step, not the threshold, that stops a confidently
+           retrieved but irrelevant passage printing.
+        4s. **The same gate on the substrate.** Decision 9 says property *or*
+           substrate; only the property half used to be enforced, so "Can I use
+           Solo on cob walls?" printed general guidance from a corpus that
+           never names cob. Answering a substrate question from evidence about
+           a different wall is the costly error the design exists to avoid.
+        5. **A load-bearing slot is uncued.** An unstated substrate on a
+           question that is choosing a product for a specific wall asks back
+           rather than assuming. An unstated inside/outside does not ask back;
+           it sets `per_option`, because the sheets split that way and both
+           answers fit in the same passages.
+        6. **Calculation words.** Extract the published coverage and pack size
+           and refuse the multiplication — the arithmetic is not given to the
+           model, and `sum_refused` says so downstream.
+        7. **One document and a factual ask.** Print the passage rather than
+           paraphrase it; there is nothing for a model to add to a lookup but
+           drift.
+        7s. **A staff-only audience.** Extract, because staff verify from
+           passage text; composing for staff is roadmap.
+        8. **Otherwise compose** — several passages bear on the question, and
+           this is the one path on which the model runs.
+
+        Past step 4 every decision carries the gate's own word list
+        (`asked_terms`), the same list kept split by property
+        (`evidence_terms`) and the substrate's published class, so the
+        post-generation checks enforce the rule this function applied instead
+        of re-deriving a narrower one. See the field comments on `Decision` for
+        the two bugs that came of the two halves drifting apart.
+
+        Note what this function never returns. `ROUTE` belongs to `PolicyGate`
+        and has already fired before anything was retrieved; `SELECT` is
+        decided in `assistant/answering/answer.py`, where a recommendation can
+        be checked against the candidate set `assistant/retrieval/candidates.py`
+        approved. Routing here is about the shape of the evidence, and those
+        two are not.
+
+        `carried` — slots from an earlier turn or read off a photograph — is
+        merged **under** what this question says, never over it. A caller
+        correcting themselves must win against memory and against a model's
+        reading, and that precedence is the whole safety property of carrying
+        anything between turns at all.
+        """
         # `carried` holds slots this question did not state — from an earlier
         # turn, or read off a photograph. They are merged *under* what this
         # question says, never over it: a caller who corrects themselves

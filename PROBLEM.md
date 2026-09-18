@@ -44,9 +44,9 @@ Everything runs locally. No data leaves the machine.
 | Storage | `KnowledgeRepository` with two adapters behind it — SQLite ships and serves every answer in the transcript; PostgreSQL + pgvector passes the same contract against a real instance |
 | Retrieval | Local embeddings, audience filtering in code before ranking — a `WHERE` clause in PostgreSQL, a row filter in Python in SQLite — authority ranking with recency |
 | Router | Eleven-topic policy gate, eight slots, eight ordered decisions |
-| Answering | Five paths plus two composites, six post-generation checks, hand-off rendering |
+| Answering | Five paths plus two composites, eight post-generation checks, hand-off rendering |
 | Interfaces | A CLI and a web page, both over one library |
-| Evaluation | **9/9 situations, 10/10 probes**, audience filter passing both ways, a threshold sweep, and 648 unit tests |
+| Evaluation | **9/9 situations, 10/10 probes**, audience filter passing both ways, a threshold sweep, and a suite that now collects 2,324 tests |
 
 ## What was not built, and why
 
@@ -122,7 +122,7 @@ refusal state, or a string that must or must not appear. The transcript is in
 | Situations | 9 of 9 |
 | Guardrail probes | 10 of 10 |
 | Audience filter | staff material invisible to a public caller, visible to staff |
-| Unit tests | 648 passed, 43 skipped, with every outbound socket blocked. The skips are the PostgreSQL-gated tests, which need `ASSISTANT_POSTGRES_DSN`; CI supplies one and runs them |
+| Unit tests | The suite collects **2,324**. The last recorded run was 648 passed / 43 skipped, taken before the package restructure and not re-measured since, so it is quoted as history rather than as the current figure — run the command below for today's. Every outbound socket is blocked. The skips are the PostgreSQL-gated tests, which need `ASSISTANT_POSTGRES_DSN`; CI supplies one and runs them |
 | Safety-critical coverage | 100% line and branch |
 
 The threshold sweep runs over the six situations that reach retrieval, and
@@ -174,7 +174,7 @@ python -m eval.run             # situations, probes, sweep, audience filter
 python -m assistant.infrastructure.health     # is it actually able to answer?
 
 pip install pytest coverage
-python -m pytest -q tests/     # 648 tests, no Ollama, no network, no index
+python -m pytest -q tests/     # 2,324 tests, no Ollama, no network, no index
 python -m coverage run --rcfile=.coveragerc -m pytest -q tests/
 python -m coverage report --rcfile=.coveragerc
 ```

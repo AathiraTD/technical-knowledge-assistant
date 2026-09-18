@@ -166,7 +166,7 @@ def quoting(prompt: str, **_kwargs) -> tuple[str, float]:
     """A model that does the one thing this system wants: quote and cite.
 
     It reads the passages out of the prompt it was handed and returns the first
-    sentence of each under the marker it arrived with, so the six checks pass
+    sentence of each under the marker it arrived with, so the eight checks pass
     and Compose actually prints. The leading `.strip()` matters: the passage
     block opens with a newline, and without it the first passage is silently
     dropped and the answer looks multi-source while citing one document.

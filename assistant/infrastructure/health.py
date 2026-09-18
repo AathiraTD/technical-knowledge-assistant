@@ -58,6 +58,14 @@ def _redact(text: str) -> str:
 
 
 def vision_demo_enabled() -> bool:
+    """Whether a missing vision model should count against readiness.
+
+    Off unless the operator says otherwise, and the several spellings of yes
+    are accepted because the alternative — a capability flag that silently
+    means "no" when someone writes `true` instead of `1` — fails in the
+    direction of a demonstration discovering at the wrong moment that its
+    model was never checked.
+    """
     return os.environ.get(VISION_DEMO_VAR, "").strip().lower() in (
         "1", "true", "yes", "on")
 
@@ -68,6 +76,44 @@ def _pulled(tag: str, have: list[str]) -> bool:
 
 
 def check(db: str = "", dsn: str = "") -> dict:
+    """Everything that has to be true before this process can answer anything.
+
+    Readiness is computed, never assumed: `report["ready"]` is the conjunction
+    of `report["checks"]`, so a check added to that mapping is load-bearing the
+    moment it is written and there is no separate verdict to forget to update.
+
+    The order is a dependency chain, and each stage returns early rather than
+    reporting a cascade of consequences. A store that cannot be opened makes
+    every later question meaningless, so the report stops there with one fault
+    named instead of six. The same applies to a missing snapshot and to an
+    unreachable Ollama: an operator reading a probe at three in the morning
+    needs the first true statement, not the transitive closure of it.
+
+    What the chain actually asserts, in the order the code runs it:
+
+    * the store opens — PostgreSQL when a DSN is configured, SQLite otherwise,
+      selected by the same factory every entry point uses so the probe cannot
+      be inspecting a different backend from the one serving;
+    * an index snapshot is published and active;
+    * that snapshot holds passages at all, and was chunked by the version this
+      build of `assistant/indexing/index.py` implements;
+    * the vector width matches what the engine is configured to produce;
+    * Ollama answers, and holds both the embedding and the generation model;
+    * **the snapshot's embedding model is the one the engine is configured to
+      use** — the check this whole module exists for, because an index built
+      by one model and queried by another returns confident nonsense rather
+      than an error, and nothing downstream would notice.
+
+    `apply_schema=False` on the PostgreSQL branch is deliberate: a readiness
+    probe runs constantly and must observe the system, never migrate it. The
+    store is closed in a `finally`, because a probe called every fifteen
+    seconds that leaked a connection would exhaust the server it is meant to be
+    watching over.
+
+    Vision is reported and, unless `ASSISTANT_VISION_DEMO` is set, excluded
+    from the verdict — see the module docstring for why a roadmap stage must
+    not be able to declare a working text system unready.
+    """
     report: dict = {"ready": False, "checks": {}}
 
     dsn = dsn or os.environ.get("ASSISTANT_POSTGRES_DSN", "")
@@ -255,6 +301,29 @@ def summary(report: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """The same verdict for an orchestrator and for a person, one exit code.
+
+    The exit status is the machine-readable part: 0 ready, 1 not. A container
+    healthcheck and a startup script both act on that alone, so the output
+    format is free to serve whoever is reading — `--json` for something
+    parsing it, the table from `summary()` for someone standing in front of a
+    demonstration five minutes before it starts, with the remedy printed under
+    each failing line.
+
+    **Liveness is not in this module at all.** It is one static line in
+    `assistant/interfaces/ui.py` at `/health`, answering "is this process
+    running" without touching the store. Everything here is readiness, and the
+    distinction is the reason both exist: a process can start perfectly and be
+    unable to answer a single question, and a probe that conflates the two
+    keeps such a container in rotation.
+
+    `--wait` is the one place the two callers genuinely want opposite
+    behaviour. A startup script has to give Ollama time to finish loading a
+    model; a readiness probe must never wait, because a probe that waits
+    reports healthy slowly instead of reporting unhealthy. The loop runs at
+    least once whatever the deadline, so `--wait 0` is a single check rather
+    than no check.
+    """
     use_utf8()
     parser = argparse.ArgumentParser(
         prog="assistant.infrastructure.health",

@@ -1,4 +1,29 @@
-"""OpenTelemetry export — lightweight, no SDK, fire-and-forget."""
+"""OTLP export built by hand, so that observability costs no runtime dependency.
+
+The dependency policy prefers the standard library where it is adequate, and
+for emitting spans, metrics and log records over OTLP/HTTP it is:
+`assistant/infrastructure/otel_export.py` assembles the JSON envelopes itself
+and posts them with `urllib`, rather than pulling in the OpenTelemetry SDK and
+its instrumentation tree. The cost of that choice is that the envelope shape is
+this repository's responsibility, which is what these tests hold: that
+`resourceSpans`, `resourceMetrics` and `resourceLogs` are built where a
+collector expects them, that trace and span ids survive into the payload, and
+that the status code is the OTLP enumeration — `2` for error, `0` for ok —
+rather than the readable word used in the internal span.
+
+Two properties matter more than the shapes. Export is **opt-in**: with no
+`OTEL_EXPORTER_OTLP_ENDPOINT` set, nothing is sent at all, which is the state a
+clean clone and the whole test suite run in. And export is **fire-and-forget**:
+a collector that is absent, refusing connections or slow must degrade telemetry
+and never an answer, so a network error is logged at debug and swallowed rather
+than raised into the caller.
+
+Everything here is mocked at `_send_otlp` or at `urllib.request.urlopen`. No
+collector is contacted, no port is opened, and the service metadata test reads
+the resource attributes out of the payload instead of asserting on a running
+backend. What this file does not establish is that any collector accepts these
+documents; that is an integration concern and is not claimed.
+"""
 
 import json
 import os
@@ -9,7 +34,7 @@ from assistant.infrastructure import otel_export
 
 
 class TestOtelExport(unittest.TestCase):
-    """Test OTLP export functions."""
+    """The three OTLP envelopes, the opt-in gate, and the failure that must not raise."""
 
     def test_export_trace_builds_otel_format(self):
         """Trace export builds valid OTel JSON."""
@@ -146,10 +171,20 @@ class TestOtelExport(unittest.TestCase):
 
 
 class TestJsonFormatterOtel(unittest.TestCase):
-    """Test that JSON formatter includes OTel headers."""
+    """Structured logs carry the same service identity as the exported spans.
+
+    A log line and a span that cannot be attributed to the same service and
+    version are two unrelated records, so `JSONFormatter` reads the OTel
+    service environment rather than naming the application itself.
+    """
 
     def test_json_formatter_includes_otel_headers(self):
-        """JSON logs include service name, version, environment."""
+        """`service.name`, `service.version` and `deployment.environment` reach the payload.
+
+        The module is reloaded because those values are read at import, which
+        is also why this is the one test here with a side effect on global
+        state.
+        """
         from assistant.infrastructure import observability
 
         formatter = observability.JSONFormatter()

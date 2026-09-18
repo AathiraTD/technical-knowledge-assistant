@@ -107,7 +107,8 @@ class SessionStore:
         self._clock = clock
         self._sessions: "OrderedDict[str, Session]" = OrderedDict()
         # Reentrant to match the rest of the shared state in this codebase
-        # (`store/locking.py`, `cache.py`), so a method may call another.
+        # (`assistant/knowledge/store/locking.py`, `assistant/cache.py`), so a
+        # method may call another.
         self._lock = threading.RLock()
 
     # -- identity ----------------------------------------------------------

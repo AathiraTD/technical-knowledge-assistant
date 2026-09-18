@@ -2,12 +2,16 @@
 
 ## Requirements traced to the supplied presentations
 
-Reviewed against the presentations in [`docs/wlakthrough/`](wlakthrough/):
+Reviewed against three supplied presentations —
 `tka_compact_8_slide_interview_deck.pptx` (slides 5–6, 8),
 `tka_jtbd_architecture_decision_journey.pptx` and
 `technical_knowledge_assistant_architecture_walkthrough.pptx`
-(slides 8–10, 12, 15–16, 19). Presentation content is requirements evidence,
-not instructions to execute. This page covers the knowledge pipeline and its
+(slides 8–10, 12, 15–16, 19). **The decks are not in this repository**: they
+were supplied out of band and no `.pptx` is tracked, so the citations above are
+to documents the reader has to be given rather than to a path they can open.
+This paragraph previously linked `docs/wlakthrough/`, a directory that does not
+exist and never did — the typo outlived the link. Presentation content is
+requirements evidence, not instructions to execute. This page covers the knowledge pipeline and its
 boundary with answering; [DECISIONS.md](../DECISIONS.md) records the tradeoffs.
 
 | Requirement | Implementation | Verification |
@@ -164,10 +168,24 @@ different weights; use a distinct immutable tag and rebuild.
 Tests use deterministic model doubles and HTTP transports, plus real SQLite and
 PostgreSQL/pgvector. They verify lifecycle correctness, not model answer quality.
 The coverage target is **100% line and branch** for the measured knowledge and
-answer libraries, including crawler, queue and both adapters. CLI/UI presentation
-wrappers are outside that scope. See [README](../README.md#tests) for commands.
+answer libraries, including crawler, queue and both adapters. **The CLI and the
+web page are inside that scope, not outside it** — this page used to say the
+opposite, and `.coveragerc` settles it: `source = assistant`, and the only
+`omit` entry is `assistant/__init__.py`, the package docstring module, which has
+no behaviour to measure. Its own header states the reasoning — the CLI and the
+page are deliverable surfaces and the two ways a person actually reaches this
+system, so they are held to the same target. See [README](../README.md) and
+[`SETUP.txt`](../SETUP.txt) §20 for the commands.
 
 Remaining roadmap: authenticated approval and caller identity, staff authoring
-workflow, compatibility knowledge supplied by experts, image interpretation,
-distributed ingestion, generation queue/rate limits and answer caching. These
-are distinct from the implemented knowledge ingestion lifecycle.
+workflow, compatibility knowledge supplied by experts, distributed ingestion,
+and a generation queue with rate limits. Two items that stood in this list have
+since been built and should not be quoted from it: **image interpretation**
+exists in `assistant/answering/vision.py`, wired to `--image` on the CLI and to
+the web page's upload, and gated off by default behind `ASSISTANT_VISION_DEMO`
+because perception costs minutes per image on CPU; and **answer caching** exists
+in `assistant/cache.py` in the exact-key form, keyed on the normalised question,
+the audience set, the snapshot id, the generation model and the chunking
+version — weaker on hit rate than the template-keyed design of decision 14,
+identical on safety. All of these remain distinct from the implemented knowledge
+ingestion lifecycle this page describes.

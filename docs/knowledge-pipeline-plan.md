@@ -29,13 +29,20 @@ this does not invent or approve technical content.
    (crawl, extract, index, embedding client/cache, model, repository, storage,
    and new lifecycle/bootstrap modules). Do not omit crawler/PostgreSQL or add
    coverage exclusions to meet the target. Keep full existing suite green.
+   Note that the enforced configuration is wider than this criterion: `.coveragerc`
+   sets `source = assistant` and omits only `assistant/__init__.py`, so the CLI
+   and the web page are measured to the same target rather than excused as
+   presentation wrappers.
 6. Document final architecture, decisions, commands, evidence and limitations.
 
 ## Completion
 
 Implemented and verified on 16 September 2026. See
 [the requirements mapping and runbook](knowledge-pipeline.md) and
-[the measured verification evidence](knowledge-pipeline-verification.md).
+[the measured verification evidence](knowledge-pipeline-verification.md) — which
+carries a dating caveat worth reading first: the package was restructured on
+18 September 2026 and those figures have not been re-measured against the
+current tree.
 
 ## Verification commands
 

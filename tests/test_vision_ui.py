@@ -14,7 +14,7 @@ graph, the JSON assembly -- is the code that runs in the demonstration.
 
 The escaping tests are not ceremony. A filename is caller-controlled text that
 reaches the page without passing a model, and the observation note is
-model-controlled text that reaches the page without passing the six checks.
+model-controlled text that reaches the page without passing the eight checks.
 Those are the two strings on this surface with no other guard in front of them.
 """
 
@@ -265,7 +265,7 @@ def test_the_client_renders_every_reading_with_its_certainty(serve):
 
 
 def test_the_model_note_shown_on_the_page_is_escaped(serve):
-    """Model-controlled text, reaching a person without passing the six checks."""
+    """Model-controlled text, reaching a person without passing the eight checks."""
     base = serve(perception(("substrate", "brickwork"),
                             note="<img src=x onerror=alert(1)>"))
     report = json.loads(ask(base, "what thickness?"))["perception"]

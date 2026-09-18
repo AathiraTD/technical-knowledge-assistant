@@ -727,6 +727,34 @@ def summarise(report: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Index what changed, and print what it did rather than that it finished.
+
+    The default is a delta run: `build()` compares the crawl against the
+    content hashes of what is **currently being served** and reprocesses only
+    what is new or changed. So this command is cheap to run often, and running
+    it on an unchanged site extracts nothing, chunks nothing and embeds
+    nothing.
+
+    `--rebuild` is the override for the one thing a content hash cannot see. A
+    chunking change moves every passage boundary in the corpus without moving a
+    single hash, so a delta run would leave the whole index stale and silent
+    about it. Rebuilding preserves history — versions are superseded, never
+    dropped — which is why it is an ordinary option rather than a destructive
+    one.
+
+    `--staff-dir` ingests reviewed staff JSON through the same chunking,
+    versioning and audience pipeline as crawled material, so approved internal
+    answers are evidence like any other and carry their own audience tags. The
+    option is absent from the call when it was not given, rather than passed as
+    `None`, so nothing downstream has to distinguish the two.
+
+    An unreachable Ollama exits 1 with the reason on stderr and no partial
+    publication, because there is nothing useful to build without embeddings.
+    `summarise()` on stdout is the ingestion report — counts by change type,
+    extraction quality per document — and it is the artefact, not decoration: a
+    run that quietly recomputed everything and a run that skipped everything
+    are indistinguishable without it.
+    """
     use_utf8()
     parser = argparse.ArgumentParser(
         prog="assistant.indexing.index",

@@ -455,6 +455,21 @@ class SQLiteKnowledgeRepository:
         return {r["canonical_url"]: r["content_hash"] for r in rows}
 
     def versions(self, canonical_url: str) -> list[DocumentVersion]:
+        """Every version of one document, newest first — superseded ones included.
+
+        This is the audit read, and it is the only one that sees inactive rows
+        on purpose. "Why did it say that six months ago?" is answerable because
+        a changed document supersedes rather than replaces: the old version
+        stays, marked inactive, and shows up here. Retrieval cannot reach any
+        of it — `retrieve()` joins through the active version — so returning
+        history costs nothing in safety.
+
+        The same list, in the same order, comes back from
+        `assistant/knowledge/store/postgres.py`. That parity is decision 3's
+        claim made literal: one boundary, two adapters, equivalent domain
+        semantics, and an empty list for a URL that was never crawled rather
+        than an error.
+        """
         rows = self.db.execute(
             """SELECT v.* FROM document_versions v
                JOIN documents d ON d.id = v.document_id
@@ -472,6 +487,20 @@ class SQLiteKnowledgeRepository:
         ]
 
     def crawl_runs(self, limit: int = 10) -> list[CrawlRun]:
+        """The last few ingestion runs, newest first, with what each one found.
+
+        New, changed, unchanged, failed and removed are counted separately
+        because they are different events with different consequences — an
+        unchanged document costs nothing, a failed one keeps its previous
+        version, and a removed one is deactivated rather than deleted. A run
+        that reported ninety-four unchanged and a run that silently did nothing
+        are indistinguishable in a terminal and are not indistinguishable here.
+
+        Written inside the publication transaction, so the counts belong to the
+        snapshot named beside them; `snapshot_id` is what ties a night's crawl
+        to the release it produced. `assistant/knowledge/store/postgres.py`
+        returns the same rows in the same order.
+        """
         rows = self.db.execute(
             "SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
@@ -655,6 +684,19 @@ class SQLiteKnowledgeRepository:
         )
 
     def document(self, canonical_url: str) -> Document | None:
+        """One document's identity — title, type, authority, product, audience.
+
+        Identity only: no version, no passages, no vectors. It answers "what is
+        this URL" for a citation being rendered or a name being checked, and
+        `None` for a URL the corpus has never held.
+
+        Note what it does **not** do: it applies no audience filter, because it
+        is a lookup of a row whose audience it returns for the caller to act
+        on, and it is not a retrieval path. The audience decisions that matter
+        are made where evidence is selected — inside `retrieve()`, and in
+        `manifest()` for the published list — not here.
+        `assistant/knowledge/store/postgres.py` behaves identically.
+        """
         r = self.db.execute(
             """SELECT canonical_url, title, link_text, document_type, authority,
                       audience AS doc_audience, product
@@ -664,6 +706,23 @@ class SQLiteKnowledgeRepository:
         return self._document(r) if r else None
 
     def manifest(self, audiences: tuple[str, ...] = ("public",)) -> list[Document]:
+        """What is currently published, as this audience is allowed to see it.
+
+        Two constraints, both in the query rather than in the caller. The join
+        through `active_version_id` means a withdrawn document disappears from
+        the manifest while its history stays in the database, and the audience
+        clause means a staff-tagged document is never in a list handed to a
+        public caller — which matters because this list is what answers a
+        document request on the route path, where nothing else would filter it.
+
+        Ordered by authority then URL, so a datasheet precedes a product page
+        precedes an article, and the order is stable across runs.
+
+        The audience is bound as parameters — `IN (?,?)` here, `= ANY(%s)` in
+        `assistant/knowledge/store/postgres.py`. Only the placeholder dialect
+        differs; the predicate, the ordering and the result are the same, which
+        is the parity decision 3 is built on.
+        """
         marks = ",".join("?" * len(audiences))
         rows = self.db.execute(
             f"""SELECT d.canonical_url, d.title, d.link_text, d.document_type,
@@ -695,6 +754,22 @@ class SQLiteKnowledgeRepository:
         return [Excluded(r["url"], r["reason"], r["link_text"]) for r in rows]
 
     def snapshot(self) -> Snapshot | None:
+        """The release being served, or `None` when nothing has been published.
+
+        The snapshot is what makes an answer explicable after the fact: it
+        binds the embedding model and its dimension, the chunking version, and
+        the document and passage counts to the index those answers came out of.
+        The engine reads it at construction and **refuses to run when the
+        model or the dimension does not match what it is configured for**,
+        because an index built by one embedding model and queried by another
+        returns confident nonsense rather than an error.
+
+        Exactly one row can be active, so this returns a single value rather
+        than the newest of several. `None` is a normal state — a clean clone
+        before the first build — and is reported as "not built" by
+        `assistant/infrastructure/health.py`, not as a fault.
+        `assistant/knowledge/store/postgres.py` returns the same record.
+        """
         r = self.db.execute(
             "SELECT * FROM index_snapshots WHERE is_active = 1"
         ).fetchone()
@@ -710,6 +785,20 @@ class SQLiteKnowledgeRepository:
         )
 
     def active_version(self, canonical_url: str) -> DocumentVersion | None:
+        """The one version of this document retrieval is allowed to reach.
+
+        Singular by database constraint, not by convention: a partial unique
+        index refuses a second active version of the same document, so an
+        activation that forgot to deactivate its predecessor fails in the
+        database rather than producing two coverage figures for one product.
+        This method therefore cannot need an ordering or a tiebreak.
+
+        `None` means the document is withdrawn or was never successfully
+        indexed — both are states the corpus genuinely has, and both are
+        distinguishable from a missing document by asking `versions()`, which
+        still returns the history.
+        `assistant/knowledge/store/postgres.py` enforces and returns the same.
+        """
         r = self.db.execute(
             """SELECT v.*, d.canonical_url FROM document_versions v
                JOIN documents d ON d.id = v.document_id

@@ -82,6 +82,25 @@ MODELS = [
 
 
 def build_chunks() -> list[Chunk]:
+    """The corpus as the indexer would chunk it, without touching the index.
+
+    Re-extracts and re-chunks from the shipped crawl log using the same
+    `extract_html`, `extract_pdf` and `chunk_sections` the real pipeline uses,
+    so what is being compared is the retrieval quality of the models rather
+    than the difference between this harness and the build. Importing those
+    functions rather than reimplementing them is the whole point — a benchmark
+    that chunked differently from the indexer would measure a corpus that is
+    never served.
+
+    It deliberately does not read the knowledge store and deliberately writes
+    nothing to it. The index holds vectors from one model; this needs the same
+    passages under several, and running it must not disturb the release an
+    answer could be served from at the same moment.
+
+    Cache entries whose file is missing are skipped rather than raised on, so a
+    partial cache still yields a comparison across the documents that are
+    present — the measurement is relative, and every model sees the same set.
+    """
     log = json.loads((ROOT / "data/cache/crawl-log.json").read_text(encoding="utf-8"))
     chunks: list[Chunk] = []
     for entry in log["fetched"]:
@@ -101,6 +120,31 @@ def build_chunks() -> list[Chunk]:
 
 
 def embed_all(texts: list[str], model: str, dims: int, label: str) -> np.ndarray:
+    """Vectors for every passage, normalised so cosine is a dot product.
+
+    The rows are unit length on return, which is why `evaluate` can score with
+    a single matrix multiply and no per-query normalisation of the corpus.
+
+    It shares the indexer's `EmbeddingCache`, and sharing it is safe for the
+    same reason the cache is safe in the build: the key is the hash of the text
+    together with the model tag and the dimension count, so a vector is only
+    ever returned for the exact text it was computed from by the exact model
+    that computed it. Pointing this at a second model therefore misses every
+    key and recomputes, which is the required behaviour — a cached vector from
+    another model is exactly the confident nonsense the index header exists to
+    prevent.
+
+    The practical consequence is what makes this benchmark runnable at all: the
+    first model's pass is largely free against the shipped cache, so the cost
+    of the comparison is the candidates that have never been run, not the whole
+    corpus times the number of models. The printed cached/computed counts are
+    there so a run that quietly recomputed everything cannot be mistaken for
+    one that did not.
+
+    Note that the reported build time is therefore only a like-for-like
+    embedding cost when the cache is cold for every candidate; decision 6 lists
+    build time as a criterion, and a warm cache measures the cache.
+    """
     with EmbeddingCache() as cache:
         known = cache.get_many(texts, model, dims)
         todo = [i for i in range(len(texts)) if i not in known]
@@ -119,6 +163,35 @@ def embed_all(texts: list[str], model: str, dims: int, label: str) -> np.ndarray
 
 
 def evaluate(spec: dict, chunks: list[Chunk]) -> dict:
+    """One model's recall at five, and what it cost to get there.
+
+    A question counts as answered only when a passage in the top five contains
+    the verified answer string *and* comes from the named document. Both halves
+    matter: a document match alone would credit a model for retrieving the
+    right datasheet's wrong section, which is precisely the near-miss the
+    relevance gate exists to catch downstream, and crediting it here would
+    select the model that produces the most refusals.
+
+    The prefix handling is the reason this file has three specs for two models.
+    Qwen3-Embedding is trained with an instruction prefix on queries and none
+    on documents; running it without one is a configuration error that reads
+    as a model weakness, so both configurations are measured rather than one
+    being assumed. `nomic-embed-text` asymmetrically prefixes both sides, which
+    is why `doc_prefix` is applied to the passages and not only to the query.
+
+    `ollama.EMBED_DIMENSIONS` is patched for the duration and restored in a
+    `finally`, because the module-level dimension is an assertion the embedding
+    call makes against its own output and the candidates disagree about width
+    (1024 against 768). Mutating shared module state is the ugly part of this
+    function and it is contained here deliberately — the alternative was a
+    dimension parameter threaded through the production call path for the sole
+    benefit of a benchmark.
+
+    The returned row also carries index build time, query time and the vector
+    footprint, which are three of decision 6's criteria. The two it cannot
+    measure — memory with the generation model also resident, and input window
+    against the longest chunk — stay a matter for the record.
+    """
     label = spec.get("label", spec["tag"])
     dims = spec["dims"]
     doc_prefix = spec.get("doc_prefix", "")
@@ -169,6 +242,29 @@ def evaluate(spec: dict, chunks: list[Chunk]) -> dict:
 
 
 def main() -> int:
+    """Run the comparison decision 6 is still open on, and write the evidence.
+
+    Decision 6 records the embedding model as chosen by measurement and the
+    measurement as not yet run: `qwen3-embedding:0.6b` is the **development
+    default** actually in use and recorded in every snapshot, not a selected
+    model. This module is the thing that closes it, and until it has been run
+    against every candidate the record says so rather than claiming otherwise.
+
+    A model Ollama does not hold is skipped with the reason kept in the results
+    row, never silently dropped — a table missing a row reads as a model that
+    scored nothing rather than one that was never asked. The comparison is
+    still valid across whatever did run, because every candidate sees the same
+    chunks and the same questions.
+
+    The missed questions are printed with the top hit each model returned
+    instead, which is the part worth reading. A recall count says which model
+    is better; the near miss says why, and whether the failure is one a
+    synonym in the vocabulary would fix rather than a different model.
+
+    Results are written to `eval/results/embedding-choice.json` so the decision
+    can cite a file rather than a terminal, and so a rerun can be compared
+    against the last one.
+    """
     use_utf8()
     chunks = build_chunks()
     print(f"{len(chunks)} chunks, {len(QUESTIONS)} questions with verified answers\n")

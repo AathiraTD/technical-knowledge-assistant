@@ -1,4 +1,34 @@
-"""A request must read one release while the next release is published."""
+"""One answer reads one release, even while the next release is being published.
+
+Decision 19 pins a single read transaction per answer, and the reason is not
+performance. An answer is assembled from several reads — passages, then
+caveats, then the snapshot header printed beside it — and an indexer that
+publishes between two of those reads would produce a reply whose citations and
+whose header describe different states of the corpus. The retrieval rule that
+active and superseded versions never blend would hold on each individual query
+and still be violated by the answer as a whole.
+
+So `read_snapshot()` is a context manager over a real database transaction, and
+these tests exercise it with **two live connections to the same store**: a
+reader inside the context, a writer publishing a new version underneath it. The
+reader must continue to see `before` — both its snapshot id and its passage
+text — and must see `after` only once the context has closed. The second test
+covers the path that would quietly break the first: an exception inside the
+context has to end the transaction rather than leave it open, or the connection
+serves that release forever.
+
+The third test is about what a snapshot has to carry to be auditable at all.
+Publication records per-document membership — version number and content hash
+in `notes["active_versions"]` — and the crawl outcome that produced it,
+including the removals, which are the one category with no surviving row to
+point at. A crawl whose counts were written outside the publishing transaction
+could disagree with the release it describes.
+
+These are lifecycle tests, not concurrency stress tests: they prove the
+isolation boundary exists and is scoped correctly, not that it holds under
+load. Contention between competing publishers is covered by the publication
+lock tests.
+"""
 from dataclasses import replace
 
 import pytest
@@ -9,6 +39,7 @@ from test_repository_contract import A, doc, ver, chunk, snap
 
 
 def test_read_snapshot_pins_passages_and_caveats_until_request_ends(tmp_path):
+    """A reader holding the context keeps `before` until it exits, then sees `after`."""
     path = tmp_path / "read.db"
     with SQLiteKnowledgeRepository(path) as writer, SQLiteKnowledgeRepository(path) as reader:
         first = DocumentUpdate(doc("one"), ver("one"), [chunk("one", 0, "old", A)])
@@ -24,6 +55,7 @@ def test_read_snapshot_pins_passages_and_caveats_until_request_ends(tmp_path):
 
 
 def test_read_snapshot_releases_transaction_on_error(tmp_path):
+    """An exception inside the pinned read must not strand an open transaction."""
     with SQLiteKnowledgeRepository(tmp_path / "read.db") as repo:
         with pytest.raises(ValueError):
             with repo.read_snapshot():
@@ -32,6 +64,7 @@ def test_read_snapshot_releases_transaction_on_error(tmp_path):
 
 
 def test_snapshot_records_membership_and_complete_crawl_outcome(repo):
+    """Version, content hash, removals and snapshot id are written inside publication."""
     from assistant.knowledge.model import CrawlRun
     repo.apply_delta([DocumentUpdate(doc("one"), ver("one"), [chunk("one", 0, "text", A)])], [],
                      snap("release"), crawl_run=CrawlRun("2026-01-01", documents_removed=2, snapshot_id="release"))

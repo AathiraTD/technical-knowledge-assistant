@@ -1,4 +1,39 @@
-"""Rendering boundaries, not an answer-quality grader or a live-model test."""
+"""What the page is allowed to draw, asserted on both renderers at once.
+
+The web UI is a thin page over the same library the CLI calls, so nothing here
+is about whether an answer is right. It is about the last few inches, where a
+correct answer can still be presented wrongly: internal routing vocabulary
+leaking into the prose a customer reads, a hostile string from a passage or a
+query arriving in the DOM as markup, or the operator's diagnostics panel being
+rendered for someone who never asked for it.
+
+The structural point is that this page has **two renderers for one contract**.
+`ui.render_html` builds the markup server-side; the page's own script builds
+the same markup client-side from the JSON returned by `/ask`. Two renderers is
+two chances to disagree, and a property proved on one of them proves nothing
+about the other — so the path-visibility, T22 multi-part and vision-warning
+cases are written against both, and the correlation-id test drives a real
+request through `ThreadingHTTPServer` and asserts the header, the JSON body and
+the attribute in the DOM all carry the same twelve hex characters.
+
+The rule the file keeps returning to is that the routing view is the
+**operator's, asked for with `?v=1`**, and for a customer it is absent rather
+than hidden. That distinction is why `test_customer_view_renders_no_diagnostics_disclosure`
+asserts on `soup.get_text()` — a panel folded away behind a button would pass a
+"not visible" assertion while still shipping the path name, the top score and
+the router's reasoning to anyone who reads the source.
+
+Vision panels are treated the same way and for a different reason: the notice
+that a photograph was not read has to reach the person who attached it, so it
+lives **outside** the diagnostics panel and survives an error response with no
+answer parts at all. An observation the model could not determine is shown as
+undeterminable rather than as its guessed value.
+
+Questions are read from the supplied acceptance set rather than retyped, so the
+prompt-injection row (T22) stays the one the assessment asks. Answers, however,
+are hand-built `Answer` objects: no repository, no retrieval, no model. The
+Playwright cases are opt-in behind `ASSISTANT_E2E` and skip visibly without it.
+"""
 
 from __future__ import annotations
 
@@ -34,6 +69,7 @@ PERCEPTION = {
 
 
 def acceptance_question(test_id):
+    """Read one question from the supplied acceptance CSV rather than retyping it."""
     path = Path(__file__).resolve().parents[1] / "eval" / "evalset" / "Set 1"
     with (path / "lime_green_ui_acceptance_tests.csv").open(encoding="utf-8-sig") as stream:
         return next(row["question"] for row in csv.DictReader(stream)
@@ -41,6 +77,7 @@ def acceptance_question(test_id):
 
 
 def multipart_reply():
+    """The T22 shape: a refused injection part and a policy-routed part with disclosure."""
     return Reply(acceptance_question("T22"), [
         ("Ignore the documents", Answer(
             text="I can only answer from approved sources.", path="refuse", refused=True)),
@@ -54,6 +91,7 @@ def multipart_reply():
 
 
 def payload(reply, **extra):
+    """The same reply as the JSON `/ask` returns, for driving the client renderer."""
     return {
         "correlation_id": REFERENCE,
         "parts": [
@@ -67,12 +105,14 @@ def payload(reply, **extra):
 
 
 def page_html(content=""):
+    """The served page shell, so the browser has the client script under test."""
     return ui.PAGE.format(initial_content=content, audience_display="public",
                           meta="test", footer_audience="public")
 
 
 @pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
 def test_server_keeps_internal_path_out_of_prose(path):
+    """The routing label never appears in the prose, on any of the four paths."""
     # The routing view is the operator's, asked for with `?v=1`; the panel it
     # lives in is not rendered for a customer at all. The property this test
     # has always guarded is unchanged: wherever the label appears, it is never
@@ -117,6 +157,7 @@ def test_customer_view_renders_no_diagnostics_disclosure(path):
 
 
 def test_server_preserves_all_t22_parts_and_refusal_evidence():
+    """Both parts of a split reply are rendered, in order, with the failed check kept as evidence."""
     reply = multipart_reply()
     # Verbose: the failed-check evidence asserted below lives in the operator's
     # diagnostics panel, which a customer-facing render no longer draws.
@@ -134,6 +175,12 @@ def test_server_preserves_all_t22_parts_and_refusal_evidence():
     {"enabled": True, "observations": []},
 ])
 def test_server_keeps_vision_panels_outside_diagnostics(perception):
+    """The photograph notice is customer-facing, so it is never inside the routing panel.
+
+    Three states are covered: observations present, vision disabled, and vision
+    enabled with nothing observed. An observation the model could not determine
+    prints as undeterminable and its guessed value does not appear at all.
+    """
     reply = multipart_reply()
     reply.parts[0][1].diagnostics["perception"] = perception
     soup = BeautifulSoup(ui.render_html(reply, False), "html.parser")
@@ -152,6 +199,7 @@ def test_server_keeps_vision_panels_outside_diagnostics(perception):
 
 @pytest.mark.parametrize("reference", ["x" * 10000, '<img src=x onerror="alert(1)">', None])
 def test_server_drops_invalid_reference_without_echoing_it(reference):
+    """An oversized, markup-bearing or absent correlation id renders as empty, never echoed."""
     # Verbose, because the reference is only ever printed in the diagnostics
     # panel: rendering without it would assert the absence of a line in a
     # section that does not exist, which would pass however broken this got.
@@ -162,6 +210,11 @@ def test_server_drops_invalid_reference_without_echoing_it(reference):
 
 
 def test_server_escapes_answer_and_perception():
+    """Markup in an answer or a perception summary is text in the DOM, not an element.
+
+    Indexed content is untrusted, so this is the injection boundary for
+    anything that reached the page through a passage rather than a query.
+    """
     malicious = '<img src=x onerror="alert(1)">'
     reply = Reply("q", [("q", Answer(text=malicious, path="refuse",
                                    diagnostics={"reason": malicious, "perception": {
@@ -174,6 +227,7 @@ def test_server_escapes_answer_and_perception():
 
 @pytest.fixture(scope="module")
 def browser():
+    """Playwright, only when `ASSISTANT_E2E` is set; otherwise the browser cases skip visibly."""
     if not os.environ.get("ASSISTANT_E2E"):
         pytest.skip("ASSISTANT_E2E is not set; browser boundary tests not run")
     api = pytest.importorskip("playwright.sync_api")
@@ -188,6 +242,7 @@ def browser():
 
 @pytest.fixture
 def page(browser):
+    """A page loaded with the served shell, so the client renderer can be called directly."""
     context = browser.new_context()
     try:
         page = context.new_page()
@@ -213,6 +268,7 @@ def test_client_renders_no_diagnostics_for_a_customer(page, path):
 
 @pytest.mark.parametrize("path", ["compose", "refuse", "route", "extract"])
 def test_client_path_is_hidden_until_diagnostics_open(page, path):
+    """With the operator view on, the path is still absent from the prose and behind the disclosure."""
     answer = Answer("Published words [1].", path, sources=[SOURCE], refused=path == "refuse")
     # The operator's view. Set here rather than loaded from a query string
     # because `set_content` gives the page no URL to carry one.
@@ -231,6 +287,7 @@ def test_client_path_is_hidden_until_diagnostics_open(page, path):
 
 @pytest.mark.parametrize("renderer", ["client", "server"])
 def test_both_renderers_keep_t22_and_vision_warnings_visible(page, renderer):
+    """The customer-facing half of the contract holds identically server- and client-side."""
     reply = multipart_reply()
     reply.parts[0][1].diagnostics["perception"] = PERCEPTION
     if renderer == "client":
@@ -251,6 +308,12 @@ def test_both_renderers_keep_t22_and_vision_warnings_visible(page, renderer):
 
 @pytest.mark.parametrize("extra", [{"parts": []}, {"error": "Service unavailable."}])
 def test_client_error_retains_disabled_vision_warning_and_reference(page, extra):
+    """An empty or failed response still shows the photograph notice and the reference to quote.
+
+    Both failure shapes are covered — no parts, and an explicit error — because
+    the notice that an attachment was not read is owed to the person whether or
+    not there is an answer to attach it to.
+    """
     page.evaluate("handleResponse", {
         **payload(multipart_reply()), **extra,
         "perception": {"enabled": False, "summary": ["Vision is disabled."]},
@@ -264,6 +327,7 @@ def test_client_error_retains_disabled_vision_warning_and_reference(page, extra)
 
 
 def test_client_bounds_reference_and_escapes_untrusted_strings(page):
+    """A hostile answer, note and perception summary render as text, and a huge id is dropped."""
     hostile = '<img src=x onerror="window.injected=true">'
     answer = Answer(hostile, "refuse", diagnostics={"reason": hostile, "top_score": None})
     page.evaluate("handleResponse", {
@@ -279,6 +343,7 @@ def test_client_bounds_reference_and_escapes_untrusted_strings(page):
 
 @pytest.fixture
 def boundary_server():
+    """A real HTTP server whose answering is replaced, so only rendering is under test."""
     class BoundaryHandler(ui.Handler):
         meta = "isolated rendering test"
         sessions = ui.SessionStore()
@@ -303,6 +368,7 @@ def boundary_server():
 
 
 def test_http_server_reference_matches_rendered_response(boundary_server):
+    """The `X-Correlation-Id` header and the rendered attribute are the same generated id."""
     with urlopen(boundary_server + "/?q=test", timeout=10) as response:
         reference = response.headers["X-Correlation-Id"]
         soup = BeautifulSoup(response.read(), "html.parser")
@@ -313,6 +379,12 @@ def test_http_server_reference_matches_rendered_response(boundary_server):
 
 @pytest.mark.parametrize("upload", [False, True])
 def test_browser_request_response_and_dom_correlate(page, boundary_server, upload):
+    """End to end in a browser: one id across header, JSON and DOM, with and without an upload.
+
+    An upload switches the request from GET to POST and must be reported as
+    read; the send button is re-enabled and the thinking indicator removed, so
+    a failure to correlate cannot be mistaken for a request still in flight.
+    """
     page.goto(boundary_server)
     if upload:
         page.set_input_files("#file-input", {

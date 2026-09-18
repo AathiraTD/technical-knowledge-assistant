@@ -451,6 +451,21 @@ class PostgresKnowledgeRepository:
             return {r[0]: r[1] for r in cur.fetchall()}
 
     def versions(self, canonical_url: str) -> list[DocumentVersion]:
+        """Every version of one document, newest first — superseded ones included.
+
+        The audit read, and the only one that returns inactive rows on purpose.
+        A changed document supersedes rather than replaces, so the version that
+        produced an answer last quarter is still here, marked inactive and
+        unreachable by retrieval, which is what makes "why did it say that"
+        answerable at all.
+
+        Deliberately the same list, in the same order, as
+        `assistant/knowledge/store/embedded.py` returns — decision 3's one
+        boundary, two adapters. Columns are named rather than `SELECT *` and
+        the timestamp columns are stringified, because PostgreSQL hands back
+        `datetime` objects where SQLite hands back text and the domain type
+        must not be able to tell which adapter filled it.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT v.version_number, v.content_hash, v.source_path, v.etag,
@@ -473,6 +488,19 @@ class PostgresKnowledgeRepository:
         ]
 
     def crawl_runs(self, limit: int = 10) -> list[CrawlRun]:
+        """The last few ingestion runs, newest first, with what each one found.
+
+        New, changed, unchanged, failed and removed are separate counts because
+        they are separate events: an unchanged document costs nothing, a failed
+        one keeps the version it already had, and a removed one is deactivated
+        rather than deleted. A run that checked ninety-four documents and
+        changed none is not the same as a run that did nothing, and this is
+        where that distinction survives the terminal.
+
+        Written inside the publication transaction, so the counts and the
+        `snapshot_id` beside them describe the same release. Same rows, same
+        order as `assistant/knowledge/store/embedded.py`.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT started_at, completed_at, documents_checked,
@@ -637,6 +665,20 @@ class PostgresKnowledgeRepository:
         )
 
     def document(self, canonical_url: str) -> Document | None:
+        """One document's identity — title, type, authority, product, audience.
+
+        Identity only: no version, no passages, no vectors. It answers "what is
+        this URL" for a citation being rendered or a name being checked, and
+        `None` for a URL the corpus has never held.
+
+        No audience filter, deliberately — it returns the row's audience for
+        the caller to act on and is not a retrieval path. Audience is enforced
+        where evidence is chosen: in `retrieve()`, beside the distance
+        operator, and in `manifest()`. Identical behaviour to
+        `assistant/knowledge/store/embedded.py`; the row is zipped against
+        `cur.description` so the shared `_document()` mapper can be fed the
+        same dictionary shape SQLite's row factory produces.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT canonical_url, title, link_text, document_type,
@@ -649,6 +691,23 @@ class PostgresKnowledgeRepository:
         return self._document(dict(zip(columns, row)))
 
     def manifest(self, audiences: tuple[str, ...] = ("public",)) -> list[Document]:
+        """What is currently published, as this audience is allowed to see it.
+
+        Two constraints, both in the query rather than in the caller. The join
+        through `active_version_id` drops a withdrawn document from the list
+        while its history stays in the database, and the audience predicate
+        means a staff-tagged document is never in a list handed to a public
+        caller — which matters because this list answers a document request on
+        the route path, where nothing downstream would filter it.
+
+        Ordered by authority then URL, so a datasheet precedes a product page
+        precedes an article, stably across runs.
+
+        `= ANY(%s)` against `assistant/knowledge/store/embedded.py`'s
+        `IN (?,?)` is the whole of the difference: a parameterised predicate
+        either way, never string-built, and the same result. The dialect
+        differs; the semantics are the ones decision 3 requires to match.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT d.canonical_url, d.title, d.link_text, d.document_type,
@@ -680,6 +739,25 @@ class PostgresKnowledgeRepository:
         return [Excluded(r[0], r[2], r[1] or "") for r in rows]
 
     def snapshot(self) -> Snapshot | None:
+        """The release being served, or `None` when nothing has been published.
+
+        The snapshot binds the embedding model and its dimension, the chunking
+        version and the document and passage counts to the index an answer came
+        from, which is what makes the answer explicable later. The engine reads
+        it at construction and **refuses to run when the model or the dimension
+        does not match what it is configured for** — an index built by one
+        embedding model and queried by another returns confident nonsense
+        rather than an error.
+
+        Exactly one row is active, so there is a single value to return rather
+        than a newest-of-several. `None` is a normal state and
+        `assistant/infrastructure/health.py` reports it as "not built".
+
+        `notes` is tolerated as either a mapping or JSON text because `jsonb`
+        arrives already decoded here while SQLite stores a string; the domain
+        type must not be able to tell which adapter filled it. Same record as
+        `assistant/knowledge/store/embedded.py`.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT id, created_at, embedding_model, embedding_dimensions,
@@ -697,6 +775,20 @@ class PostgresKnowledgeRepository:
         )
 
     def active_version(self, canonical_url: str) -> DocumentVersion | None:
+        """The one version of this document retrieval is allowed to reach.
+
+        Singular by database constraint rather than by convention: a partial
+        unique index on the active rows refuses a second active version of the
+        same document, so an activation that failed to deactivate its
+        predecessor raises an integrity error from PostgreSQL instead of
+        letting two coverage figures for one product into the index. That is
+        why no ordering or tiebreak is needed here.
+
+        `None` means withdrawn or never successfully indexed — both real states
+        — and `versions()` still returns the history that distinguishes either
+        from a document the corpus never held. Same guarantee, same result as
+        `assistant/knowledge/store/embedded.py`.
+        """
         with self.conn.cursor() as cur:
             cur.execute(
                 """SELECT v.version_number, v.content_hash, v.source_path, v.etag,

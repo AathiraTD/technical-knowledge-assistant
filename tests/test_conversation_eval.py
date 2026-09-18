@@ -1,6 +1,6 @@
 """Conversations: what a later turn inherits, and what it must not.
 
-The single-turn harness has covered routing, refusal and the six checks since
+The single-turn harness has covered routing, refusal and the eight checks since
 the beginning. What it has never covered is the part of the system that only
 exists across turns — `assistant/turn/session.py`'s three carried slots, the five it
 deliberately drops, the ask-back it holds in `pending`, and the provenance that
@@ -44,7 +44,7 @@ Ollama. Embedding is a keyword-to-axis stand-in so that retrieval is
 *deterministically steerable* — a question about thickness ranks the thickness
 passage first — which is what makes the topic-switch assertion mean anything on
 a four-passage corpus. Generation is `test_engine.quoting`, which quotes and
-cites and therefore survives the six checks. The vision call is replaced the way
+cites and therefore survives the eight checks. The vision call is replaced the way
 `tests/test_vision_seam.py` replaces it: by a `Perception` the real resolver
 still has to accept, so the vocabulary check, the confidence band and the region
 are genuinely exercised rather than stubbed past.

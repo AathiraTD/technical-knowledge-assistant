@@ -14,7 +14,7 @@ This document traces how the system evolved through measured failures, root-caus
 | **2. Compound-query evidence binding** | Correct evidence retrieved, but model attached claims to wrong passages | Model-generated association between claim and passage not verified | Introduce property-evidence binding; promote deterministically bound passages for composition | Evidence membership verified before ranking |
 | **3. Product registry pollution** | Generic editorial links ("lime plaster") entered product registry; false refusals on common sentences | Broad link harvesting without capitalization filter | Harvest only names starting with capital letters; preserve all genuine product links | Product vocabulary clean; name checks valid |
 | **4. Product-scope verification** | Answer cited correctly but contradicted evidence; wrong product claim slipped through | Citation correctness ≠ product-scope correctness; Check 6 alone insufficient | Introduce Check 7: explicit product-scope resolution with real-name enforcement | Wrong-product refusals caught before output |
-| **5. Compose evidence membership** | Ultra-only set correct, FAQ-only wrong, FAQ+Ultra produced refusal | Lexical attractor (FAQ heading matching question) preferred over deterministic binding | Exclude generic documents when product-bound evidence covers property | Membership-level control without breaking retrieval |
+| **5. Compose evidence membership** | Ultra-only set correct, FAQ-only wrong, FAQ+Ultra produced refusal | Lexical attractor (FAQ heading matching question) preferred over deterministic binding | Scope composition evidence to the named or carried product, and to passages that name it (`scoped_evidence()`) | Membership-level control without breaking retrieval |
 | **6. Vision substrate contract and provenance** | Vision observations indistinguishable from user statements; substrate uncalibrated from photograph | VLM observations treated as facts; loss of provenance attribution | Constrain to typed observations; vocabulary-filter values; distinguish OBSERVED from STATED | Observations explicit; inferences traced; confidence gates work |
 | **7. Ollama context consistency** | Local generation/vision models requested different context sizes; inference instability | Configuration split; no unified context baseline | Single `NUM_CTX` variable; propagate to all model calls | Local inference stability hardened |
 | **8. Conversation state security** | Audience set not in cache key; staff answer could reach public caller | Cache key missing audience dimension | Include audience set in exact-key cache | Audience isolation verified in test |
@@ -30,7 +30,7 @@ The system was designed as a **governed agentic workflow**, not an unconstrained
 - **Deterministic boundary**: policy routing, evidence sufficiency, version filtering, audience filtering, candidate assessment, product identity, calculations, citations, refusal
 - **LLM role**: structured understanding and grounded composition over retrieved passages only
 - **Retrieval**: semantic similarity plus metadata constraints (active version, audience, product, authority)
-- **Verification**: six post-generation checks before any answer leaves the system
+- **Verification**: eight post-generation checks before any answer leaves the system. Six at the start; check 7 (product scope) arrives in §5 and check 8 (product relationships and unsupported property claims) in §5.1, and `assistant/answering/answer.py` counts eight today — `obs.span("checks", count=8, …)`
 
 Conversation state was added to carry context across turns — product identity, substrate, location, exposure — using LangGraph orchestration with in-memory checkpointing in the demo.
 
@@ -69,7 +69,7 @@ No generated answer reenters as evidence-like material.
 - Citation chains cannot loop through prior generated answers
 - Each turn's facts must still trace to the indexed corpus
 - Check 1 (citation overlap) catches any slip where a sentence draws from history instead of passages
-- Test confirms no feedback loops: `tests/test_transcript_contamination.py`
+- Test confirms no feedback loops: `tests/test_context_isolation.py` — a poisoned prior answer changes neither the route, nor a detected slot, nor the embedded query, and the transcript still reaches the compose prompt delimited as non-evidence
 
 **Design rule**: *Transcript context ≠ evidence source.*
 
@@ -101,7 +101,7 @@ Introduce deterministic property-evidence binding **before** the model runs:
 4. **Promote bound passages** for composition: reorder the evidence set so passages supporting the actually-requested property appear first
 5. **Supplement, not replace**: other passages remain available (needed for cross-product comparisons), but the bound ones get priority
 
-Implemented in `assistant/answering/router.py:evidence_binding()` and integrated into the composition path.
+Implemented in `assistant/answering/answer.py:evidence_binding()` (line 450) and integrated into the composition path — `_binding_guidance()` reads it to tell the model where each half of the question is stated, and `promote_bound()` reorders on the single-property case. It lives beside the checks it feeds rather than in the router, which is where this document first placed it.
 
 ### Validation
 
@@ -207,6 +207,35 @@ Fails if:
 - Combined with binding (stage 3), ensures evidence belongs to the correct product
 - Follows the principle: *Citation correctness ≠ product-scope correctness.*
 
+### 5.1 Check 8 — relationship direction and unsupported property claims
+
+Check 7 settled *which product* an answer is about. It said nothing about what
+an answer asserts *between* two products, and that is a second way a correctly
+cited sentence can be wrong. "Forte is suitable over Ultra" and "Ultra is
+suitable over Forte" share every content word, so check 1's overlap test cannot
+separate them, and a passage stating one of them is not evidence for the other.
+
+Check 8 (`_semantic_failures`, `assistant/answering/answer.py`) verifies two
+things a lexical check cannot:
+
+1. **Relationship direction, polarity and conditions.** Every product-to-product
+   relation the generated sentence asserts must appear in a cited passage with
+   the same direction, the same polarity, and its conditions preserved — where
+   a condition includes a following sentence that qualifies or negates
+   (`_restriction_context`). Two named products joined by *over*, *under*,
+   *onto*, *compatible*, *finished* or *coated* with no relation the passage
+   supports fails as "the product relationship cannot be established".
+2. **Property claims that a shared product name does not license.**
+   *waterproof*, *watertight*, *structural*, *certified*, *certification* must
+   be explicitly asserted of the same product in a cited passage. A sheet
+   mentioning a product proves none of them, and these are the claims where an
+   unsupported sentence is a liability rather than an inaccuracy.
+
+It also enforces layer order where an answer is asked to establish one.
+
+**Design rule**: *A relation is a claim about two products, and needs its own
+evidence.*
+
 ---
 
 ## 6. Compose evidence membership
@@ -229,36 +258,54 @@ Earlier attempts at solution:
 - **Reordering/ranking alone**: Insufficient; lexical attraction in prompts overrides position.
 - **Deterministic binding (stage 3)**: Necessary but not sufficient for this case; binding shows that the property exists in Ultra's evidence, but does not prevent the model from preferring a generic match.
 
-### Fix: Conditional membership filtering
+### Fix: membership filtering — designed by document class, shipped by product identity
 
-Apply a **deliberate, measured, narrow rule**:
+The rule as designed was conditional on document class: when the resolved
+product's own evidence already covers the requested property (verified via
+binding), exclude generic product-range documents — FAQ entries,
+knowledge-base articles, system-level guides — from the composition evidence
+set, with the coverage condition as the safety property.
 
-When the resolved product's own evidence already covers the requested property (verified via binding), exclude generic product-range documents from the composition evidence set.
+**That form never landed, and saying so costs less than letting a reader grep
+for it.** Nothing in this repository excludes a passage by document type, and
+no filter consults the binding for a coverage condition; there is no
+`_filter_compose_evidence`, in `engine.py` or anywhere else. What shipped is
+`scoped_evidence()` (`assistant/answering/answer.py:580`), which filters on
+**product identity** instead:
 
-Specifically:
-- **Excluded when product evidence is sufficient**: FAQ entries, knowledge-base articles, system-level guides
-- **Always retained**: 
-  - The resolved product's datasheets and product pages
-  - Other products' datasheets (needed for cross-product analysis: "can I use Ultra over Solo?")
-  - Evidence that explicitly mentions the resolved product
+- **Kept**: every passage whose own product is one the question names — or the
+  product carried in `decision.slots["product"]` — and every passage whose text
+  explicitly names one of them. That second clause is what keeps a primer or
+  finishing relation stated on another product's sheet available, so
+  cross-product reasoning survives.
+- **Dropped**: everything else, including the Duro FAQ entry that produced the
+  failure above, because it is neither about Ultra nor names it.
+- **Fallback**: when the question names no product and none is carried, the hit
+  list is returned unchanged. That, not a coverage test, is what stops this
+  starving the model.
 
-The **coverage condition** is what makes this safe: filtering only occurs when the product's own evidence answers the question. If no single product's evidence covers the property, no filtering happens and all sources are included.
-
-Implemented in `assistant/answering/engine.py:_filter_compose_evidence()`.
+The observed failure is fixed, and by a narrower mechanism than the designed
+one: a document class is a judgement about a source, a product name is a fact
+about a passage.
 
 ### Measurement
 
-Over the corpus:
-- Standard retrieval is unchanged
-- Membership filtering applies only to Compose path
-- Other paths (Extract, Cite hand-off, Refuse) are unaffected
-- Evaluation shows: correct answer rates improved; wrong-product answers eliminated; over-refusal rate unchanged
+- Standard retrieval is unchanged; this filters what retrieval already returned
+- It is **not** Compose-only, as this document once claimed. `scoped_evidence()`
+  is applied on Extract (`answer.py:1712`) and in the factual and relationship
+  helpers (`1639`, `1685`) as well as on Compose (`1778`). Cited hand-off and
+  refusal are unaffected
+- An empty scoped set is an explicit refusal — "no evidence for the requested
+  product" — not a silent fall back to the unscoped list
+- Boundary cases are asserted in `tests/test_acceptance_evidence_boundaries.py`
 
 ### Outcome
 
-- Membership control is explicit, narrow, and conditional
-- Does not break cross-product reasoning
-- Evidence sufficiency is maintained (filtering only when condition is met)
+- Membership control is explicit and narrow
+- Does not break cross-product reasoning: a passage naming the product crosses
+  the filter whatever document it sits in
+- The un-named-product case is the release valve, and it is the one to watch:
+  a question that names nothing is scoped by nothing
 - Follows principle: *Retrieved evidence ≠ sufficient membership for composition.*
 
 ---
@@ -283,7 +330,7 @@ Additionally, the vision model could return values (like `exposure: "visible"`) 
 
 ### Fix: Three-layer contract
 
-**Layer 1 — Constraint to schema**: The vision model returns JSON with an enum-constrained `attribute` field. Attributes are `(substrate, symptom)` only — not `location` or `exposure` (see next layer). No `product` attribute exists for it to fill.
+**Layer 1 — Constraint to schema**: The vision model returns JSON with an enum-constrained `attribute` field. The enum is `VISION_SLOTS` — the ten attributes of the three tiers below — and what it omits is the point: no `product`, no `cause_asked`, and nothing naming structure, compliance or chemistry. A second list, `FORBIDDEN_ATTRIBUTES`, is checked in the decoder and counted into `refused`, so a model that ignores its own schema is visible rather than merely unsuccessful. Only the two tier-1 attributes may reach a router slot.
 
 **Layer 2 — Vocabulary resolution**: `vision.resolve()` compares observed values against `config/vocabularies.json`. Only values the vocabulary defines map to slots. An observation like `substrate: "Lime Green Solo"` is discarded (the term is not in the substrate vocabulary). This prevents the model from inventing substrate values or smuggling product names into slots.
 
@@ -299,13 +346,32 @@ Vision observations are marked `OBSERVED` and the renderer prints "as you can se
 
 Initial design expected vision to fill four slots: substrate, location, exposure, symptom.
 
-After running the real model on real photographs:
-- `substrate`: Safe to tier 1 (may fill) — photographs of exposed masonry can settle this
-- `symptom`: Safe to tier 1 — visible conditions like cracking, staining are perception
-- `location`: Moved to tier 2 (reported, never routed) — a flat elevation lacks ground lines, skylights, skirting; confidence that a wall is inside/outside from one photograph is poor
-- `exposure`: Moved to tier 2 — confidence in exterior/interior/semi-exposed from a single photo face is unreliable
+After running the real model on real photographs, `vision.py` settles on **three
+tiers**. Everything in all three is *reported* to the caller; only the first may
+change what the system does.
 
-Tier 2 observations are reported to the user for context but never change routing.
+- **Tier 1 — may fill a router slot** (`ROUTER_SLOTS = ("substrate", "symptom")`).
+  `substrate` because a photograph of genuinely exposed masonry does settle it,
+  and it is gated further by `_covered_without_exposure`. `symptom` because a
+  symptom is a visible condition — deposits, cracking, a blown patch — and that
+  is perception. `cause_asked` is absent from every tier: a cause is the
+  technical team's judgement (decision 16), and a model able to fill it would
+  route a diagnosis question away from the hand-off it must take.
+- **Tier 2 — reported, never routed** (`CONTEXT_SLOTS = ("location", "exposure")`).
+  These were tier 1 until the first real photograph went through the real model,
+  which answered a flat brick elevation with `{"attribute": "exposure", "value":
+  "visible", "confidence": 1.0}` twelve times. No such string is a value the
+  vocabulary defines, so nothing reached a slot and the safety property held —
+  but a photograph does not carry these facts, and a model reporting them is
+  producing text rather than evidence. Inside/outside is decided by what is
+  usually out of frame; exposure is a fact about a site's weather. Both are read,
+  both are shown as context, neither reaches the router, and the person is asked.
+- **Tier 3 — directly observable wall condition** (`CONDITION_ATTRIBUTES`:
+  `exposed_masonry`, `existing_finish`, `damaged_finish`, `cracks`, `staining`,
+  `texture`). What a photograph is actually good for. These never route either;
+  they are what the assistant reports when asked what it can reliably identify,
+  and two of them — `exposed_masonry`, `existing_finish` — additionally gate the
+  substrate claim in tier 1.
 
 ### Outcome
 
@@ -338,7 +404,7 @@ No single source of truth existed. The application never made unified decisions 
 Introduce a single `NUM_CTX` variable (`assistant/infrastructure/ollama.py`):
 
 ```python
-NUM_CTX = int(os.getenv('OLLAMA_NUM_CTX', '8192'))
+NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 ```
 
 All model calls — generation, embeddings, vision — use this value. Imported and passed to every Ollama HTTP call. Default is 8192; overridable via environment.
@@ -382,11 +448,16 @@ Add `audience_set` to the cache key. The key is now:
 
 Audience must match exactly for a cache hit to apply.
 
+The key has since grown three more fields — the carried slots, their origins and
+the transcript (`Assistant._cache_key`, `assistant/answering/engine.py`) — for
+the same class of reason: a substrate read off a photograph and a substrate the
+caller stated print different sentences, so they are different answers.
+
 ### Outcome
 
 - No audience leakage through the cache
 - Staff answers stay isolated
-- Test confirms: `tests/test_cache.py::test_audience_isolation()`
+- Tests confirm, in both directions: `tests/test_cache.py::test_a_staff_answer_is_not_served_to_a_public_caller` and `::test_a_public_answer_is_not_served_to_a_staff_caller_either`
 - Follows principle: *Audience filtering is not optional; it applies everywhere.*
 
 ---
@@ -430,7 +501,7 @@ The demo runs on:
 - **Generation**: Local Ollama, `qwen3.5:4b`
 - **Embeddings**: Local Ollama, `qwen3-embedding:0.6b`
 - **Vision**: Optional local Ollama `qwen3.5:4b` with vision
-- **Conversation state**: LangGraph `InMemorySaver` (per-process, not durable)
+- **Conversation state**: two halves, and only one of them is durable. The LangGraph checkpointer is `InMemorySaver` — per-process, lost on restart (decision 20's dependency block). The session's carried slots, pending ask-back and turn history persist to the `sessions` table via `PersistedSessionStore` (`assistant/turn/session_storage.py`), wired into the web surface by `open_persisted_session_store()`, which falls back to the in-memory store if no connection can be opened
 - **Tracing**: Structured spans with optional OTLP export; LangSmith tracing disabled in code
 
 Production infrastructure (not implemented in demo, but designed as seams):
@@ -452,9 +523,9 @@ These are supported by the repository and current implementation:
 
 - **Conversation pronouns**: Some bridging questions ("Why is it better?") need cleaner routing when "it" has been established as a product property rather than the product itself. Current workaround: ask-back.
 - **Targeted property retrieval**: When a question asks about a property that is only mentioned in one section of a datasheet, retrieval might return multiple sections. Evidence binding helps but doesn't guarantee tight scoping in all cases.
-- **Cross-product relation direction**: A passage like "Forte is suitable over Ultra" is evidence for Ultra-to-Forte compatibility but may not answer Forte-to-Ultra compatibility. Explicit direction needs verification.
-- **Image inference latency**: Local CPU vision inference ranges 156–198 seconds for successful cases; timeouts possible under load. Pre-run or use recorded traces for demo.
-- **In-memory conversation state**: Not durable; lost on process restart. LangGraph PostgreSQL checkpointer is dependency-blocked.
+- **Cross-product relation direction**: A passage like "Forte is suitable over Ultra" is evidence for Ultra-to-Forte compatibility but may not answer Forte-to-Ultra compatibility. Check 8 (§5.1) now verifies direction, polarity and conditions against the cited passage, so this fails closed into a refusal rather than printing; what remains is the coverage cost, not a safety gap.
+- **Image inference latency**: minutes, on a processor with no graphics card. The one figure actually measured on the build machine is **191.9 seconds** for a single 512×512 image through `qwen3.5:4b` (recorded at `assistant/answering/vision.py`, beside `VISION_TIMEOUT`); the opt-in live lane records a wider observed range of **150 to 600 seconds** (`tests/test_vision_live.py`), and one pre-fix run returned malformed JSON after 204 s. `VISION_TIMEOUT` defaults to 600 s for that reason. Vision is off unless `ASSISTANT_VISION_DEMO=1`; pre-run or use recorded traces for a demonstration.
+- **In-memory graph checkpoint**: the LangGraph checkpointer is not durable and is lost on process restart, because the PostgreSQL checkpointer is dependency-blocked. Session slots and turn history *do* survive a restart through `PersistedSessionStore`, so the two halves of conversation state have different durability — worth knowing before quoting either as the whole.
 - **Single Ollama instance**: No model parallelism; generation is the bottleneck. Production queue not implemented.
 - **Exact-key cache only**: Template-keyed cache (decision 14) remains roadmap. Current form hits only on word-identical questions.
 
@@ -468,7 +539,7 @@ From the failures and fixes above:
 2. **Retrieved passage ≠ sufficient evidence.** Retrieval confidence, lexical matching, and position ranking are not evidence sufficiency. Property coverage, product scope, and membership must be checked.
 3. **Citation correctness ≠ answer correctness.** A sentence with markers and word overlap to a passage can still attach the wrong claim to the wrong evidence. Property binding, product resolution, and scope checks are separate.
 4. **VLM hypothesis ≠ fact.** Vision observations are typed, vocabulary-gated, and explicitly provisional. Confidence, provenance, and vocabulary membership must be enforced.
-5. **Evidence membership controls output.** Retrieval is unchanged; composition membership can be scoped. When product-bound evidence is sufficient, generic documents are not included in the generation set.
+5. **Evidence membership controls output.** Retrieval is unchanged; composition membership can be scoped. A passage that is neither about a requested product nor names one does not reach the model — and when no product is requested, nothing is scoped away.
 6. **Fail closed before weakening verification.** If a fix would require relaxing a check, the design prefers a refusal (fail closed, coverage reduced) over a compromise check (safety maintained but harder to verify).
 7. **Fix the narrowest layer that caused the defect.** Product name harvesting: fix the link-text filter, not the whole extraction. Transcript: carry questions, not answers. Cache key: add audience, not rebuild the cache. Narrow fixes are easier to reason about and validate.
 
@@ -476,14 +547,16 @@ From the failures and fixes above:
 
 ## References
 
-- `assistant/answering/answer.py` — Citation checks and post-generation verification
-- `assistant/answering/router.py` — Evidence binding, routing, and property verification  
-- `assistant/answering/engine.py` — Composition path and membership filtering
-- `assistant/answering/vision.py` — Vision contract, provenance, and vocabulary filtering
+- `assistant/answering/answer.py` — the eight checks, `evidence_binding()`, `promote_bound()`, `scoped_evidence()`, `Provenance` and `SlotFact`
+- `assistant/answering/router.py` — routing, slot detection and precedence
+- `assistant/answering/engine.py` — `Assistant`: topic split, per-part orchestration, cache key, logging
+- `assistant/answering/vision.py` — Vision contract, tiers, provenance, and vocabulary filtering
 - `assistant/cache.py` — Cache key construction with audience isolation
 - `assistant/turn/session.py` — Trusted conversation state and slots
 - `tests/test_evidence_binding.py` — Property-evidence binding validation
 - `tests/test_checks.py` — Post-generation check coverage
+- `tests/test_acceptance_evidence_boundaries.py` — `scoped_evidence()` membership boundaries
+- `tests/test_context_isolation.py` — transcript-contamination regressions
 - `tests/test_cache.py` — Cache isolation and audience separation
 - `tests/test_vision_contract.py` — Vision observation typing and resolution
 - `eval/conversations.json` — Evaluation conversations with traced failures/fixes

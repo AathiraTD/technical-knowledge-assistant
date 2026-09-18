@@ -63,7 +63,7 @@ def recommending_but_well_cited(product: str):
 
     So this reads the passages out of the prompt the way the model is asked to,
     quotes one verbatim, and prefixes it with a recommendation. Every one of the
-    six checks passes -- the figures are in the cited passage, attached to the
+    eight checks passes -- the figures are in the cited passage, attached to the
     right product, with a real name -- and the only thing standing between it
     and the page is the guard.
     """
@@ -170,7 +170,7 @@ def test_the_stub_would_otherwise_print(assistant, monkeypatch):
     """The control. Without it, the tests below could pass for the wrong reason.
 
     This proves the recommendation the guard is about to refuse is one that
-    would genuinely have reached the page: it passes all six checks. A stub that
+    would genuinely have reached the page: it passes all eight checks. A stub that
     check 1 was quietly rejecting would make every assertion below vacuous.
     """
     monkeypatch.setattr(ollama, "generate", recommending_but_well_cited("Duro"))
@@ -178,7 +178,7 @@ def test_the_stub_would_otherwise_print(assistant, monkeypatch):
     # Duro is named in the question, so the guard exempts it: answering about
     # the product somebody asked about is answering their question, not the
     # system choosing one for them. What is left standing between this text and
-    # the page is the six checks, and they pass it.
+    # the page is the eight checks, and they pass it.
     reply, _ = assistant.ask_turn(turn("What coverage does Duro give?"))
     answer = reply.parts[0][1]
 
@@ -192,7 +192,7 @@ def test_a_misclassified_selection_cannot_recommend_unapproved(assistant, monkey
 
     A plain selection is forced to read as ``LOOKUP``, so it never reaches the
     evidence gate and composes instead. The model then recommends a product, in
-    words the six checks accept. Without the guard this prints.
+    words the eight checks accept. Without the guard this prints.
     """
     misclassify_as(monkeypatch, und.Intent.LOOKUP)
     monkeypatch.setattr(ollama, "generate", recommending_but_well_cited("Duro"))

@@ -334,7 +334,7 @@ def compares_products(text: str, registry) -> bool:
     stone" asserts neither substrate. It is the wrong one for the discussion
     target. "Curing or application conditions" lists two things asked about one
     product, and reading its "or" as a comparison left `topic_product` empty --
-    so the recommendation guard in `assistant/graph.py`, which exempts only the
+    so the recommendation guard in `assistant/turn/graph.py`, which exempts only the
     product the caller named, refused the answer's own mention of that product
     as an unapproved recommendation. A bare "or" therefore counts only when a
     product name sits within a few words of it; the explicit comparison words

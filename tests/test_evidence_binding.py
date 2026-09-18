@@ -33,7 +33,7 @@ A third, smaller gap sat behind both: "Can Ultra be applied internally on solid
 brick?" is plainly a suitability question and matched no compatibility term at
 all, so no property was detected, no gate ran, and there was nothing to bind.
 
-None of the six checks changed. The binding removes the opportunity to misbind;
+None of the eight checks changed. The binding removes the opportunity to misbind;
 it is not what catches a misbinding, and `test_the_binding_cannot_make_an_
 unsupported_clause_print` is the test that says so.
 """
@@ -594,7 +594,7 @@ def test_overlapping_evidence_suppresses_the_binding_block():
 
     This is the regression GD2 measured. The block that separated nothing still
     perturbed the generation, and the published "25mm" came back as "25 mm" --
-    correct, cited, passing all six checks, and a failed assertion about a
+    correct, cited, passing all eight checks, and a failed assertion about a
     figure, because the evaluation compares published figures with whitespace
     collapsed and nothing else normalised.
     """

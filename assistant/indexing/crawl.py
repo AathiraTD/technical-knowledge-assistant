@@ -195,6 +195,29 @@ def cache_path(url: str) -> Path:
 
 
 def classify_page(path: str, cfg: dict) -> str:
+    """What kind of page this is, decided by URL prefix and nothing cleverer.
+
+    The document type is not cosmetic: it sets the authority rank that resolves
+    a conflict between two passages — datasheet, then product page, then
+    knowledge-base article, then FAQ — and it is the noun that appears in a
+    citation. So it has to be derived from something stable, and on this site
+    the URL structure is the stable thing. Page titles are not (they carry
+    marketing copy), and filenames are not (they carry typos and date
+    prefixes); see `document_kind` for the same problem solved by link text.
+
+    Warmshell pages classify as product pages because that is what they are —
+    a system rather than a single product, but read for selection the same way.
+
+    Everything unmatched is `commercial`, which covers contact,
+    find-a-supplier and order-a-sample. That default is safe only because the
+    corpus boundary has already run: `wanted()` decides what is crawled at all,
+    so an unrecognised path reaching here is inside the boundary by rule rather
+    than an accident being given a type.
+
+    `cfg` is accepted and unused. It keeps the signature uniform with the other
+    classifiers in this module so the rules can move into `crawl.json` without
+    touching every call site.
+    """
     if path.startswith("/products/"):
         return "product_page"
     if path.startswith("/support/knowledgebase/"):
@@ -311,6 +334,26 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run(refresh: bool = False) -> int:
+    """Crawl, and leave evidence behind when it does not finish.
+
+    A thin wrapper by design. All the work is in `_run`; what this adds is the
+    guarantee that **a failed crawl is visible on disk rather than only in the
+    terminal that was running it.** `crawl-failure.json` records the error and
+    the time, which is what stops a half-finished fetch from being read later
+    as a site that withdrew its documents — the difference between "the crawl
+    broke" and "these pages are gone" is the difference between retrying and
+    deactivating ninety documents.
+
+    The exception is re-raised rather than swallowed. The marker is for the
+    next person to look; the non-zero exit and the traceback are for the caller
+    that has to decide whether to index on top of this, and
+    `assistant/indexing/pipeline.py` treats either as a reason to retry rather
+    than publish.
+
+    Nothing here rolls anything back, because nothing needs to: the previous
+    source release stays current until a complete crawl replaces it, so the
+    failure path is to leave everything exactly as it was.
+    """
     try:
         return _run(refresh)
     except Exception as exc:

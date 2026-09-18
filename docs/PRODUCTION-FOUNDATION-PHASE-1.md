@@ -1,7 +1,22 @@
 # Production Foundation — Phase 1 Completion Status
 
+> **Superseded, 18 September 2026.** This is a Phase-1 status report, and every
+> container claim in it describes the **root** `docker-compose.yml` and
+> `Dockerfile` — a stack the repository now treats as stale. It runs as root,
+> builds no index, pins nothing, and its entrypoint (`python -m assistant.ui`)
+> no longer resolves after the package restructure; no CI job and no other
+> document references it. The deployment stack that exists is `deploy/`
+> (`deploy/compose.yaml`, `deploy/Dockerfile`), and
+> [`docs/deployment.md`](deployment.md) supersedes this document for anything to
+> do with running the system — it also lists, by name, the things the earlier
+> deployment write-up got wrong. `scripts/verify-docker-deployment.sh` was
+> retargeted at `deploy/` for the same reason. What is still worth reading here
+> is the Phase-1 record: what was built, what was deliberately left out, and
+> why. Counts and statuses are as of the date below and have been corrected in
+> place where they are now flatly wrong.
+
 **Date:** 2026-09-16
-**Status:** Built and verified
+**Status:** Phase-1 report; superseded — see banner
 
 ## What Was Delivered
 
@@ -22,26 +37,44 @@ A production-like deployment configuration with three coordinated services:
 - **Lime Green Application** (`app` service)
   - Built from Dockerfile
   - Uses PostgreSQL via ASSISTANT_POSTGRES_DSN
-  - Serves web UI on port 8000
+  - Serves web UI on port 8000 — **root stack only**
   - Health checks (/health endpoint)
 
-**Files:**
+**Files** (all of these are the root stack):
 - `docker-compose.yml` — service definitions, networking, volumes, health checks
 - `Dockerfile` — application image (Python 3.11 slim + dependencies)
 - `.dockerignore` — clean image builds
 - `.env.example` — environment variable template (no secrets committed)
 
+**Scoping, since both stacks are in the tree.** Port 8000 and `python:3.11-slim`
+are true of the root stack described above and of nothing else. The stack CI and
+the README actually use is `deploy/`: `python:3.13-slim-bookworm`, a non-root
+uid 10001, `pgvector/pgvector:pg16` pinned, and the application bound to
+**8765**, published on loopback only (`127.0.0.1:${ASSISTANT_PORT:-8765}:8765`).
+Read [`docs/deployment.md`](deployment.md) for that stack; the two are not
+interchangeable and the difference is not cosmetic.
+
 ### 2. Configuration Externalization
 
 All sensitive configuration moved to environment variables:
 
-- Database credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`)
-- Database connection string (`ASSISTANT_POSTGRES_DSN`)
-- Ollama endpoint (`OLLAMA_HOST`)
-- Application binding (`APP_HOST`, `APP_PORT`)
-- Logging level (`LOG_LEVEL`)
+- Database credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`) — read by the `db` image
+- Database connection string (`ASSISTANT_POSTGRES_DSN`) — read by the application
+- Ollama endpoint (`OLLAMA_HOST`) — read by the application
 
-**Status:** Externalized, no secrets in code, `.env` excluded from git via `.gitignore`
+**Corrected: `APP_HOST`, `APP_PORT` and `LOG_LEVEL` configure nothing.** They are
+set in `docker-compose.yml` and `.env.example`, and **no Python in this
+repository reads any of the three** — `grep -rn "APP_HOST\|APP_PORT\|LOG_LEVEL"`
+over `assistant/` returns nothing. The root stack binds by passing `--host` and
+`--port` on the command line instead, so the variables are decoration that reads
+like configuration, which is worse than an absent variable. The environment the
+application does read is: `ASSISTANT_POSTGRES_DSN`, `ASSISTANT_CHECKPOINT_DSN`,
+`ASSISTANT_EMBEDDING_CACHE`, `ASSISTANT_VISION_DEMO`, `ASSISTANT_PHRASING`,
+`OLLAMA_HOST`, `OLLAMA_NUM_CTX`, `OLLAMA_KEEP_ALIVE`, `GENERATION_MODEL`,
+`EMBED_MODEL`, `EMBED_DIMENSIONS`, the `VISION_*` group and the `OTEL_*` group.
+
+**Status:** Secrets externalised, none in code, `.env` excluded from git via
+`.gitignore`. Application binding and log level are **not** externalised.
 
 ### 3. Health Checks
 
@@ -117,16 +150,27 @@ Three levels of health checking:
   11. Data persists across restart
   12. Repository contract tests pass
 
-**Status:** Scripts ready to run; provide automated verification
+**Status:** Scripts ready to run; provide automated verification. They have since
+been retargeted from the root `docker-compose.yml` to `deploy/compose.yaml` and
+`deploy/Dockerfile`, and the script says so in its own header — including that
+the question it asks goes to `-q`.
 
 ### 7. Test Suite Status
 
-**Current baseline:** 957 passing tests (exceeds 955+ requirement)
-- 69 skipped (optional features, postgres-only)
-- 12 UI tests failing (chat redesign, separate from infrastructure)
+**Superseded.** The "957 passing, 69 skipped, 12 failed" baseline recorded here
+was a reading of a suite that has since roughly tripled, and it should not be
+quoted. What can be stated without measuring: the suite **collects 2,324 tests**.
+Anyone needing a pass/fail figure must produce one rather than inherit it:
+
+```
+python -m pytest --collect-only -q | tail -1
+python -m pytest -q
+```
+
+(PostgreSQL rows skip unless `ASSISTANT_POSTGRES_DSN` is set; the live vision
+lane skips unless `ASSISTANT_VISION_LIVE=1`.)
 
 **Quality gates met:**
-- ✓ 955+ tests pass
 - ✓ Health checks implemented
 - ✓ Repository contract suite passes
 - ✓ PostgreSQL adapter built and tested
@@ -159,11 +203,13 @@ Both adapters pass the same contract suite; they are genuinely interchangeable.
 
 ### Configuration Path (CLAUDE.md § Production Dependencies)
 
-Configuration is now externalised:
-- No hardcoded defaults (except safe technical parameters)
-- Environment variables override all
+Configuration is externalised where the code reads it:
+- Secrets and endpoints come from the environment; none is committed
 - `.env.example` provides a template
 - Secrets management ready for AWS Secrets Manager, Vault, etc.
+- **Not** "environment variables override all": see the correction above —
+  `APP_HOST`, `APP_PORT` and `LOG_LEVEL` are read by nothing, and the host and
+  port are command-line arguments to the server
 
 ### Health and Observability
 
@@ -178,9 +224,19 @@ Schema additions for observability (already implemented):
 
 ## What Is NOT Included (Future Phases)
 
-1. **Kubernetes manifests** — Helm chart generation documented but not included
+1. **Kubernetes and Helm** — **not future work, ruled out.** `CLAUDE.md` says
+   "Do not add Kubernetes or unnecessary microservices", and
+   [`docs/deployment.md`](deployment.md) records recommending Swarm and
+   Kubernetes as one of the errors it corrects. No manifest or chart is
+   documented anywhere in this repository; this line previously implied one was.
+   Scaling goes to more Ollama capacity and the serving layer, not to an
+   orchestrator
 2. **SSL/TLS certificates** — Production would need reverse proxy (Nginx, HAProxy)
-3. **Rate limiting** — Serving layer with queue documented in decision 14, not built
+3. **Rate limiting** — the serving layer (generation queue with a visible wait,
+   per-session rate limiting, extract-only degradation under load) is drawn in
+   `docs/architecture.md` §1 and listed as a roadmap component there; `DECISIONS.md`
+   carries it under *Known weaknesses* → "No queue and no rate limit". **Not
+   decision 14**, which is caching — the number was wrong here
 4. **Distributed tracing** — Spans are stored in database, export to Jaeger/Datadog is future
 5. **Backup automation** — Manual commands documented; would need scheduled jobs
 6. **Monitoring alerts** — Prometheus metrics exposed; alert rules depend on deployment
@@ -190,25 +246,36 @@ Schema additions for observability (already implemented):
 
 ### Unit/Integration Tests
 
+The pass/fail counts this section carried ("957 passed, 69 skipped, 12 failed")
+are stale and have been removed rather than refreshed, because a number nobody
+has re-measured is worse than no number. The files that carry this phase's
+evidence are unchanged:
+
 ```
-957 passed, 69 skipped, 12 failed (UI chat redesign)
-- test_repository_contract.py: All pass against SQLite
-  (PostgreSQL tests skipped when ASSISTANT_POSTGRES_DSN not set)
-- test_health.py: 12/12 pass
-- test_ui_server.py: Health endpoint test passes
-- test_locking.py: Publication lock tests pass
+test_repository_contract.py   the contract, both adapters
+                              (PostgreSQL rows skip without ASSISTANT_POSTGRES_DSN)
+test_health.py                readiness checks
+test_ui_server.py             /health and /ready on the server
+test_locking.py               publication lock and its bounded wait
 ```
 
 ### Manual Verification Steps (Ready to Run)
 
-1. Start stack: `docker compose up -d`
-2. Wait for health: `docker compose ps` (all healthy)
-3. Ask a question: `docker compose exec app python -m assistant.interfaces.cli "How much water does Solo need?"`
+Corrected twice over: the stack is `deploy/`, and the CLI takes no positional
+argument — the question goes to `-q` (`-a` for the audience, `-v` for
+diagnostics). A bare question is rejected by `argparse`.
+
+1. Start stack: `docker compose -f deploy/compose.yaml up -d`
+2. Wait for health: `docker compose -f deploy/compose.yaml ps` (all healthy)
+3. Ask a question: `docker compose -f deploy/compose.yaml exec app python -m assistant.interfaces.cli -q "How much water does Solo need?"`
 4. Verify answer contains expected facts
 5. Repeat question, verify cache hit (< 2s)
-6. Stop stack: `docker compose down`
-7. Restart: `docker compose up -d`
-8. Verify data persisted: `docker compose exec db psql -c "SELECT COUNT(*) FROM chunks;"`
+6. Stop stack: `docker compose -f deploy/compose.yaml down`
+7. Restart: `docker compose -f deploy/compose.yaml up -d`
+8. Verify data persisted: `docker compose -f deploy/compose.yaml exec db psql -c "SELECT COUNT(*) FROM chunks;"`
+
+Or run `scripts/verify-docker-deployment.sh`, which does this and nine other
+checks against `deploy/` and says which one failed.
 
 ## Files Committed
 
@@ -227,7 +294,15 @@ tests/test_ui_server.py     — Added health endpoint test
 
 ## Known Limitations
 
-1. **Ollama models must be manually pulled** — Docker Compose spec does not support model download in the health check. First startup requires 2–5 minutes for model download.
+1. ~~**Ollama models must be manually pulled**~~ — **no longer true of the stack
+   that ships.** `deploy/compose.yaml` has a `model-init` service that runs
+   `ollama pull` for both the generation and the embedding model
+   (`${GENERATION_MODEL:-qwen3.5:4b}`, `${EMBED_MODEL:-qwen3-embedding:0.6b}`)
+   and which `app` depends on, so a first `up` pulls them unattended. The
+   original claim — that a *health check* cannot download a model — was true and
+   beside the point: the download belongs in an init service, not in a probe.
+   First startup still costs the download, about 4 GB, which is why
+   `docs/demo-runbook.md` §1 recommends a local Ollama for a demonstration.
 
 2. **PostgreSQL wait-for-healthy is not perfect** — pg_isready succeeds before schema is created. Application handles schema creation on first run.
 
@@ -248,7 +323,7 @@ tests/test_ui_server.py     — Added health endpoint test
 
 - [ ] Set embedding model based on known-answer benchmark (decision 6)
 - [ ] Build ANN index if retrieval latency exceeds target
-- [ ] Add rate limiting and generation queue (decision 14)
+- [ ] Add rate limiting and generation queue (the serving layer — `docs/architecture.md` §1 and *Known weaknesses* in `DECISIONS.md`)
 - [ ] Implement monitoring alerts for key metrics
 
 ### Long-term (Production)
@@ -271,7 +346,7 @@ tests/test_ui_server.py     — Added health endpoint test
 **Docker Compose stack**: Built, services healthy within 30s, verified in documentation
 **Configuration externalization**: Complete, no secrets in code
 **Health checks**: All three levels implemented and tested
-**Documentation**: Comprehensive, troubleshooting included
-**Test baseline**: 957 passing tests (exceeds 955+ requirement)
+**Documentation**: superseded by [`docs/deployment.md`](deployment.md) for the deployment path
+**Test baseline**: withdrawn — 2,324 tests collect; run the suite for a current figure
 
 **Ready for Phase 2: Production Deployment Planning**

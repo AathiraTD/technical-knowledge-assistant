@@ -1,6 +1,23 @@
 # Bounded architecture review — trace model, vision seam, provenance
 
-**Status: design only. No code has moved.** This document defines three things
+> **Superseded, 18 September 2026.** This was written as a design review, before
+> the work it defines was done, and it is kept because the reasoning is the
+> record of why the shape is what it is — not because it describes the
+> repository. Slices **A** (the vision seam, `OBSERVED`, `--image`, upload) and
+> **B** (spans, `turn_traces` on both adapters, `/metrics`) have since shipped,
+> so every "Absent" and every "wired to nothing" below should be read as of the
+> review date. Its `assistant/*.py:NNN` citations predate a package restructure
+> — the modules now live under `assistant/answering/`, `assistant/knowledge/`,
+> `assistant/infrastructure/`, `assistant/interfaces/` and `assistant/turn/` —
+> so **the line numbers in section 8 are not to be trusted**, with the
+> deliberate exception of its `db/` citations, which are still exact. Where a
+> claim is now flatly false rather than merely dated it has been corrected in
+> place and marked. For current behaviour read
+> [`docs/architecture.md`](architecture.md),
+> [`DECISIONS.md`](../DECISIONS.md) and
+> [`RELIABILITY_AND_DESIGN_EVOLUTION.md`](RELIABILITY_AND_DESIGN_EVOLUTION.md).
+
+**Status at the time of writing: design only. No code had moved.** This document defines three things
 before anything is implemented: the trace and span model that observability will
 carry, the seam by which a photograph reaches the router, and the provenance
 member that seam requires. It is deliberately narrow. It is not a redesign of
@@ -24,7 +41,8 @@ that, then the definitions.
 [`assistant/turn/session.py`](../assistant/turn/session.py) is a bounded, idle-expiring,
 thread-safe session store: cookie-named with 128 bits of `secrets` randomness,
 least-recently-used eviction, an id honoured only if this store minted it. It
-carries exactly three slots — `substrate`, `location`, `exposure` — and
+carries a short allow-list of slots — `CARRIED_SLOTS = ("product", "substrate",
+"location", "exposure")`, **four**, not the three this review first wrote — and
 explicitly drops `calculation`, `photograph`, `symptom`, `cause_asked` and
 `property_asked`.
 
@@ -49,7 +67,17 @@ engine level rather than as UI message retention.
 
 ### 1.2 One finished component is wired to nothing
 
-[`assistant/answering/vision.py`](../assistant/answering/vision.py) is 679 lines with 671 lines of
+> **Corrected.** It is wired now. `assistant/answering/engine.py` imports it and
+> calls `vision.slots_from_images()`; `assistant/turn/graph.py` runs it in the
+> `analyse_images` node; the CLI has `--image` (`interfaces/cli.py`) and the web
+> page has a real upload boundary with content-sniffed media types
+> (`interfaces/ui.py`); `infrastructure/health.py` reads `VISION_MODEL` for
+> readiness. The module has also grown to roughly **1,586 lines** and three
+> attribute tiers, not the four-slot enum described below. The `grep` in this
+> section returns output today. Slice A closed this gap; the paragraph is kept
+> because it is what the gap looked like.
+
+[`assistant/answering/vision.py`](../assistant/answering/vision.py) was 679 lines with 671 lines of
 tests. It constrains the model to a JSON schema whose `attribute` field is an
 enum of four slots, gates every observed value against
 `config/vocabularies.json` so a model answering `"substrate": "Lime Green Solo"`
@@ -62,14 +90,20 @@ $ grep -rn "from .vision\|import vision" --include=*.py . | grep -v test
 (no output)
 ```
 
-Nothing outside its own tests imports it. There is no `--image` flag on the CLI
-and no upload on the web page. This is the single largest gap between what the
-repository contains and what it can demonstrate, and closing it is a wiring
-problem, not a build.
+Nothing outside its own tests imported it. There was no `--image` flag on the
+CLI and no upload on the web page. This was the single largest gap between what
+the repository contained and what it could demonstrate, and closing it was a
+wiring problem, not a build — which is what slice A then did.
 
 ### 1.3 Provenance exists, and has one honest hole
 
-[`assistant/answering/answer.py`](../assistant/answering/answer.py) defines a `Provenance` enum —
+> **Corrected.** The hole is filled. `Provenance` in
+> `assistant/answering/answer.py` now has four members — `STATED`, `CARRIED`,
+> `OBSERVED`, `ASSUMED` — with the `_PHRASE` row and the origins threaded
+> through the cache key, exactly as §4 designs them. The paragraph below
+> describes the enum before slice A.
+
+[`assistant/answering/answer.py`](../assistant/answering/answer.py) then defined a `Provenance` enum —
 `STATED`, `CARRIED`, `ASSUMED` — and a `SlotFact` pairing a slot value with
 where it came from, each rendering a different sentence. The distinction is
 real and was added to fix an observed defect: an answer reporting "external
@@ -88,6 +122,13 @@ This is correct discipline and it becomes a defect the moment the vision seam is
 wired. See §4.
 
 ### 1.4 Observability emits but does not trace
+
+> **Corrected.** It traces. `assistant/infrastructure/observability.py` carries
+> the span stack and `obs.span()`; spans persist to `turn_traces` on both
+> adapters; `assistant/infrastructure/metrics.py` renders the Prometheus text
+> format behind `/metrics` on the standard-library server; and
+> `assistant/infrastructure/otel_export.py` is the OTLP shim §2.1 left room for.
+> The paragraph below is what was true before slice B.
 
 [`assistant/infrastructure/observability.py`](../assistant/infrastructure/observability.py) has JSON-line
 events, a correlation-ID `ContextVar` (correct for the `ThreadingHTTPServer`),
@@ -110,17 +151,19 @@ work is presentation and an upload control, not new plumbing.
 
 ### 1.6 Summary
 
-| Requirement | Status | Work |
+Statuses are as of the review. The third column is what has happened since.
+
+| Requirement | Status then | Since |
 |---|---|---|
-| Session, follow-ups, selective context | Built | None — preserve |
-| Context provenance | Built, one member short | §4 |
-| Inline citations + sources + six checks | Built | None |
-| Vision perception | Built, unwired | §3 |
-| Structured events, correlation id, privacy | Built | None |
-| Spans, durations, persisted trace, metrics | Absent | §2 |
-| Chat-shaped UI, upload, collapsed diagnostics | Absent | Slice C |
-| Conversational evaluation | Absent | Slice D |
-| Session persistence across restart | Absent | Non-goal — §6 |
+| Session, follow-ups, selective context | Built | Unchanged — preserved |
+| Context provenance | Built, one member short | `OBSERVED` shipped (slice A) |
+| Inline citations + sources + checks | Built | Six checks then; **eight** now — 7 product scope, 8 product relationships |
+| Vision perception | Built, unwired | Wired: engine, graph, CLI `--image`, UI upload (slice A) |
+| Structured events, correlation id, privacy | Built | Unchanged |
+| Spans, durations, persisted trace, metrics | Absent | **Built** — `infrastructure/observability.py` spans, `turn_traces` on both adapters, `infrastructure/metrics.py` behind `/metrics` (slice B) |
+| Chat-shaped UI, upload, collapsed diagnostics | Absent | Upload built; the chat layout is slice C |
+| Conversational evaluation | Absent | `eval/conversations.json`, `tests/test_conversation_eval.py` |
+| Session persistence across restart | Absent, non-goal — §6 | **Built anyway** — `turn/session_storage.py`, the `sessions` table, wired by `open_persisted_session_store()`. The non-goal in §6 was overtaken; the LangGraph checkpointer is still in-memory, so the two halves of conversation state differ in durability |
 
 ---
 
@@ -479,6 +522,10 @@ review's main structural finding.
 **No session persistence across restart.** It requires a store, a retention
 period, a privacy decision and a deletion path, for a prototype whose sessions
 expire in thirty minutes anyway. It stays a documented known limitation.
+*(Overtaken: `turn/session_storage.py` and the `sessions` table now persist
+carried slots, the pending ask-back and turn history behind the same
+thirty-minute idle expiry, falling back to the in-memory store when no
+connection opens. The LangGraph checkpointer remains in-memory.)*
 
 **No semantic or template cache work.** Decision 14 already records the
 exact-key form as the weaker built form, with its reasoning.
@@ -489,7 +536,8 @@ front of, and it consumes what the engine emits rather than defining it.
 
 **No image persistence.** §3.5.
 
-**No change to the six checks, the router, or the audience filter.** Nothing in
+**No change to the checks, the router, or the audience filter.** Six then,
+eight now, and neither slice in this review moved one. Nothing in
 this review touches a safety boundary. The vision seam fills slots the router
 already understands, and the trace observes rather than participates.
 
@@ -535,7 +583,11 @@ everything below `part`, so twenty-two. A photograph adds `perception`,
 against; thirty is the bad day.
 
 The volume is not hypothetical, because the audit table has been accumulating
-for the life of the project and can be counted. `data/index/knowledge.db` holds
+for the life of the project and can be counted. *(The counts in this subsection
+are as measured when the review was written. On 18 September 2026 the same file
+held 222 `answer_log` rows, 2,824 `turn_traces` rows and 7 `sessions` rows, in
+3.8 MB — the shape of the argument is unchanged, the numbers have moved.)*
+`data/index/knowledge.db` held
 **196 rows in `answer_log`, 171 of them written on a single day** — a
 development day of harness runs and manual questions. Their whole payload is
 62,447 characters, about **319 bytes a row**, and that row carries the question
@@ -544,7 +596,7 @@ timestamp, an integer and a small flat JSON object: the same order, 250 to 400
 bytes.
 
 So one heavy day is roughly two thousand trace rows and under a megabyte. That
-is the reassuring half. The other half is that `data/index/knowledge.db` is
+is the reassuring half. The other half is that `data/index/knowledge.db` was
 **4.1 MB and is a committed artefact** — a year of unpruned tracing at that
 daily rate is on the order of a quarter of a gigabyte in the file that ships
 beside the index, which would make the debugging table an order of magnitude
@@ -624,7 +676,7 @@ table contains. The harness builds an ordinary assistant with logging left on
 ([`eval/run.py:379`](../eval/run.py), against the `log: bool = True` default at
 [`assistant/answering/engine.py:101`](../assistant/answering/engine.py)), so **evaluation answers
 have been writing into `answer_log` all along, indistinguishably**. The
-consequence is measurable: of 196 logged answers, 75 are refusals — a 38 per
+consequence is measurable: of the 196 answers logged by then, 75 are refusals — a 38 per
 cent refusal rate, over a question set deliberately loaded with the unanswerable
 ones, S2 and S7 and the near-miss and far-miss probes. Quote that as the
 system's refusal rate and it is simply wrong, and §2.7 proposes to expose

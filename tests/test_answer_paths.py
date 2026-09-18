@@ -1,6 +1,6 @@
 """The seven answer paths, and what each one is obliged to carry.
 
-`test_checks.py` covers the six checks in isolation. This covers everything
+`test_checks.py` covers the eight checks in isolation. This covers everything
 around them: what Extract prints, what a refusal still hands over, what a
 document request answers from, and the two rules a caveat has to obey.
 
@@ -441,7 +441,7 @@ def test_the_calculation_edge_prints_the_coverage_passage_not_the_top_one():
     above its coverage, because retrieval scores the whole question. Extract
     printed that, then appended a code-written sentence claiming it had shown
     "the published coverage and pack size". Unsupported prose reaching the page
-    is exactly what the six checks exist to stop — and this arrived by a door
+    is exactly what the eight checks exist to stop — and this arrived by a door
     they do not watch, because code wrote it rather than the model.
     """
     mixing = hit(SOLO_URL, "Mixing",

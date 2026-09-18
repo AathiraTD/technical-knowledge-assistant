@@ -103,6 +103,12 @@ class NoVision:
 
 
 def rule(text: str = "", char: str = "=") -> None:
+    """A separator, because a demonstration is read at a distance.
+
+    Turns run to tens of seconds each and the output scrolls; without hard
+    rules between them a room cannot tell where one answer ended and the next
+    began. Called with no text it prints a bare line.
+    """
     print(f"\n{char * 78}")
     if text:
         print(text)
@@ -110,6 +116,24 @@ def rule(text: str = "", char: str = "=") -> None:
 
 
 def show_perception(report: dict) -> None:
+    """What the model saw, and — the part that matters — what was acted on.
+
+    Every reading prints with its certainty, and the asterisk marks the ones
+    that actually reached the router. The two are deliberately shown together
+    because the claim being demonstrated is not "the model can see a brick
+    wall"; it is that **a reading below the confidence floor leaves the slot
+    uncued and changes nothing**, which is invisible unless the withheld
+    readings are printed beside the used ones with the reason attached.
+
+    `cannot_determine_from_image` is printed for the same reason: forcing the
+    model to enumerate what it cannot tell is the visual equivalent of refusing
+    to answer, and a demonstration that showed only the confident readings
+    would be showing the half that flatters it.
+
+    A truncated answer is announced rather than quietly trimmed — a model
+    whose output was cut short may have been mid-observation, so what it said
+    is shown and was not acted on.
+    """
     if not report:
         return
     print("\n  FROM THE PHOTOGRAPH")
@@ -133,6 +157,27 @@ def show_perception(report: dict) -> None:
 
 def show_turn(index: int, step: dict, reply, state, seconds: float,
               image_name: str) -> None:
+    """One turn with its seams exposed: the route, the evidence, the state.
+
+    The answer text is the least interesting thing printed here. Around it go
+    the route the deterministic router took, whether the part refused, the
+    sources, the caveats appended by code, and — after the reply — every fact
+    the conversation is now holding with where each one came from. Those are
+    the design's claims, and they are exactly what prose hides.
+
+    The `why` line is printed before the answer rather than kept in a comment,
+    because it is what the presenter says out loud: it states what the turn is
+    testing before the audience sees whether it held.
+
+    `resumed_question` is surfaced when it is set, because after an ask-back
+    the message typed was one word and the question answered was the one from
+    two turns earlier — a turn that silently answered something other than what
+    was just said would look like a non-sequitur rather than a resume.
+
+    The elapsed seconds are printed on every turn deliberately. The latency is
+    the honest constraint on this path and the record says so; hiding it in a
+    demonstration would be the one dishonest thing this script could do.
+    """
     rule(f"TURN {index}")
     print(f"  SAY: {step['say']}")
     if step.get("image"):
@@ -172,6 +217,38 @@ def show_turn(index: int, step: dict, reply, state, seconds: float,
 
 
 def main(argv=None) -> int:
+    """Play a scripted conversation against the real stack, turn by turn.
+
+    Nothing is stubbed except, under `--dry-run`, the vision model itself. The
+    index, retrieval, the router, the checks and generation are the ones that
+    serve an answer, and the conversation runs as one session with the state
+    carried from turn to turn — which is the thing being demonstrated, since
+    the substrate established in turn one has to survive a quantity question, a
+    photograph and a symptom without being restated.
+
+    The scenarios are scripted rather than typed live for a reason the clock
+    decides: a compose on an unseen question costs tens of seconds on a
+    processor with no graphics card and one photograph costs minutes, so this
+    is run before the room and read from, not run in it.
+
+    Two preconditions are checked before anything slow starts — the image
+    fixture exists, and the store has an active snapshot — each with the
+    command that fixes it and exit code 2. Discovering a missing index after a
+    three-minute vision call is the failure this ordering exists to avoid.
+
+    The header prints the snapshot id, the counts and the model tags, so the
+    output is self-describing: a transcript that cannot say which index and
+    which models produced it is not evidence of anything.
+
+    `--dry-run` substitutes `NoVision`, which returns a resolved perception
+    carrying an error instead of readings. The turn shape, the routing and the
+    ask-back behaviour are all still real — what disappears is the minutes,
+    which makes it the right way to check the script itself.
+
+    The store is closed in a `finally`, including on Ctrl-C partway through a
+    scenario, because the next thing an operator does after an interrupted
+    demonstration is rebuild the index.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", default="four-turn", choices=SCENARIOS)
     parser.add_argument("--image", default="",

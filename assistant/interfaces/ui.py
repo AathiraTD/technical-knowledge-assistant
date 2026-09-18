@@ -1053,6 +1053,58 @@ def _render_answer_html(answer, index: int, reference: str,
 
 
 class Handler(BaseHTTPRequestHandler):
+    """The entire HTTP surface: six paths, one answer route, no second engine.
+
+    `BaseHTTPRequestHandler` instantiates one of these per request, which is
+    why the things that must outlive a request — the assistant, the session
+    store, the upload budget, the audience set the server was started with —
+    are class attributes assigned once in `main()` rather than instance state.
+    Anything per-request (`correlation_id`, `session_id`) is set at the top of
+    the method that handles it.
+
+    **A request may narrow the audience set and can never widen it.** That is
+    the security property of this surface and it is enforced in exactly one
+    place, `resolve(audience, self.audiences)` inside `_respond`, so `?a=staff`
+    against a server started for the public gets public material and no error
+    worth probing. The session is deliberately part of no part of that
+    decision: it carries slots about the caller's building and never an
+    audience, because a conversation that could accumulate entitlement would be
+    an access-control bug with a cookie on it. The filter that does the work is
+    further down still — inside retrieval, in code, before ranking — so nothing
+    reaching this class can talk its way past it.
+
+    The paths divide into three kinds. `/` and `/ask` answer questions, the
+    first as HTML and the second as JSON, and they share `_respond` entirely:
+    the JSON view is the HTML view's data, not a second implementation with its
+    own opinions about refusals. `/health`, `/ready` and `/metrics` are for
+    whatever is operating the container — liveness that touches nothing,
+    readiness that runs the same checks as
+    `assistant/infrastructure/health.py`, and an exposition rendered by
+    `assistant/infrastructure/metrics.py` rather than here. `/new` ends a
+    conversation, and it is a server action because the cookie naming the
+    session is `HttpOnly`: a page cannot clear what it is not allowed to read,
+    and the version that tried left the old cookie in place so the "new"
+    conversation inherited the previous wall.
+
+    GET and POST differ only in where the question comes from. POST exists
+    because a photograph cannot be a query parameter; once the upload guards in
+    `_read_upload` have run, it calls the same `_respond` with the same
+    arguments, so **an upload adds evidence to a question and adds no answer
+    route** — no second renderer, no second place the audience set is decided,
+    nothing new for a review to check.
+
+    Every response carries `X-Correlation-Id`, minted before anything can
+    answer, and `assistant/infrastructure/trace.py` reads a stored span tree
+    back by that id. A 404 is the exception: `send_error` never reaches the
+    sender that attaches the header, which is tolerable because a path that
+    does not exist produced no answer to trace.
+
+    What this class deliberately is not: it holds no routing, no retrieval and
+    no checks. It is a view over the library the CLI calls, which is the claim
+    the roadmap channel adapters rest on — if a second surface could not be
+    written this thinly, the engine would not in fact be a library.
+    """
+
     assistant: Assistant
     meta: str
     # What this server was started to allow. A request may narrow this and can
@@ -1090,6 +1142,26 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self) -> None:
+        """Dispatch by path: the operational endpoints first, the question last.
+
+        The order is not arbitrary. `/health`, `/ready` and `/metrics` are
+        answered before anything touches the session or the query string,
+        because they are polled continuously by things that must not be able to
+        open conversations or be affected by one; `/new` is handled before the
+        answering paths because it is the only GET that changes state, and it
+        does so by issuing a fresh cookie and a 303 rather than by answering.
+
+        Everything else is either `/` or `/ask` — the same question, rendered
+        as a page or as JSON — or a 404. There is no static file serving and no
+        path is ever turned into a filename, so the traversal question this
+        surface would otherwise have to answer does not arise.
+
+        The unverified query parameters (`q`, `v`, `a`) go straight to
+        `_respond`, which is safe precisely because none of them is trusted
+        there: `a` is narrowed against what the server allows, `q` is a
+        question the engine treats as data, and `v` only decides how much
+        diagnostic detail is printed back to the caller who asked for it.
+        """
         # One id per request, established before anything can answer and handed
         # back on every response. It is what turns "it refused and I do not know
         # why" into a line in the log: the caller quotes the id, the operator
@@ -1638,6 +1710,42 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Bind the server, and decide once everything a request may not decide.
+
+    Composition happens here and nowhere else: the store is opened, the
+    assistant built, and the results assigned onto `Handler` as class
+    attributes before the first connection is accepted. A request therefore
+    cannot choose a backend, widen an audience set or start a second engine —
+    it can only use what this function already settled.
+
+    **`--allow-audience` is the ceiling, not the value.** It is resolved once
+    against the full set, and every request narrows within it; the default is
+    public, so a server started with no argument cannot be made to serve staff
+    material however the URL is written. That is the only access control this
+    surface has, which is why it is a process-level decision an operator makes
+    rather than anything a caller can influence.
+
+    Three smaller calls worth knowing about. Logging is configured on by
+    default here, the opposite of the CLI, because this surface produces no
+    transcript to keep clean and a server nobody can see is not operable. The
+    store is opened `thread_safe=True` because `ThreadingHTTPServer` serves
+    requests concurrently and the SQLite connection is shared — see
+    `assistant/knowledge/store/locking.py` for why a lock rather than a pool.
+    And the session store is replaced with a per-server instance rather than
+    left as the class default, so a restarted process never inherits a
+    conversation, and the substrate someone stated yesterday cannot reappear in
+    a stranger's answer today.
+
+    A refused start — an index built by another embedding model, or no Ollama —
+    closes the store before returning 1, because the operator's next command is
+    a rebuild into the same file and an open handle is what would make that
+    fail too.
+
+    The address printed and opened in a browser is read back from
+    `server.server_address`, not from `--port`. They differ when the port is
+    left to the operating system, and advertising the requested port would send
+    someone to an address nothing is listening on.
+    """
     use_utf8()
     parser = argparse.ArgumentParser(prog="assistant.interfaces.ui")
     parser.add_argument("-p", "--port", type=int, default=8765)
