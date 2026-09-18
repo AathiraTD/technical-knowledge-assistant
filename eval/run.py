@@ -771,7 +771,7 @@ def check_structure(spec: dict, record: "TurnRecord",
 
     # -- the recommendation guard, re-asked from outside ---------------------
     if expect.get("no_unapproved_recommendation"):
-        from assistant import candidates as cand
+        from assistant.retrieval import candidates as cand
         from assistant import understanding as und
         for _question, answer in parts:
             allowed = {und.normalise_product(p)

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from . import observability as obs
+from .. import observability as obs
 
 
 @dataclass

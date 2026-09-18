@@ -38,7 +38,7 @@ from assistant.indexing.index import (  # noqa: E402
     product_name,
 )
 from assistant.model import Chunk                         # noqa: E402
-from assistant.retrieve import QUERY_INSTRUCTION          # noqa: E402
+from assistant.retrieval.retrieve import QUERY_INSTRUCTION          # noqa: E402
 
 # Each question's answer was located in the extracted corpus before the question
 # was written. `contains` is the string that must appear in a retrieved passage

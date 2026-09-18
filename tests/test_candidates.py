@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import candidates as c                              # noqa: E402
+from assistant.retrieval import candidates as c
 from assistant.model import Chunk, Document, Retrieved             # noqa: E402
 from assistant.router import SlotDetector                          # noqa: E402
 from assistant.understanding import Intent, ResolvedRequest        # noqa: E402

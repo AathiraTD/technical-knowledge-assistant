@@ -25,7 +25,7 @@ from assistant import ollama                                  # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
 from assistant.repository import RetrievalRequest               # noqa: E402
 from assistant.repository import IndexMismatch                # noqa: E402
-from assistant.retrieve import (                              # noqa: E402
+from assistant.retrieval.retrieve import (
     DEFAULT_THRESHOLD,
     OVERFETCH,
     QUERY_INSTRUCTION,

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from assistant import observability, session
 from assistant.engine import Assistant
-from assistant.retrieve import Retriever
+from assistant.retrieval.retrieve import Retriever
 from assistant.store import SQLiteKnowledgeRepository
 
 

@@ -107,7 +107,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
 from langgraph.graph import END, START, StateGraph                  # noqa: E402
 from langgraph.types import interrupt                               # noqa: E402
 
-from . import candidates as cand                                    # noqa: E402
+from .retrieval import candidates as cand
 from . import observability as obs                                  # noqa: E402
 from . import understanding as und                                  # noqa: E402
 from .answer import Provenance                                      # noqa: E402

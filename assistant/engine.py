@@ -24,7 +24,7 @@ from .answer import (Answer, AnswerEngine, Provenance, _named_aliases,
                      _product_aliases, _requested_fields)
 from .cache import AnswerCache
 from .model import AnswerLogEntry
-from .retrieve import Retriever
+from .retrieval.retrieve import Retriever
 from .router import Decision, Path_, Router, split_by_topic
 
 
@@ -550,7 +550,7 @@ class Assistant:
         The pause itself is untouched. The conversation stays parked in the
         checkpoint, and the next message resumes it.
         """
-        from .candidates import Outcome, RecommendationDecision
+        from .retrieval.candidates import Outcome, RecommendationDecision
 
         payload = final["__interrupt__"][0]
         value = getattr(payload, "value", payload) or {}

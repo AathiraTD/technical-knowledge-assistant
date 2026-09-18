@@ -19,12 +19,12 @@ import json
 import re
 from pathlib import Path
 
-from . import observability as obs
-from . import ollama
-from .model import Retrieved
-from .repository import IndexMismatch, RetrievalRequest
-from .indexing.index import CHUNKING_VERSION
-from . import paths
+from .. import observability as obs
+from .. import ollama
+from ..model import Retrieved
+from ..repository import IndexMismatch, RetrievalRequest
+from ..indexing.index import CHUNKING_VERSION
+from .. import paths
 
 CONFIG = paths.CONFIG_DIR
 

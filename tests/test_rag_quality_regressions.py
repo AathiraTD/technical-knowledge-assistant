@@ -246,7 +246,7 @@ def test_a_corpus_of_only_product_pages_still_prints_product_pages():
 
 import pytest                                                       # noqa: E402
 
-from assistant import candidates as cand                            # noqa: E402
+from assistant.retrieval import candidates as cand
 from assistant import ollama                                        # noqa: E402
 from assistant.conversation import TurnInput                        # noqa: E402
 from assistant.engine import Assistant                              # noqa: E402
@@ -381,7 +381,7 @@ def test_the_two_orchestration_paths_refuse_the_same_way(near_miss_assistant):
 
 # ------------------------- 5. the same datasheet, indexed under two names
 
-from assistant.retrieve import OVERFETCH, _distinct            # noqa: E402
+from assistant.retrieval.retrieve import OVERFETCH, _distinct            # noqa: E402
 
 # The shape the real corpus has, because the site publishes two product pages
 # for one product -- /products/duro and /products/duro-plaster, /products/ultra

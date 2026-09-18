@@ -142,7 +142,7 @@ def test_duplicate_staff_identity_rejected(pipeline, tmp_path):
 
 def test_retriever_rejects_chunking_mismatch():
     from test_retrieve import build
-    from assistant.retrieve import Retriever
+    from assistant.retrieval.retrieve import Retriever
     with build() as repo:
         repo.apply_delta([], [], replace(repo.snapshot(), snapshot_id='changed', chunking_version='other'))
         with pytest.raises(IndexMismatch, match='chunking'):

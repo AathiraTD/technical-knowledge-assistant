@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from assistant.compatibility import CompatibilityMatrix, CompatibilityRule
+from assistant.retrieval.compatibility import CompatibilityMatrix, CompatibilityRule
 
 
 @pytest.fixture
