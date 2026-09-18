@@ -462,12 +462,20 @@ def build(services: Services):
 
             provider = _Default()
         turn = state.get("turn_index", 0)
-        with obs.span("vlm_perception", images=len(images)) as span:
-            resolution = provider.observe(images)
-            span["slots"] = sorted(resolution.slots)
-            span["discarded"] = len(getattr(resolution, "discarded", ()))
-            span["cannot_determine"] = len(
-                getattr(resolution, "cannot_determine_from_image", ()))
+        try:
+            with obs.span("vlm_perception", images=len(images)) as span:
+                resolution = provider.observe(images)
+                span["slots"] = sorted(resolution.slots)
+                span["discarded"] = len(getattr(resolution, "discarded", ()))
+                span["cannot_determine"] = len(
+                    getattr(resolution, "cannot_determine_from_image", ()))
+        except Exception as e:
+            obs.event("vision_error", reason=str(e), images=len(images))
+            return {"perception": {"enabled": True, "error": str(e),
+                                   "summary": ["Image reading failed. "
+                                               "Answering from text only."]},
+                    "facts": {}, "observations": [],
+                    "trace": ["analyse_images:error"]}
         observed = {
             slot: SessionFact(slot, value, Provenance.OBSERVED, turn,
                               confidence=_confidence_for(resolution, slot),
