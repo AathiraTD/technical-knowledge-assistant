@@ -14,8 +14,8 @@ import pytest
 from bs4 import BeautifulSoup
 
 from assistant import ui
-from assistant.answer import Answer
-from assistant.engine import Reply
+from assistant.answering.answer import Answer
+from assistant.answering.engine import Reply
 
 
 REFERENCE = "012345abcdef"

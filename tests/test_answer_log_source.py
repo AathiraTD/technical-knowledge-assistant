@@ -28,7 +28,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant.engine import Assistant                       # noqa: E402
+from assistant.answering.engine import Assistant                       # noqa: E402
 from assistant.model import AnswerLogEntry                   # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository        # noqa: E402
 

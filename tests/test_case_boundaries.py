@@ -38,8 +38,12 @@ from assistant.conversation import (                               # noqa: E402
     Case, ConversationState, FactStatus, NewCase, SessionFact, TurnInput,
     merge_facts, opens_a_new_case,
 )
-from assistant.answer import Provenance                            # noqa: E402
-from assistant.engine import Assistant                             # noqa: E402
+from assistant.answering.answer import (  # noqa: E402
+    Provenance,
+)
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 
 from test_engine import build_repo, quoting, unit                  # noqa: E402
 from test_graph import StubVision                                  # noqa: E402

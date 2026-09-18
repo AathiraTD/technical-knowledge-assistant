@@ -52,12 +52,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import ollama, vision                                # noqa: E402
+from assistant.answering import vision
+from assistant import ollama                                # noqa: E402
 from assistant import ui                                            # noqa: E402
-from assistant.answer import Provenance, SlotFact                   # noqa: E402
+from assistant.answering.answer import (  # noqa: E402
+    Provenance,
+    SlotFact,
+)
 from assistant.cache import AnswerCache                             # noqa: E402
-from assistant.engine import Assistant                              # noqa: E402
-from assistant.router import Path_                                  # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
+from assistant.answering.router import (  # noqa: E402
+    Path_,
+)
 from assistant.store.factory import open_repository                 # noqa: E402
 from assistant.ui import Handler, MAX_IMAGES_PER_SESSION, sniff     # noqa: E402
 

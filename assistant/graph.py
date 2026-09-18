@@ -108,16 +108,21 @@ from langgraph.graph import END, START, StateGraph                  # noqa: E402
 from langgraph.types import interrupt                               # noqa: E402
 
 from .retrieval import candidates as cand
-from . import answer as ans                                         # noqa: E402
+from .answering import answer as ans
 from . import conversation as conv                                  # noqa: E402
 from . import observability as obs                                  # noqa: E402
-from . import understanding as und                                  # noqa: E402
-from .answer import Provenance                                      # noqa: E402
+from .answering import understanding as und
+from .answering.answer import (  # noqa: E402
+    Provenance,
+)
 from .conversation import (                                         # noqa: E402
     ConversationState, Denial, FactHistory, NewCase, SessionFact, merge_facts,
     merge_observations, opens_a_new_case,
 )
-from .router import Path_, split_by_topic                           # noqa: E402
+from .answering.router import (  # noqa: E402
+    Path_,
+    split_by_topic,
+)
 
 # The domain types a checkpoint may rehydrate. Named rather than left to a
 # permissive default: a checkpoint is data, and a deserialiser that will
@@ -265,7 +270,7 @@ class TurnState(TypedDict, total=False):
     resumed_question: str
     hits: list
     decision: Any                # cand.RecommendationDecision
-    answer: Any                  # assistant.answer.Answer
+    answer: Any                  # assistant.answering.answer.Answer
     boundary_answer: Any         # deterministic conversation-only response
     active_product: str         # lookup topic, never installation testimony
     answers: list                # (part, Answer) pairs, for a split message
@@ -445,7 +450,7 @@ def build(services: Services):
         # had read one. A test double is the exception, not the default.
         provider = services.vision
         if provider is None:
-            from . import vision as vision_module
+            from .answering import vision as vision_module
 
             # `ASSISTANT_VISION_DEMO` decides whether the default provider is
             # the real one or none at all. An **explicitly injected** provider
@@ -463,7 +468,7 @@ def build(services: Services):
                 return {"perception": vision_module.disabled_report(),
                         "trace": ["analyse_images:disabled"]}
 
-            from .vision import slots_from_images
+            from .answering.vision import slots_from_images
 
             class _Default:
                 @staticmethod
@@ -499,7 +504,7 @@ def build(services: Services):
         # not route -- the reason. A customer asking "what can you reliably
         # identify from the photo" is asking for the second one, and answering
         # it out of the first would report a rendered wall as showing nothing.
-        from .vision import perception_report
+        from .answering.vision import perception_report
 
         report = perception_report(resolution)
         if report.get("refused_attributes"):

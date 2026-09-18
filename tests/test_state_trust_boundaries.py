@@ -41,7 +41,9 @@ from assistant import ollama                                       # noqa: E402
 from assistant.conversation import (                               # noqa: E402
     ConversationState, FactStatus, TurnInput,
 )
-from assistant.engine import Assistant                             # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 
 from test_engine import build_repo, quoting, unit                  # noqa: E402
 

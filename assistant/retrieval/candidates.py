@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .. import observability as obs
-from ..understanding import Intent, ResolvedRequest
+from ..answering.understanding import Intent, ResolvedRequest
 
 # How many candidates are worth assessing. Each costs a metadata lookup per
 # required property, so this bounds the work a single question can cause; and a
@@ -461,7 +461,7 @@ def recommends_a_product(text: str, registry) -> list[str]:
     figure and "use Ultra" makes a commercial recommendation the company stands
     behind.
     """
-    from ..understanding import normalise_product
+    from ..answering.understanding import normalise_product
 
     sentences = [s for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
     named: list[str] = []

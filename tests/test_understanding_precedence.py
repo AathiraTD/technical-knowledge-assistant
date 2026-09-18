@@ -37,8 +37,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import ollama                                       # noqa: E402
-from assistant import understanding as u                           # noqa: E402
-from assistant.router import PolicyGate, SlotDetector              # noqa: E402
+from assistant.answering import understanding as u
+from assistant.answering.router import (  # noqa: E402
+    PolicyGate,
+    SlotDetector,
+)
 
 REGISTRY = ["Ultra", "Lime Green Ultra", "Duro", "Solo"]
 

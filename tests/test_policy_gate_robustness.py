@@ -39,7 +39,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.router import PolicyGate                        # noqa: E402
+from assistant.answering.router import PolicyGate                        # noqa: E402
 
 
 # ------------------------------------------------- the three reported misses

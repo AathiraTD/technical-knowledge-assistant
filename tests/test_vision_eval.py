@@ -28,7 +28,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import vision                                        # noqa: E402
+from assistant.answering import vision
 from eval.vision_eval import (                                      # noqa: E402
     IMAGES, MANIFEST, is_forbidden, parse_forbidden, prose_of, report,
     rescore, score,

@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from assistant import ollama, vision
-from assistant.answer import Answer, Provenance
+from assistant.answering import vision
+from assistant import ollama
+from assistant.answering.answer import Answer, Provenance
 from assistant.conversation import ConversationState, FactHistory, SessionFact
-from assistant.engine import Assistant
+from assistant.answering.engine import Assistant
 from assistant.model import Retrieved, Snapshot
-from assistant.router import Decision, Path_
+from assistant.answering.router import Decision, Path_
 from assistant.store import SQLiteKnowledgeRepository
 from test_engine import CHUNKING_VERSION, chunk, document, unit, version
 
@@ -340,7 +341,7 @@ def test_only_real_cache_hits_are_marked(assistant, entrypoint):
 @pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
 def test_nonassertions_cannot_enter_legacy_remember(
         assistant, monkeypatch, question, entrypoint):
-    from assistant.engine import Reply
+    from assistant.answering.engine import Reply
     from assistant.session import SessionStore
     from assistant.ui import Handler
 

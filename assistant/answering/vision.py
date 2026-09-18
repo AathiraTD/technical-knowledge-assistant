@@ -59,7 +59,7 @@ from pathlib import Path
 
 import httpx
 
-from .ollama import HOST, KEEP_ALIVE, GENERATION_MODEL, NUM_CTX
+from ..ollama import HOST, KEEP_ALIVE, GENERATION_MODEL, NUM_CTX
 from .router import SlotDetector
 
 # --------------------------------------------------- what may be reported

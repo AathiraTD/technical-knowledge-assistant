@@ -38,8 +38,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import ollama                                        # noqa: E402
 from assistant.cache import AnswerCache                             # noqa: E402
-from assistant.engine import Assistant                              # noqa: E402
-from assistant.router import Path_                                  # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
+from assistant.answering.router import (  # noqa: E402
+    Path_,
+)
 
 from test_engine import (                                           # noqa: E402
     SOLO, build_repo, quoting, unit,

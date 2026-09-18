@@ -33,7 +33,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import health, ollama                               # noqa: E402
-from assistant.engine import Assistant                             # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.indexing.index import CHUNKING_VERSION                       # noqa: E402
 from assistant.model import (                                      # noqa: E402
     Chunk, Document, DocumentVersion, Snapshot,
@@ -316,7 +318,7 @@ def test_vision_is_reported_but_does_not_decide_readiness(tmp_path, monkeypatch)
     """Images are roadmap, so a machine without the model still answers text."""
     monkeypatch.setattr(ollama, "available",
                         lambda: [ollama.EMBED_MODEL, ollama.GENERATION_MODEL])
-    monkeypatch.setattr("assistant.vision.VISION_MODEL", "qwen3-vl:4b")
+    monkeypatch.setattr("assistant.answering.vision.VISION_MODEL", "qwen3-vl:4b")
 
     report = health.check(str(build_index(tmp_path / "index" / "knowledge.db")))
 
@@ -331,7 +333,7 @@ def test_the_image_demo_makes_the_vision_model_load_bearing(tmp_path, monkeypatc
     monkeypatch.setenv(health.VISION_DEMO_VAR, "1")
     monkeypatch.setattr(ollama, "available",
                         lambda: [ollama.EMBED_MODEL, ollama.GENERATION_MODEL])
-    monkeypatch.setattr("assistant.vision.VISION_MODEL", "qwen3-vl:4b")
+    monkeypatch.setattr("assistant.answering.vision.VISION_MODEL", "qwen3-vl:4b")
 
     report = health.check(str(build_index(tmp_path / "index" / "knowledge.db")))
 

@@ -36,12 +36,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import ollama, vision                                # noqa: E402
-from assistant.answer import Provenance                             # noqa: E402
+from assistant.answering import vision
+from assistant import ollama                                # noqa: E402
+from assistant.answering.answer import (  # noqa: E402
+    Provenance,
+)
 from assistant.conversation import (                                # noqa: E402
     ConversationState, FactStatus, TurnInput,
 )
-from assistant.engine import Assistant                              # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.indexing.index import (  # noqa: E402
     CHUNKING_VERSION,
 )

@@ -66,10 +66,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant.answer import Provenance                  # noqa: E402
+from assistant.answering.answer import Provenance                  # noqa: E402
 from assistant.conversation import TurnInput             # noqa: E402
-from assistant.engine import Assistant, render          # noqa: E402
-from assistant.router import Path_                      # noqa: E402
+from assistant.answering.engine import Assistant, render          # noqa: E402
+from assistant.answering.router import Path_                      # noqa: E402
 from assistant.session import SessionStore              # noqa: E402
 from assistant.store.factory import open_repository     # noqa: E402
 
@@ -772,7 +772,7 @@ def check_structure(spec: dict, record: "TurnRecord",
     # -- the recommendation guard, re-asked from outside ---------------------
     if expect.get("no_unapproved_recommendation"):
         from assistant.retrieval import candidates as cand
-        from assistant import understanding as und
+        from assistant.answering import understanding as und
         for _question, answer in parts:
             allowed = {und.normalise_product(p)
                        for p in (answer.diagnostics.get("approved") or [])}

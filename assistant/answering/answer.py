@@ -19,10 +19,10 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 
-from . import observability as obs
-from . import ollama
-from .logging.diagnosis_capture import DiagnosisCapture
-from .model import Retrieved
+from .. import observability as obs
+from .. import ollama
+from ..logging.diagnosis_capture import DiagnosisCapture
+from ..model import Retrieved
 from .router import Decision, Path_
 
 # ---------------------------------------------------------------- the prompt

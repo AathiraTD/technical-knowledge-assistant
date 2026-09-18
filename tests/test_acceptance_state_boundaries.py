@@ -6,11 +6,11 @@ from unittest.mock import Mock
 import pytest
 
 from assistant import graph, observability as obs, ollama
-from assistant import understanding as und
-from assistant.answer import Answer, Provenance
+from assistant.answering import understanding as und
+from assistant.answering.answer import Answer, Provenance
 from assistant.conversation import (
     ConversationState, FactStatus, SessionFact, merge_facts)
-from assistant.router import PolicyGate, SlotDetector
+from assistant.answering.router import PolicyGate, SlotDetector
 
 
 REGISTRY = ("Ultra", "Lime Green Ultra", "Solo", "Duro")

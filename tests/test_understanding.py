@@ -30,12 +30,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import ollama                                        # noqa: E402
-from assistant import understanding as u                            # noqa: E402
-from assistant.answer import Provenance                             # noqa: E402
+from assistant.answering import understanding as u
+from assistant.answering.answer import (  # noqa: E402
+    Provenance,
+)
 from assistant.conversation import (                                # noqa: E402
     ConversationState, FactStatus, SessionFact, merge_facts,
 )
-from assistant.router import SlotDetector                           # noqa: E402
+from assistant.answering.router import (  # noqa: E402
+    SlotDetector,
+)
 
 # The registry as it is actually harvested: long names and short aliases both.
 REGISTRY = ["Ultra: Insulated Lime Plaster Base Coat", "Ultra", "Duro",

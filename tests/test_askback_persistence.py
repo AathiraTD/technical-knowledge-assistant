@@ -32,7 +32,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.router import SlotDetector                          # noqa: E402
+from assistant.answering.router import (  # noqa: E402
+    SlotDetector,
+)
 
 from test_ui_server import (                                       # noqa: E402
     ASK, Browser, chat,                                            # noqa: F401

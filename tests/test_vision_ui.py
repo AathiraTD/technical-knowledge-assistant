@@ -34,8 +34,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import ollama, ui, vision                             # noqa: E402
-from assistant.engine import Assistant                               # noqa: E402
+from assistant.answering import vision
+from assistant import ollama, ui                             # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.store.factory import open_repository                  # noqa: E402
 from assistant.ui import Handler                                     # noqa: E402
 

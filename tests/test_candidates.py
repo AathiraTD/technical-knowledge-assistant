@@ -28,8 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.retrieval import candidates as c
 from assistant.model import Chunk, Document, Retrieved             # noqa: E402
-from assistant.router import SlotDetector                          # noqa: E402
-from assistant.understanding import Intent, ResolvedRequest        # noqa: E402
+from assistant.answering.router import (  # noqa: E402
+    SlotDetector,
+)
+from assistant.answering.understanding import (  # noqa: E402
+    Intent,
+    ResolvedRequest,
+)
 
 REGISTRY = ["Ultra", "Duro", "Solo", "Warmshell Woodfibre Insulation Boards",
             "Forte"]

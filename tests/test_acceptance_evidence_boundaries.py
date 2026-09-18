@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant.answer import AnswerEngine, run_checks, scoped_evidence
+from assistant.answering.answer import AnswerEngine, run_checks, scoped_evidence
 from assistant.model import Chunk, Document, Retrieved
-from assistant.router import Decision, Path_
+from assistant.answering.router import Decision, Path_
 
 
 NAMES = {"products": ["Ultra", "Solo", "Duro", "Bond", "Forte", "Tradirend"]}
@@ -378,7 +378,7 @@ def test_router_identified_additional_field_gets_explicit_limit(engine):
 
 
 def test_deterministic_extraction_still_runs_checks(engine, monkeypatch):
-    import assistant.answer as answering
+    import assistant.answering.answer as answering
 
     monkeypatch.setattr(answering, "run_checks", lambda *a, **kw: ["check 2: blocked"])
     hit = passage("Mix Ultra with 8 litres of water.", section="Mixing")

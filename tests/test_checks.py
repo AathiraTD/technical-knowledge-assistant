@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.answer import products_named, run_checks      # noqa: E402
+from assistant.answering.answer import products_named, run_checks      # noqa: E402
 from assistant.model import Chunk, Document, Retrieved       # noqa: E402
 
 NAMES = {

@@ -47,7 +47,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import vision                                        # noqa: E402
+from assistant.answering import vision
 
 IMAGES = ROOT / "eval" / "fixtures" / "images"
 MANIFEST = IMAGES / "manifest.json"

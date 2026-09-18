@@ -31,9 +31,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import vision                                        # noqa: E402
-from assistant.vision import (                                      # noqa: E402
-    Observation, Perception, VISION_SLOTS, observe, resolve,
+from assistant.answering import vision
+from assistant.answering.vision import (
+    Observation,
+    Perception,
+    VISION_SLOTS,
+    observe,
+    resolve,
 )
 
 from test_vision import PIXEL, _Client, body, fake_ollama, obs       # noqa: E402

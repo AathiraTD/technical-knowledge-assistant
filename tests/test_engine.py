@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant import ollama                                      # noqa: E402
-from assistant.answer import Answer                               # noqa: E402
-from assistant.engine import (  # noqa: E402
+from assistant.answering.answer import Answer                               # noqa: E402
+from assistant.answering.engine import (
     MAX_WORDS,
     cap,
     Assistant,
@@ -38,7 +38,7 @@ from assistant.engine import (  # noqa: E402
 from assistant.model import (                                     # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Retrieved, Snapshot,
 )
-from assistant.router import Decision, Path_                      # noqa: E402
+from assistant.answering.router import Decision, Path_                      # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 
 DIMS = 1024

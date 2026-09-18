@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .model import Retrieved
-from . import paths
+from ..model import Retrieved
+from .. import paths
 
 CONFIG = paths.CONFIG_DIR
 

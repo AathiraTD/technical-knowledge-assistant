@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 import pytest
 
-from assistant.engine import Assistant
+from assistant.answering.engine import Assistant
 from assistant.model import Snapshot
 from assistant.store import SQLiteKnowledgeRepository
 from assistant import ollama

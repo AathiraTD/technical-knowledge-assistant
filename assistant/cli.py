@@ -25,7 +25,7 @@ import sys
 
 from . import observability as obs, ollama, use_utf8
 from .conversation import TurnInput
-from .engine import Assistant, render
+from .answering.engine import Assistant, render
 from .repository import IndexMismatch
 from .store import EmbeddedRepository
 from .store.factory import open_repository

@@ -13,7 +13,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from assistant import observability, session
-from assistant.engine import Assistant
+from assistant.answering.engine import Assistant
 from assistant.retrieval.retrieve import Retriever
 from assistant.store import SQLiteKnowledgeRepository
 
@@ -367,7 +367,7 @@ class IntegrationTestVision(unittest.TestCase):
         # This test requires Phase 2 vision perception to be built
         # Placeholder: verify vision module exists
         try:
-            from assistant import vision
+            from assistant.answering import vision
             self.assertIsNotNone(vision)
         except ImportError:
             self.skipTest("Vision module not built yet")

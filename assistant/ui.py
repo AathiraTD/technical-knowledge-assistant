@@ -51,11 +51,11 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from . import health, metrics, observability as obs, ollama, use_utf8
-from .answer import Provenance
+from .answering.answer import Provenance
 from .audience import DEFAULT as PUBLIC_ONLY, resolve
-from .engine import Assistant
+from .answering.engine import Assistant
 from .repository import IndexMismatch
-from .router import Path_
+from .answering.router import Path_
 from .session import SessionStore
 from .store.factory import open_repository, open_persisted_session_store
 

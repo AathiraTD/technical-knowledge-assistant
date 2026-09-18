@@ -47,10 +47,10 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from . import observability as obs
-from . import ollama
+from .. import observability as obs
+from .. import ollama
 from .answer import Answer, Provenance, SlotFact, _named_aliases, _product_aliases
-from .conversation import ConversationState, Denial, FactStatus, SessionFact
+from ..conversation import ConversationState, Denial, FactStatus, SessionFact
 
 # The model is asked for one small object and nothing else, so the budget is a
 # fraction of an answer's. A reply longer than this is a malfunction, not a

@@ -20,10 +20,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import ollama, vision
-from assistant.answer import Provenance
+from assistant.answering import vision
+from assistant import ollama
+from assistant.answering.answer import Provenance
 from assistant.conversation import ConversationState, FactStatus, TurnInput
-from assistant.engine import Assistant
+from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
 from assistant.store import SQLiteKnowledgeRepository

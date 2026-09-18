@@ -39,9 +39,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.answer import _diagnostic_passages, run_checks   # noqa: E402
+from assistant.answering.answer import _diagnostic_passages, run_checks   # noqa: E402
 from assistant.model import Chunk, Document, Retrieved          # noqa: E402
-from assistant.router import PolicyGate, Router                 # noqa: E402
+from assistant.answering.router import PolicyGate, Router                 # noqa: E402
 
 
 def passage(content: str, *, product: str = "Forte Render Base Coat",
@@ -249,7 +249,9 @@ import pytest                                                       # noqa: E402
 from assistant.retrieval import candidates as cand
 from assistant import ollama                                        # noqa: E402
 from assistant.conversation import TurnInput                        # noqa: E402
-from assistant.engine import Assistant                              # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.indexing.index import (  # noqa: E402
     CHUNKING_VERSION,
 )

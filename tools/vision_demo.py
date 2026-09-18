@@ -34,7 +34,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant.conversation import ConversationState, TurnInput      # noqa: E402
-from assistant.engine import Assistant                               # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.store.factory import open_repository                  # noqa: E402
 
 IMAGES = ROOT / "eval" / "fixtures" / "images"
@@ -95,7 +97,7 @@ class NoVision:
 
     @staticmethod
     def observe(images):
-        from assistant import vision
+        from assistant.answering import vision
         return vision.resolve([vision.Perception(
             error="vision skipped (--dry-run)")])
 

@@ -84,7 +84,7 @@ def test_the_price_gate_still_catches_the_question_it_exists_for():
     `how much (is|are) (it|this|the)`, and reached retrieval — where a price
     question has no honest answer.
     """
-    from assistant.router import PolicyGate
+    from assistant.answering.router import PolicyGate
 
     gate = PolicyGate()
 

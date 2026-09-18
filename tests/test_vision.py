@@ -25,8 +25,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import vision                                    # noqa: E402
-from assistant.vision import (                                  # noqa: E402
+from assistant.answering import vision
+from assistant.answering.vision import (
     Band,
     Observation,
     Perception,
@@ -682,7 +682,7 @@ def test_an_unknown_slot_name_is_ignored_by_the_vocabulary_reader():
 
 
 def test_the_vocabulary_is_the_routers_own():
-    from assistant.router import SlotDetector
+    from assistant.answering.router import SlotDetector
     spec = SlotDetector().spec
     for slot, values in vision._vocabulary(VISION_SLOTS).items():
         assert values == spec[slot]["values"]

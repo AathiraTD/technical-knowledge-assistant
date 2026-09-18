@@ -46,7 +46,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant import observability as obs                         # noqa: E402
-from assistant.engine import Assistant                             # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
 from assistant.model import TraceSpan                              # noqa: E402
 from assistant.repository import (                                 # noqa: E402
     TRACE_PRUNE_STRIDE, TRACE_RETENTION_DAYS, TRACE_ROW_CAP,

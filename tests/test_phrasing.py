@@ -27,8 +27,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import phrasing                                     # noqa: E402
-from assistant.answer import Answer                                # noqa: E402
+from assistant.answering import phrasing
+from assistant.answering.answer import (  # noqa: E402
+    Answer,
+)
 from assistant.ollama import OllamaUnavailable                     # noqa: E402
 
 
@@ -314,7 +316,7 @@ def test_a_polished_answer_renders_through_the_page_unchanged_in_structure(
     from bs4 import BeautifulSoup
 
     from assistant import ui
-    from assistant.engine import Reply
+    from assistant.answering.engine import Reply
 
     monkeypatch.setenv(phrasing.PHRASING_FLAG, "1")
     source = {"name": "Ultra datasheet", "url": "https://example.invalid/ultra"}

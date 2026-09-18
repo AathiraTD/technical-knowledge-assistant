@@ -45,13 +45,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.answer import (                                   # noqa: E402
-    _binding_guidance, _distinguishes, evidence_binding, promote_bound,
+from assistant.answering.answer import (
+    _binding_guidance,
+    _distinguishes,
+    evidence_binding,
+    promote_bound,
     run_checks,
 )
 from assistant.model import Chunk, Document, Retrieved           # noqa: E402
 from assistant.repository import product_matches                 # noqa: E402
-from assistant.router import Path_, Router                       # noqa: E402
+from assistant.answering.router import Path_, Router                       # noqa: E402
 
 COMPOUND = ("I have a solid brick wall internally. Can I use Ultra, and what "
             "thickness should it be applied at?")
@@ -478,7 +481,7 @@ def test_a_compound_question_is_still_answered_per_option_when_location_is_uncue
 
 def test_a_decision_built_without_the_router_still_composes():
     """Every field is empty-safe. A `Decision` a test builds carries no binding."""
-    from assistant.router import Decision
+    from assistant.answering.router import Decision
 
     bare = Decision(Path_.COMPOSE, "built by hand", "8", hits=HITS)
 

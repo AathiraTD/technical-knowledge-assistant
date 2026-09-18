@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant import ollama
-from assistant.engine import Assistant
-from assistant.router import PolicyGate, split_by_topic
+from assistant.answering.engine import Assistant
+from assistant.answering.router import PolicyGate, split_by_topic
 from test_engine import build_repo, unit
 
 

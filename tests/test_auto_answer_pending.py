@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from assistant.engine import Assistant
-from assistant.router import SlotDetector
+from assistant.answering.engine import Assistant
+from assistant.answering.router import SlotDetector
 from assistant.session import SessionStore
 
 

@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import ollama                                   # noqa: E402
-from assistant.answer import (                                 # noqa: E402
+from assistant.answering.answer import (
     PHOTO_LINE,
     AnswerEngine,
     Provenance,
@@ -32,7 +32,7 @@ from assistant.answer import (                                 # noqa: E402
 from assistant.model import (                                  # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Excluded, Retrieved, Snapshot,
 )
-from assistant.router import Decision, Path_, Router           # noqa: E402
+from assistant.answering.router import Decision, Path_, Router           # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository          # noqa: E402
 
 DIMS = ollama.EMBED_DIMENSIONS
@@ -404,7 +404,7 @@ def test_a_stopped_model_server_is_reported_and_not_disguised(monkeypatch, caplo
 
 def test_a_sentence_with_no_figures_skips_the_attribution_check():
     """Check 3 compares figures against products; a sentence with none has nothing to compare."""
-    from assistant.answer import run_checks
+    from assistant.answering.answer import run_checks
     failures = run_checks(
         "Solo is a one-coat lime plaster for interior use [1].",
         [hit(SOLO_URL, "Description",
@@ -416,13 +416,13 @@ def test_a_sentence_with_no_figures_skips_the_attribution_check():
 
 def test_an_empty_answer_produces_no_failures():
     """An empty string is refused earlier; the checks must not invent a reason of their own."""
-    from assistant.answer import run_checks
+    from assistant.answering.answer import run_checks
     assert run_checks("", [MIXING], NOTES, []) == []
 
 
 def test_a_qualifier_cited_to_no_retrieved_passage_is_caught():
     """A marker pointing nowhere must not silently satisfy the qualifier check."""
-    from assistant.answer import run_checks
+    from assistant.answering.answer import run_checks
     failures = run_checks("Apply at a minimum thickness of 8 mm [9].",
                           [MIXING], NOTES, [])
     assert any(f.startswith("check 1") for f in failures)

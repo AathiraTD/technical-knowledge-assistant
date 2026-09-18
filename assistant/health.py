@@ -119,7 +119,7 @@ def check(db: str = "", dsn: str = "") -> dict:
 
         # Reported either way; load-bearing only for an image demonstration.
         #
-        # Imported here rather than at module scope because `assistant.vision`
+        # Imported here rather than at module scope because `assistant.answering.vision`
         # pulls in the router and its vocabularies, and a readiness probe that
         # runs every fifteen seconds should not pay for them.
         #
@@ -130,7 +130,7 @@ def check(db: str = "", dsn: str = "") -> dict:
         # opposite of what a probe is for.
         demo = vision_demo_enabled()
         try:
-            from .vision import VISION_MODEL
+            from .answering.vision import VISION_MODEL
         except Exception as exc:                        # pragma: no cover
             report["vision"] = {"model": "", "pulled": False, "required": demo,
                                 "error": str(exc)}

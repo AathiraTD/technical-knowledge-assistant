@@ -62,12 +62,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import ollama, vision                              # noqa: E402
-from assistant.answer import PHOTO_LINE, Provenance               # noqa: E402
-from assistant.engine import Assistant                            # noqa: E402
+from assistant.answering import vision
+from assistant import ollama                              # noqa: E402
+from assistant.answering.answer import PHOTO_LINE, Provenance               # noqa: E402
+from assistant.answering.engine import Assistant                            # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
-from assistant.router import Path_                                # noqa: E402
+from assistant.answering.router import Path_                                # noqa: E402
 from assistant.session import CARRIED_SLOTS, SessionStore         # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository             # noqa: E402
 

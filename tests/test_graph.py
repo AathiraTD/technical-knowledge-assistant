@@ -28,13 +28,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant.retrieval import candidates as cand
 from assistant import graph as g                                    # noqa: E402
 from assistant import ollama                                        # noqa: E402
-from assistant import understanding as und                          # noqa: E402
-from assistant.answer import Answer, Provenance, SlotFact           # noqa: E402
+from assistant.answering import understanding as und
+from assistant.answering.answer import (  # noqa: E402
+    Answer,
+    Provenance,
+    SlotFact,
+)
 from assistant.conversation import (                                # noqa: E402
     ConversationState, FactStatus, SessionFact, TurnInput,
 )
-from assistant.engine import Assistant                              # noqa: E402
-from assistant.router import Path_                                  # noqa: E402
+from assistant.answering.engine import (  # noqa: E402
+    Assistant,
+)
+from assistant.answering.router import (  # noqa: E402
+    Path_,
+)
 
 from test_engine import build_repo, quoting, unit                   # noqa: E402
 

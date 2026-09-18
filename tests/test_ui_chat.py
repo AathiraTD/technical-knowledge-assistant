@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import observability as obs, ollama
 from assistant import ui
-from assistant.engine import Assistant
+from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant.model import (
     Caveat, Chunk, Document, DocumentVersion, Snapshot,
