@@ -142,6 +142,23 @@ _SPLIT = re.compile(
     re.I,
 )
 
+_SOURCE_INSTRUCTION = re.compile(
+    r"(?:please\s+)?(?:"
+    r"(?:ignore|disregard|bypass|override)\s+"
+    r"(?:(?!\band\b)[^?.;,]){0,100}?"
+    r"\b(?:documents?|sources?|citations?|instructions?|rules?|evidence)"
+    r"(?:\s+and\s+(?:answer|respond)\s+from\s+(?:your\s+)?"
+    r"(?:own|general)\s+knowledge)?"
+    r"|(?:answer|respond)\s+from\s+(?:your\s+)?(?:own|general)\s+knowledge"
+    r"|(?:do not|don't|never)\s+(?:cite|reference)"
+    r"(?:\s+(?:anything|(?:(?:the|any)\s+)?(?:documents?|sources?|evidence)))?"
+    r"|(?:give me the answer|answer|respond)\s+without\s+(?:any\s+)?"
+    r"(?:sources?|citations?|references?)"
+    r"(?:\s+(?:or|and)\s+(?:sources?|citations?|references?))?"
+    r")[.!]?",
+    re.I,
+)
+
 
 def split_by_topic(question: str) -> list[str]:
     """Two *jobs* in one message are two questions. Two sentences are not.
@@ -179,7 +196,26 @@ def split_by_topic(question: str) -> list[str]:
     """
     candidates = [p.strip(" ,;") for p in _SPLIT.split(question)
                   if p and p.strip(" ,;")]
-    candidates = [p for p in candidates if len(p.split()) >= 3]
+    # An override instruction is not a retrieval job. Attach it to a real
+    # question without throwing any text away or merging independent jobs.
+    # This heuristic is not a security boundary: normal gates/checks still run.
+    if any(_SOURCE_INSTRUCTION.fullmatch(part) for part in candidates):
+        joined = []
+        pending = []
+        for part in candidates:
+            if _SOURCE_INSTRUCTION.fullmatch(part):
+                pending.append(part)
+            else:
+                joined.append(" ".join([*pending, part]))
+                pending = []
+        if pending:
+            if joined:
+                joined[-1] = " ".join([joined[-1], *pending])
+            else:
+                joined = [" ".join(pending)]
+        candidates = joined
+    else:
+        candidates = [p for p in candidates if len(p.split()) >= 3]
     if len(candidates) < 2:
         return candidates or [question.strip()]
 
@@ -209,14 +245,24 @@ class PolicyGate:
     """Topics the published corpus cannot answer, matched before retrieval."""
 
     def __init__(self) -> None:
-        cfg = _load("routing.json")["topics"]
-        self.topics = {k: v for k, v in cfg.items() if not k.startswith("_")}
+        cfg = _load("routing.json")
+        self.topics = {k: v for k, v in cfg["topics"].items()
+                       if not k.startswith("_")}
+        # A broad commercial keyword such as "guarantee" must not mask a
+        # structural/compliance request. Preserve table order otherwise.
+        order = dict.fromkeys([*cfg.get("safety_precedence", []), *self.topics])
         self.compiled = {
-            name: [re.compile(p, re.I) for p in spec["patterns"]]
-            for name, spec in self.topics.items()
+            name: [re.compile(p, re.I) for p in self.topics[name]["patterns"]]
+            for name in order
         }
 
     def match(self, question: str) -> tuple[str, dict] | None:
+        # Source-only instructions cannot supply the substantive policy intent
+        # ("ignore the warranty documents" is not a warranty question).
+        parts = [part for part in _SPLIT.split(question)
+                 if not _SOURCE_INSTRUCTION.fullmatch(part.strip(" ,;"))]
+        if parts:
+            question = " ".join(parts)
         for name, patterns in self.compiled.items():
             if any(p.search(question) for p in patterns):
                 return name, self.topics[name]

@@ -112,7 +112,7 @@ from . import observability as obs                                  # noqa: E402
 from . import understanding as und                                  # noqa: E402
 from .answer import Provenance                                      # noqa: E402
 from .conversation import (                                         # noqa: E402
-    ConversationState, FactHistory, NewCase, SessionFact, merge_facts,
+    ConversationState, Denial, FactHistory, NewCase, SessionFact, merge_facts,
     merge_observations, opens_a_new_case,
 )
 from .router import Path_, split_by_topic                           # noqa: E402
@@ -143,6 +143,10 @@ ALLOWED_TYPES = [
     ("assistant.answer", "Answer"),
     ("assistant.answer", "SlotFact"),
     ("assistant.conversation", "NewCase"),
+    # The other reducer instruction, and listed for the same reason: a node's
+    # pending writes are checkpointed alongside the channel values, so a turn
+    # interrupted between `resolve_state` and the reducer has one in the store.
+    ("assistant.conversation", "Denial"),
     ("assistant.conversation", "Case"),
     ("assistant.router", "Path_"),
 ]
@@ -252,6 +256,8 @@ class TurnState(TypedDict, total=False):
     hits: list
     decision: Any                # cand.RecommendationDecision
     answer: Any                  # assistant.answer.Answer
+    boundary_answer: Any         # deterministic conversation-only response
+    active_product: str         # lookup topic, never installation testimony
     answers: list                # (part, Answer) pairs, for a split message
     outcome: str
     trace: Annotated[list, _append]
@@ -295,10 +301,18 @@ def build(services: Services):
 
     def understand_turn(state: TurnState) -> dict:
         question = state["raw_question"]
-        reading = und.understand(question, services.router.slots,
+        boundary = und.state_only_answer(
+            question, services.router.slots, services.registry,
+            _state_of(state), state.get("turn_index", 0),
+            gate=services.router.gate,
+            active_product=state.get("active_product", ""))
+        reading = (und.deterministic(question, services.router.slots,
+                                    services.router.gate, services.registry)
+                   if boundary is not None else
+                   und.understand(question, services.router.slots,
                                  enabled=services.understanding_enabled,
                                  gate=services.router.gate,
-                                 registry=services.registry)
+                                 registry=services.registry))
         # `ResetTrace`, because this node is always first and a trace describes
         # one turn. See `ResetTrace`.
         # Per-turn fields are cleared here, by the node that always runs first.
@@ -308,6 +322,11 @@ def build(services: Services):
         # and the page reported that it had answered a question from two
         # messages ago.
         return {"understanding": reading,
+                "boundary_answer": boundary,
+                "decision": None,
+                "hits": [],
+                "missing": [],
+                "outcome": "",
                 "resumed_question": "",
                 "case_opened": "",
                 # Cleared, or a turn that produces no answer of its own -- one
@@ -339,7 +358,8 @@ def build(services: Services):
         question = state["raw_question"]
         reading = state["understanding"]
         opens, why = opens_a_new_case(
-            question, model_says=getattr(reading, "new_subject", False))
+            und.asserted_text(question),
+            model_says=getattr(reading, "new_subject", False))
         if not opens:
             return {"trace": ["case_boundary:same"]}
 
@@ -347,7 +367,7 @@ def build(services: Services):
         # old wall established does not. `NewCase` is a reducer instruction
         # rather than an assignment, so the reset goes through `merge_facts`
         # like every other write and cannot bypass supersession.
-        detected = services.router.slots.detect(question)
+        detected = services.router.slots.detect(und.asserted_text(question))
         turn = state.get("turn_index", 0)
         keep = {slot: SessionFact(slot, value, Provenance.STATED, turn)
                 for slot, value in detected.items()}
@@ -355,6 +375,7 @@ def build(services: Services):
                   turn=turn)
         reset = NewCase(keep=keep, reason=why)
         return {"facts": reset,
+                "active_product": "",
                 "observations": reset,
                 "case_opened": why,
                 "trace": [f"case_boundary:new ({why})"]}
@@ -365,12 +386,42 @@ def build(services: Services):
         resolved = und.resolve(reading, state["raw_question"],
                                services.router.slots, services.registry,
                                state=_state_of(state),
-                               turn_index=state.get("turn_index", 0))
+                               turn_index=state.get("turn_index", 0),
+                               active_product=state.get("active_product", ""))
         new = und.facts_from(resolved, state.get("turn_index", 0))
         for slot, fact in new.items():
+            if isinstance(fact, Denial):
+                # A retraction is not a fact and has no provenance to log. It is
+                # still the most audit-worthy thing a turn can do to state, so
+                # it gets its own event rather than being folded into one that
+                # would have to report an origin it does not have.
+                obs.event("fact_denied", slot=slot, value=fact.value,
+                          turn=state.get("turn_index", 0))
+                continue
             obs.event("inherited_fact", slot=slot,
                       provenance=fact.provenance.value, source_turn=fact.source_turn)
-        return {"facts": new, "resolved": resolved, "trace": ["resolve_state"]}
+        topic = und.topic_product(state["raw_question"], services.registry)
+        return {"facts": new, "resolved": resolved,
+                "active_product": topic or state.get("active_product", ""),
+                "trace": ["resolve_state"]}
+
+    def answer_state(state: TurnState) -> dict:
+        # Re-read after a possible case boundary; never answer from a retired wall.
+        answer = und.state_only_answer(
+            state["raw_question"], services.router.slots, services.registry,
+            _state_of(state), state.get("turn_index", 0),
+            gate=services.router.gate,
+            active_product=state.get("active_product", ""))
+        perception = state.get("perception") or {}
+        if perception:
+            answer.diagnostics["perception"] = perception
+            if perception.get("enabled") is False:
+                answer.text += "\n\n" + " ".join(perception.get("summary", []))
+        with obs.span("part", question=obs.fingerprint(state["raw_question"])) as span:
+            span["path"] = answer.path
+            span["cached"] = bool(answer.diagnostics.get("cached", False))
+        return {"answer": answer, "answers": [(state["raw_question"], answer)],
+                "outcome": answer.path, "trace": [f"state_only:{answer.path}"]}
 
     def analyse_images(state: TurnState) -> dict:
         """Observations, as observations. Never promoted into stated facts."""
@@ -452,7 +503,8 @@ def build(services: Services):
         resolved = und.resolve(state["understanding"], state["raw_question"],
                                services.router.slots, services.registry,
                                state=_state_of(state),
-                               turn_index=state.get("turn_index", 0))
+                               turn_index=state.get("turn_index", 0),
+                               active_product=state.get("active_product", ""))
         missing = (cand.missing_facts(resolved)
                    if resolved.intent is und.Intent.SELECT else [])
         return {"resolved": resolved, "missing": missing,
@@ -482,7 +534,7 @@ def build(services: Services):
         resumed_question = state["raw_question"]
 
         turn = state.get("turn_index", 0)
-        detected = services.router.slots.detect(str(reply))
+        detected = services.router.slots.detect(und.asserted_text(str(reply)))
         obs.event("ask_back_resumed", supplied=sorted(detected),
                   answered=bool(detected))
         return {"facts": {slot: SessionFact(slot, value, Provenance.STATED, turn)
@@ -512,7 +564,8 @@ def build(services: Services):
         resolved = und.resolve(state["understanding"], state["raw_question"],
                                services.router.slots, services.registry,
                                state=_state_of(state),
-                               turn_index=state.get("turn_index", 0))
+                               turn_index=state.get("turn_index", 0),
+                               active_product=state.get("active_product", ""))
         hits = services.retriever.search(
             resolved.retrieval_query(),
             audiences=tuple(state.get("audiences", ("public",))),
@@ -545,7 +598,9 @@ def build(services: Services):
         # Answering it as one part would have been a regression introduced by
         # the orchestration rather than by any change in the answering, which is
         # the kind of divergence having two paths invites.
-        parts = split_by_topic(state["raw_question"])
+        parts = ([state["raw_question"]]
+                 if resolved.policy_topic in und.MANDATORY_TOPICS
+                 else split_by_topic(state["raw_question"]))
         answers = []
         for part in parts:
             # One `part` span per topic, as `Assistant._ask` has always emitted.
@@ -559,7 +614,7 @@ def build(services: Services):
                     part, audiences, carried=resolved.slots(),
                     origins=resolved.provenance, history=state.get("history", ""))
                 span["path"] = answer.path
-                span["cached"] = False
+                span["cached"] = bool(answer.diagnostics.get("cached", False))
             answers.append(answer)
         return {"answers": list(zip(parts, answers)),
                 "answer": answers[0] if answers else None,
@@ -736,7 +791,7 @@ def build(services: Services):
 
     def after_missing(state: TurnState) -> Literal[
             "ask_back", "need_more_information", "retrieve_candidates",
-            "delegate"]:
+            "delegate", "answer_state"]:
         """SELECT goes through the evidence gate; everything else does not.
 
         Note what this cannot express: there is no edge from an insufficient
@@ -761,6 +816,8 @@ def build(services: Services):
         `interruptible=False` still renders instead, for a caller with no way to
         resume -- a one-shot evaluation of a single turn, for instance.
         """
+        if state.get("boundary_answer") is not None:
+            return "answer_state"
         if state["resolved"].intent is not und.Intent.SELECT:
             return "delegate"
         if not state.get("missing"):
@@ -777,17 +834,26 @@ def build(services: Services):
             return "recommend"
         return "no_supported_recommendation"
 
+    def after_resolve(state: TurnState) -> Literal["answer_state", "analyse_images"]:
+        boundary = state.get("boundary_answer")
+        if boundary is not None:
+            if state.get("images"):
+                return "analyse_images"
+            return "answer_state"
+        return "analyse_images"
+
     graph = StateGraph(TurnState)
     for fn in (understand_turn, case_boundary, resolve_state, analyse_images,
                determine_missing_information, ask_back, retrieve_candidates,
                assess_evidence, delegate, recommend, need_more_information,
-               no_supported_recommendation, verify):
+               no_supported_recommendation, verify, answer_state):
         graph.add_node(fn.__name__, fn)
 
     graph.add_edge(START, "understand_turn")
     graph.add_edge("understand_turn", "case_boundary")
     graph.add_edge("case_boundary", "resolve_state")
-    graph.add_edge("resolve_state", "analyse_images")
+    graph.add_conditional_edges("resolve_state", after_resolve)
+    graph.add_edge("answer_state", END)
     graph.add_edge("analyse_images", "determine_missing_information")
     graph.add_conditional_edges("determine_missing_information", after_missing)
     graph.add_edge("ask_back", "retrieve_candidates")

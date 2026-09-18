@@ -1,7 +1,7 @@
-"""Answering: extract, compose, six checks, hand-off, rendering.
+"""Answering: extract, compose, evidence checks, hand-off, rendering.
 
 The checks are the point of this file. The model runs on one path out of seven,
-and everything it produces is treated as a proposal that has to survive six
+and everything it produces is treated as a proposal that has to survive
 mechanical tests before a person sees it. A failure is not repaired and not
 retried — it becomes a refusal that still carries whatever the site does
 publish, because a refusal is a designed outcome here rather than a fault.
@@ -23,7 +23,6 @@ from . import observability as obs
 from . import ollama
 from .logging.diagnosis_capture import DiagnosisCapture
 from .model import Retrieved
-from .repository import product_matches
 from .router import Decision, Path_
 
 # ---------------------------------------------------------------- the prompt
@@ -39,7 +38,8 @@ SYSTEM = (
     "\n"
     "STYLE — answer directly. Do not explain your reasoning, do not describe "
     "what you are doing, and do not write an introduction or a conclusion. "
-    "Two or three sentences is usually the whole answer.\n"
+    "Cover each requested point separately; do not omit clauses to keep the "
+    "answer short.\n"
     "\n"
     "RULES\n"
     # Deliberately no "say so if the passages do not answer it". That invited
@@ -435,8 +435,11 @@ def _property_support(hits: list[Retrieved], terms: list[str],
                        + (_STATES_IT_BONUS if direct else 0), marker))
     if product:
         own = [(score, marker) for score, marker in scored
-               if product_matches(product, hits[marker - 1].chunk.product or "")]
-        scored = own or scored
+               if _same_product(product, hits[marker - 1].chunk.product or "")]
+        aliases = _product_aliases([product])
+        related = [(score, marker) for score, marker in scored
+                   if _named_aliases(hits[marker - 1].chunk.content, aliases)]
+        scored = own or related
     if not scored:
         return []
     best = max(score for score, _marker in scored)
@@ -528,61 +531,73 @@ def promote_bound(hits: list[Retrieved],
     return [hits[index]] + [h for i, h in enumerate(hits) if i != index]
 
 
-def scoped_evidence(decision: Decision) -> list[Retrieved]:
-    """Drop general-interest documents once the product's own answer is present.
+def _same_product(named: str, candidate: str) -> bool:
+    """Evidence identity is stricter than the repository's substring boost."""
+    a, b = (_without_brand(s.lower()).strip() for s in (named, candidate))
+    if not a or not b:
+        return False
+    if bool(re.search(r"\bprimer\b", a)) != bool(re.search(r"\bprimer\b", b)):
+        return False
+    return a == b or a.startswith(b + " ") or b.startswith(a + " ")
 
-    The measured case: asked "and what thickness should I apply it at?" with
-    Ultra carried from the previous turn, the model answered from the FAQ entry
-    headed "How thick can I apply lime basecoat in any one go" -- whose body
-    opens "in the case of our general purpose **Duro** lime base coat" -- and
-    reported Duro's 9 to 12 mm as the answer. Ultra's own datasheet was in the
-    same evidence set, at marker [1], saying "between 10 and 30mm".
 
-    Ordering had already been tried and does not fix it. Promotion puts the
-    Ultra passage first and the model still reaches past it, because the FAQ is
-    a question-and-answer pair whose *question* is very nearly the one being
-    asked. A heading that matches the question beats a position in a list, so
-    the only thing that works is for the passage not to be there.
+def _product_aliases(registry) -> dict[str, str]:
+    """Catalogue spellings plus unambiguous distinctive short names."""
+    aliases: dict[str, str] = {}
+    heads: dict[str, set[str]] = {}
+    for name in registry:
+        name = _without_brand((name or "").lower()).strip()
+        if not name:
+            continue
+        canonical = next((v for v in aliases.values()
+                          if _same_product(name, v)), name)
+        aliases[name] = canonical
+        head = name.split()[0]
+        if head not in {"natural", "fine", "lime", "base", "finish", "internal",
+                        "external", "medium", "coarse"}:
+            heads.setdefault(head, set()).add(canonical)
+    for head, candidates in heads.items():
+        if len(candidates) == 1:
+            aliases.setdefault(head, next(iter(candidates)))
+    return aliases
 
-    **Only the general-interest types go, and only when the product's own
-    evidence already answers.** Another product's datasheet stays: "can I use
-    Ultra over Solo" needs Solo's, situation S8's finish coats are named in
-    Forte's own sheet, and a cross-product datasheet passage was measured
-    sitting harmlessly in the set while the FAQ in the same set caused the
-    drift. Measured over forty thin follow-ups across five products, every
-    general-interest passage retrieved duplicated an answer the product's own
-    documents already carried, and seven of the eight named a different
-    product while doing it.
 
-    **The coverage condition is what makes it safe.** If the product's own
-    documents do not answer the property, the full set is returned and nothing
-    is lost -- the FAQ may be the only thing that answers, and check 7 remains
-    the backstop if the model then drifts. Coverage is decided by
-    `evidence_binding`, the same property-support logic Compose already uses to
-    bind claims, rather than by a second heuristic that could disagree with it.
+def _product_pattern(aliases: dict[str, str]) -> str:
+    # Longest names consume their short prefix. Even an unregistered accessory
+    # must not become evidence about the coating sharing its name.
+    names = set(aliases)
+    names.update(f"{name} primer" for name in aliases if not name.endswith("primer"))
+    return "|".join(re.escape(p) for p in sorted(names, key=len, reverse=True))
 
-    Returns `decision.hits` unchanged whenever the rule does not apply, so a
-    question that resolved no product, bound no property, or has no
-    product-bound answer behaves exactly as it did before.
+
+def _named_aliases(text: str, aliases: dict[str, str]) -> set[str]:
+    if not aliases:
+        return set()
+    return {aliases.get(m.group().lower(), m.group().lower())
+            for m in re.finditer(rf"\b(?:{_product_pattern(aliases)})\b", text, re.I)}
+
+
+def scoped_evidence(decision: Decision, question: str = "",
+                    registry=()) -> list[Retrieved]:
+    """Keep the requested products and passages explicitly relating to them.
+
+    A primer or finishing relation can live on another product's sheet. Its
+    explicit reference is retained; an unrelated sheet is not a fallback just
+    because it contains a stronger match for 'water' or 'thickness'.
     """
     product = decision.slots.get("product", "")
-    if not product:
+    aliases = _product_aliases([*registry, product, *(
+        h.chunk.product or h.document.product for h in decision.hits)])
+    requested = _named_aliases(question, aliases)
+    if product:
+        requested.add(_without_brand(product.lower()))
+    if not requested:
         return decision.hits
-    bound = evidence_binding(decision)
-    if not bound:
-        return decision.hits
-    covered = any(
-        product_matches(product, decision.hits[marker - 1].chunk.product or "")
-        for markers in bound.values() for marker in markers
-        if 0 < marker <= len(decision.hits))
-    if not covered:
-        return decision.hits
-    kept = [h for h in decision.hits
-            if h.chunk.document_type in PRODUCT_DOCUMENT_TYPES]
-    # Never empty the evidence. If the product-bound answer lives in a document
-    # type this rule would drop, the rule has misread the situation and the
-    # honest response is to change nothing.
-    return kept or decision.hits
+    return [h for h in decision.hits if any(
+        _same_product(p, h.chunk.product or h.document.product or "")
+        or any(_same_product(p, named)
+               for named in _named_aliases(h.chunk.content, aliases))
+        for p in requested)]
 
 
 def _binding_guidance(decision: Decision) -> str:
@@ -702,6 +717,261 @@ def products_named(text: str, registry) -> set[str]:
             if name and re.search(rf"\b{re.escape(name.lower())}\b", lowered)}
 
 
+_NEGATED = re.compile(r"\b(?:not|never|cannot|can't|don't|mustn't|isn't|aren't|"
+                      r"won't|shouldn't|couldn't|unsuitable|"
+                      r"incompatible|avoid)\b", re.I)
+_CONDITION = re.compile(
+    r"\b(?:only|if|unless|provided|providing|once|after|before|until|"
+    r"when|where|except|subject to)\b[^.!?;]*", re.I)
+_UNCERTAIN = re.compile(r"\b(?:might|could|possibly|perhaps|unconfirmed|uncertain|"
+                        r"may or may not|"
+                        r"unknown|unverified|no (?:evidence|confirmation)|"
+                        r"cannot confirm|unable to (?:confirm|establish)|"
+                        r"not (?:known|established|confirmed|proven|specified|stated))\b", re.I)
+
+
+def _assertions(text: str, aliases: dict[str, str] | None = None) -> list[str]:
+    names = "|".join(re.escape(p) for p in (aliases or {}))
+    conjunction = (rf"|\s+and\s+(?=(?:{names})\b)|,\s*(?=(?:{names})\b)"
+                   if names else "")
+    return [part for sentence in _SENTENCE.split(text)
+            for part in re.split(r";|,\s*(?:but|whereas)\s+|\s+(?:but|whereas)\s+",
+                                 sentence, flags=re.I)
+            for part in re.split(r"\s+and\s+(?=(?:do not|must not|should not|never|avoid)\b)"
+                                 + conjunction, part, flags=re.I) if part.strip()]
+
+
+def _predicate_status(clause: str, *, property_claim: bool = False) -> tuple[bool, bool]:
+    clause = clause.replace("’", "'")
+    main = re.sub(r"^\s*[“\"']*(?:if|unless|after|before|once|when|provided)\b[^,]*,",
+                  "", clause, flags=re.I)
+    main = re.split(r"\b(?:if|unless|after|before|until|when|where|provided|once)\b",
+                    main, maxsplit=1, flags=re.I)[0]
+    main = re.split(r"\band\s+(?:is|are|was|were|isn't|not|unsuitable|incompatible)\b",
+                    main, maxsplit=1, flags=re.I)[0]
+    uncertain = bool(_UNCERTAIN.search(main))
+    if property_claim and re.search(r"\bmay be\b", main, re.I):
+        uncertain = True
+    return bool(_NEGATED.search(main)), uncertain
+
+
+def _subject_start(text: str, start: int) -> bool:
+    prefix = re.split(r"[,;.!?\n]", _CITE.sub("", text[:start]))[-1]
+    prefix = prefix.strip(" \t“”\"'").lower()
+    return re.fullmatch(
+        r"(?:(?:can|may|could|should|must|i|we|you|do|not|never|"
+        r"apply|use|place|coat|finish|cannot|confirm|establish|"
+        r"it|is|uncertain|unknown|unconfirmed|whether|"
+        r"cured|hardened|dry|damp|primed|prepared|fully|lime|green)\b\s*)*",
+        prefix) is not None
+
+
+def _relations(text: str, aliases: dict[str, str]) -> list[tuple]:
+    """Parse directed layers, never infer them from a bag of product words."""
+    if not aliases:
+        return []
+    names = _product_pattern(aliases)
+    pair = re.compile(
+        rf"\b(?P<a>{names})\b(?P<link>[^.!?;\n]{{0,160}}?)"
+        rf"\b(?P<b>{names})\b", re.I)
+    out = []
+    modifier = r"(?:(?:the|cured|hardened|dry|damp|primed|prepared)\s+)*"
+    for sentence in _SENTENCE.split(_CITE.sub("", text)):
+        for match in pair.finditer(sentence):
+            if not _subject_start(sentence, match.start()):
+                continue
+            clause = next((c for c in _assertions(sentence, aliases)
+                           if match.group() in c), match.group())
+            a, b = (aliases.get(match.group(k).lower(), match.group(k).lower())
+                    for k in ("a", "b"))
+            if a == b:
+                continue
+            link = match.group("link").lower()
+            # A mention followed by another clause is not the subject of the
+            # application instruction at the end of that clause.
+            if not re.fullmatch(
+                    r"\s*(?:(?:can|cannot|can't|may|might|could|must|should|"
+                    r"will|would|not|never|or|be|is|are|isn't|aren't|"
+                    r"known|proven|confirmed|to|used|applied|placed|"
+                    r"directly|finished|finish|coated|coat|overcoated|"
+                    r"covered|compatible|incompatible)\s+)*"
+                    r"(?:over|onto|on(?:\s+top\s+of)?|to|for|under|beneath|"
+                    r"below|with|using|by)\s+"
+                    rf"{modifier}(?:lime green\s+)?", link):
+                continue
+            if re.search(r"\b(?:over|onto|on(?:\s+top\s+of)?|"
+                         rf"applied\s+to|finish\s+for)\s+{modifier}"
+                         r"(?:lime green\s+)?$", link):
+                top, base = a, b
+            elif re.search(rf"\b(?:under|beneath|below)\s+{modifier}"
+                           r"(?:lime green\s+)?$", link):
+                top, base = b, a
+            elif re.search(r"\b(?:finish(?:ed)?|coat(?:ed)?|overcoat(?:ed)?|"
+                           r"cover(?:ed)?)\s+(?:with|using|by)\s+"
+                           r"(?:lime green\s+)?$", link):
+                top, base = b, a
+            elif re.search(r"\b(?:compatible|incompatible)\s+with\s+"
+                           r"(?:lime green\s+)?$", link):
+                top, base = sorted((a, b))
+                out.append(("compatible", top, base, *_predicate_status(clause),
+                            sentence, ()))
+                continue
+            else:
+                continue
+            state = r"\b(cured|hardened|dry|damp|primed|prepared)\s+$"
+            before_a = re.search(state, sentence[:match.start()], re.I)
+            before_b = re.search(state, link, re.I)
+            states = tuple(sorted(((a, before_a.group(1).lower() if before_a else ""),
+                                   (b, before_b.group(1).lower() if before_b else ""))))
+            out.append(("layer", top, base, *_predicate_status(clause), sentence, states))
+    return out
+
+
+def _conditions_preserved(source: str, claim: str) -> bool:
+    normal = lambda s: " ".join(_CITE.sub("", s).lower().strip(" .").split())
+    required = {normal(m.group()) for m in _CONDITION.finditer(source)}
+    stated = {normal(m.group()) for m in _CONDITION.finditer(claim)}
+    modifiers = re.compile(r"\b(?:cured|hardened|dry|damp|primed|prepared|directly)\b", re.I)
+    source_modifiers = {m.group().lower() for m in modifiers.finditer(source)}
+    claim_modifiers = {m.group().lower() for m in modifiers.finditer(claim)}
+    warnings = re.compile(
+        r"(?:^|[.!?;]|\band)\s*((?:do not|never|avoid|must not|should not)\b[^.!?;]*)",
+        re.I)
+    source_warnings = {normal(m.group(1)) for m in warnings.finditer(source)}
+    claim_warnings = {normal(m.group(1)) for m in warnings.finditer(claim)}
+    return (required == stated and source_modifiers == claim_modifiers
+            and source_warnings == claim_warnings)
+
+
+def _property_subjects(text: str, prop: str, aliases: dict[str, str],
+                       implicit: str = "") -> set[str]:
+    """Bind a property to its predicate's subject, not nearby product mentions."""
+    subject = rf"(?:{_product_pattern(aliases)}|it|this product|the product)"
+    predicate = (r"(?:is|are|isn't|is not|can be|may be|might be|cannot be)\s+"
+                 r"(?:(?:not|never|known|proven|confirmed|considered|"
+                 r"certified|to|be|a|an|fully|inherently)\s+)*")
+    matches = re.finditer(
+        rf"\b(?P<subject>{subject})\b\s+{predicate}\b{prop}\b",
+        text.replace("’", "'"), re.I)
+    return {aliases.get(m.group("subject").lower(), m.group("subject").lower())
+            if m.group("subject").lower() not in {"it", "this product", "the product"}
+            else implicit for m in matches if _subject_start(text, m.start())} - {""}
+
+
+def _restriction_context(sentence: str, content: str) -> str:
+    """A following condition/warning cannot disappear at a sentence boundary."""
+    parts = _SENTENCE.split(content)
+    index = next((i for i, part in enumerate(parts) if sentence in part), None)
+    if index is None:
+        return sentence
+    attached = [parts[index]]
+    for following in parts[index + 1:]:
+        if not (_CONDITION.match(following.strip()) or _NEGATED.match(
+                re.sub(r"^\s*do\s+", "", following, flags=re.I))):
+            break
+        attached.append(following)
+    return " ".join(attached)
+
+
+def _semantic_failures(sentence: str, cited: list[Retrieved],
+                       aliases: dict[str, str], product: str = "") -> list[str]:
+    failures = []
+    evidence = [_restriction_context(s, h.chunk.content)
+                for h in cited for s in _SENTENCE.split(h.chunk.content)
+                if "?" not in s]
+    for relation in _relations(sentence, aliases):
+        candidates = [(*r[:5], s, r[6]) for s in evidence for r in _relations(s, aliases)
+                      if r[:5] == relation[:5] and r[6] == relation[6]]
+        if not any(_conditions_preserved(r[5], relation[5]) for r in candidates):
+            failures.append("check 8: product relationship direction, polarity or "
+                            "conditions are not supported by the cited passage")
+    if (len(_named_aliases(sentence, aliases)) > 1
+            and re.search(r"\b(?:over|under|beneath|onto|compatible|incompatible|"
+                          r"finished|coated)\b", sentence, re.I)
+            and not _relations(sentence, aliases)
+            and not any(_CITE.sub("", sentence).strip(" .").lower()
+                        in s.lower() for s in evidence)):
+        failures.append("check 8: the product relationship cannot be established")
+    # These properties are not synonyms for salts, draught exclusion or vapour
+    # permeability. A product name shared with a passage proves none of them.
+    for clause in _assertions(sentence, aliases):
+        for prop in ("waterproof", "watertight", "structural", "certified", "certification"):
+            if not re.search(rf"\b{prop}\b", clause, re.I):
+                continue
+            targets = _property_subjects(clause, prop, aliases, product)
+            support = []
+            for hit in cited:
+                for s in _assertions(hit.chunk.content, aliases):
+                    if "?" in s or not re.search(rf"\b{prop}\b", s, re.I):
+                        continue
+                    implicit = hit.chunk.product or hit.document.product or ""
+                    if any(not _same_product(implicit, p) for p in
+                           _named_aliases(hit.chunk.content, aliases)):
+                        implicit = ""
+                    subjects = _property_subjects(s, prop, aliases, implicit)
+                    if (targets and subjects
+                            and all(any(_same_product(t, p) for p in subjects) for t in targets)
+                            and all(
+                                any(_same_product(t, p) for t in targets)
+                                for p in subjects)):
+                        support.append((s, _restriction_context(s, hit.chunk.content)))
+            if not any(_predicate_status(s, property_claim=True)
+                       == _predicate_status(clause, property_claim=True)
+                       and _conditions_preserved(context, sentence)
+                       for s, context in support):
+                failures.append(f"check 8: the claim about {prop} is not explicitly supported")
+    return failures
+
+
+def _numeric_boundaries(sentence: str, cited: list[Retrieved],
+                        aliases: dict[str, str], product: str) -> list[str]:
+    targets = _named_aliases(sentence, aliases) or ({product} if product else set())
+    failures = []
+    for token in _numbers(_CITE.sub("", sentence)):
+        sources = [(h, s) for h in cited for s in _SENTENCE.split(h.chunk.content)
+                   if _figure_is_published(_normalise_number(token),
+                                           _normalise_number(s))]
+        for target in targets:
+            bound = []
+            for hit, source in sources:
+                named = _named_aliases(source, aliases)
+                if re.search(r"\d\s*(?:mm|cm|l|m[2²])", token, re.I) and len(named) > 1:
+                    subject_text = re.sub(
+                        r"^\s*(?:unlike|compared (?:to|with)|in contrast to)\b[^,]*,\s*",
+                        "", source, flags=re.I)
+                    before_number = re.split(r"\d", subject_text, maxsplit=1)[0]
+                    subjects = _named_aliases(before_number, aliases)
+                    layers = _relations(source, aliases)
+                    if layers and re.search(r"\d\s*mm\b", token, re.I):
+                        subjects = {r[1] for r in layers if r[0] == "layer"}
+                    if len(subjects) == 1:
+                        named = subjects
+                if named:
+                    if not any(_same_product(target, p) for p in named):
+                        continue
+                elif not _same_product(target, hit.document.product or ""):
+                    continue
+                if re.search(r"\b(?:base\s*coat|undercoat)\b",
+                             hit.document.product or "", re.I) and re.search(
+                                 r"\b(?:finish(?:ing)?|top)\s*coat\b",
+                                 hit.chunk.section + " " + source, re.I):
+                    if not re.search(r"\b(?:finish(?:ing)?|top)\s*coat\b", sentence, re.I):
+                        continue
+                bound.append(source)
+            if not bound:
+                failures.append("check 3: a figure is not bound to the claimed product/layer")
+                continue
+            # Checking only qualifiers the model wrote misses dropped limits.
+            qualifiers = re.compile(
+                r"\b(?:minimum|maximum|at least|up to|no more than|"
+                r"approximately|about)\b", re.I)
+            if not any(all(re.search(rf"\b{re.escape(q.group())}\b", sentence, re.I)
+                           for q in qualifiers.finditer(source))
+                       and _conditions_preserved(source, sentence) for source in bound):
+                failures.append("check 4: a published figure lost its qualifier or condition")
+    return failures
+
+
 def run_checks(
     text: str,
     hits: list[Retrieved],
@@ -709,15 +979,17 @@ def run_checks(
     asked_terms: list[str],
     product: str = "",
     asked_products: tuple[str, ...] = (),
+    question: str = "",
 ) -> list[str]:
     """The checks, in order. Returns the failures; empty means it prints.
 
-    `product` and `asked_products` drive check 7 and nothing else. Both default
-    to empty, so every existing caller runs exactly the six checks it always
-    ran, and a question that resolved no product is unaffected.
+    Product scope also binds figures and sensitive properties to their subject.
+    The optional question enforces asked-property and relationship coverage.
     """
     failures: list[str] = []
     cited_index = {i + 1: h for i, h in enumerate(hits)}
+    aliases = _product_aliases([*names.get("products", []), product,
+                               *asked_products, *(h.document.product for h in hits)])
 
     sentences = [s.strip() for s in _SENTENCE.split(text) if s.strip()]
 
@@ -889,6 +1161,26 @@ def run_checks(
         if not any(t.lower() in blob for t in asked_terms):
             failures.append("check 6: the property asked about is not in a cited passage")
 
+    for prop in ("waterproof", "watertight", "structural", "certified", "certification"):
+        if re.search(rf"\b{prop}\b", question, re.I):
+            cited = {int(m) for m in _CITE.findall(text) if int(m) in cited_index}
+            targets = _named_aliases(question, aliases) or ({product} if product else set())
+            answered = _property_subjects(text, prop, aliases, product)
+            if (any(not any(_same_product(t, p) for p in answered) for t in targets)
+                    or not re.search(rf"\b{prop}\b", text, re.I) or not any(
+                    re.search(rf"\b{prop}\b", cited_index[m].chunk.content, re.I)
+                    for m in cited)):
+                failures.append(f"check 6: the asked property {prop} is not in a cited passage")
+
+    for sentence in sentences:
+        cited = [cited_index[int(m)] for m in _CITE.findall(sentence)
+                 if int(m) in cited_index]
+        failures.extend(_semantic_failures(sentence, cited, aliases, product))
+        failures.extend(_numeric_boundaries(sentence, cited, aliases, product))
+    for requested in _relations(question, aliases):
+        if not any(r[:3] == requested[:3] for r in _relations(text, aliases)):
+            failures.append("check 8: the answer does not establish the requested layer order")
+
     # 7 — the answer is still about the product that was asked about.
     #
     # The five checks above ask whether a claim is *supported*. None of them
@@ -926,20 +1218,20 @@ def run_checks(
     # Skipped entirely when nothing resolved a product, which is most of the
     # corpus's questions and all of the ones with no product to be about.
     if product:
-        registry = names.get("products", [])
         cited = {m for s in sentences for m in
                  (int(x) for x in _CITE.findall(s)) if m in cited_index}
         allowed = {_without_brand(product.lower())}
         allowed |= {_without_brand(p.lower()) for p in asked_products if p}
+        allowed |= _named_aliases(question, aliases)
         for marker in cited:
             hit = cited_index[marker]
-            if product_matches(product, hit.chunk.product or ""):
-                allowed |= products_named(hit.chunk.content, registry)
+            if _same_product(product, hit.chunk.product or ""):
+                allowed |= _named_aliases(hit.chunk.content, aliases)
         # Compared with the shared containment rule rather than by equality,
         # so the catalogue's "Ultra Insulating Lime Render Base Coat" and a
         # caller's "Ultra" are one product and not two.
-        strayed = sorted(named for named in products_named(text, registry)
-                         if not any(product_matches(named, ok) for ok in allowed))
+        strayed = sorted(named for named in _named_aliases(text, aliases)
+                         if not any(_same_product(named, ok) for ok in allowed))
         if strayed:
             failures.append(
                 f"check 7: the answer is about {strayed[0]!r}, which is not the "
@@ -1093,7 +1385,8 @@ def _contact_line(names: dict) -> str:
 
 
 def _caveat_lines(decision: Decision, repo, question: str = "",
-                  limit: int = 3) -> list[str]:
+                  limit: int = 3,
+                  cited_hits: list[Retrieved] | None = None) -> list[str]:
     """At most three document caveats, from the documents actually cited.
 
     Two constraints, both learned the hard way. Only documents whose passages
@@ -1103,7 +1396,8 @@ def _caveat_lines(decision: Decision, repo, question: str = "",
     question itself scores them, not the slot values: matching on the word
     'water' alone ranks almost nothing.
     """
-    cited = dict.fromkeys(h.chunk.canonical_url for h in decision.hits[:2])
+    cited = dict.fromkeys(h.chunk.canonical_url for h in
+                          (decision.hits[:2] if cited_hits is None else cited_hits))
     wanted = _words(question) | _words(" ".join(decision.slots.values()))
     scored = []
     # The same sentence, once. Several products ship two near-identical
@@ -1137,6 +1431,127 @@ PHOTO_LINE = (
 # ------------------------------------------------------------------- engine
 
 
+_FIELD_QUESTIONS = {
+    "preparation": r"\bprepar\w*|\bbefore application\b|\bbefore applying\b",
+    "thickness": r"\b(?:thickness|thick|depth)\b",
+    "water": r"\b(?:water|mixing water|gauging)\b",
+    "coverage": r"\b(?:coverage|cover|yield|spread rate|how far)\b",
+    "backgrounds": r"\b(?:backgrounds?|suitable|suitability)\b|\bcan i use\b",
+    "curing": r"\b(?:curing|cure|drying|aftercare)\b",
+    "conditions": r"\b(?:conditions|temperature|weather|frost)\b",
+    "waterproof": r"\bwaterproof\b",
+    "watertight": r"\bwatertight\b",
+    "certification": r"\b(?:certification|certified)\b",
+    "structural": r"\bstructural\b",
+}
+_FIELD_EVIDENCE = {
+    "preparation": r"\b(?:prepar\w*|dampen\w*|clean\w*|dust|keyed|suction|"
+                   r"remove|sound|flat|primer|priming)\b",
+    "thickness": r"\b(?:thick\w*|depth)\b|\d\s*mm\b",
+    "water": r"\bwater\b",
+    "coverage": _COVERAGE.pattern,
+    "backgrounds": r"\b(?:suitable|backgrounds?|substrates?|can be used|"
+                   r"can be applied)\b",
+    "curing": r"\b(?:cur\w*|dry\w*|harden\w*|set|setting|protect\w*|"
+              r"spray|dampen\w*|aftercare)\b",
+    "conditions": r"\b(?:temperature|weather|frost|freezing|hot|cold|rain|"
+                  r"sunlight|wind|degrees)\b|\d\s*(?:°|o\s*)?c\b",
+    "waterproof": r"\bwaterproof\b",
+    "watertight": r"\bwatertight\b",
+    "certification": r"\b(?:certification|certified)\b",
+    "structural": r"\bstructural\b",
+}
+_PURCHASE = re.compile(r"\bhow many (?:bags|sacks)\b|\b(?:bags|sacks)\b.*"
+                       r"\b(?:buy|need|require)\b", re.I)
+
+
+def _requested_fields(question: str, decision: Decision) -> list[str]:
+    fields = [p for p, pattern in _FIELD_QUESTIONS.items()
+              if re.search(pattern, question, re.I)]
+    if decision.sum_refused or _PURCHASE.search(question):
+        # A supplied measurement is not a thickness question, but separately
+        # requested water/preparation/etc. still needs its own answer or limit.
+        if "thickness" in fields and not re.search(
+                r"\b(?:what|which|how)\b[^?.]{0,40}\b(?:thick|thickness|depth)\b",
+                question, re.I):
+            fields.remove("thickness")
+        if "coverage" not in fields:
+            fields.append("coverage")
+    # Units and "per bag" in a mixing-water question are not separate requests.
+    if not fields and decision.slots.get("property_asked") in _FIELD_EVIDENCE:
+        fields = [decision.slots["property_asked"]]
+    for prop in decision.evidence_terms:
+        if prop not in _FIELD_EVIDENCE and re.search(
+                rf"\b{re.escape(prop.replace('_', ' '))}\b", question, re.I):
+            fields.append(prop)
+    return fields
+
+
+def _field_sentences(hit: Retrieved, prop: str, product: str,
+                     aliases: dict[str, str]) -> list[str]:
+    if prop not in _FIELD_EVIDENCE:
+        return []
+    own = _same_product(product, hit.chunk.product or hit.document.product or "")
+    section = hit.chunk.section or ""
+    parts = [s.strip() for s in _SENTENCE.split(hit.chunk.content) if s.strip()]
+    selected = []
+    for sentence in parts:
+        if "?" in sentence:
+            continue
+        named = _named_aliases(sentence, aliases)
+        target_named = any(_same_product(product, p) for p in named)
+        if not own and not target_named:
+            continue
+        if named and not target_named:
+            continue
+        if prop not in {"preparation", "curing"} and any(
+                not _same_product(product, p) for p in named):
+            continue
+        # A finishing layer is not the basecoat's application thickness, even
+        # when both figures occur on the basecoat's own datasheet.
+        if prop == "thickness" and re.search(
+                r"\b(?:finish(?:ing)?|top)\s*coats?\b", section + " " + sentence, re.I):
+            if not target_named:
+                continue
+        if not re.search(_FIELD_EVIDENCE[prop], sentence, re.I):
+            continue
+        if prop == "water" and not (re.search(r"\d", sentence) and re.search(
+                r"\b(?:litres?|ltr|l)\b", sentence, re.I)):
+            continue
+        if prop == "thickness" and (not re.search(r"\d\s*mm\b", sentence, re.I)
+                                     or _mentions_coverage(sentence)):
+            continue
+        if prop == "coverage" and not re.search(r"\d", sentence):
+            continue
+        if prop == "preparation" and re.search(r"\b(?:mix|litres?|bag|sack)\b",
+                                              sentence, re.I):
+            continue
+        if prop == "backgrounds" and not re.search(
+                r"\b(?:masonry|laths?|brick|stone|cob|blocks?|boards?|walls?|"
+                r"backgrounds?|substrates?)\b", sentence, re.I):
+            continue
+        if prop == "curing" and not (re.search(r"\b(?:cur\w*|dry\w*|aftercare)\b",
+                                               section, re.I) or re.search(
+                r"\b(?:cur\w*|dry\w*|harden\w*|set|setting|protect\w*|spray)\b",
+                sentence, re.I)):
+            continue
+        selected.append(sentence)
+    if not selected:
+        return []
+    # Keep conditional introductions and local warnings verbatim, not just the
+    # sentence containing a number. Whole-section aftercare stays with a lookup.
+    for sentence in parts:
+        if sentence in selected:
+            continue
+        named = _named_aliases(sentence, aliases)
+        if named and not any(_same_product(product, p) for p in named):
+            continue
+        if (_CONDITION.search(sentence) or _NEGATED.search(sentence)) and not re.search(
+                r"\b(?:finish(?:ing)?|top)\s*coat\b", sentence, re.I):
+            selected.append(sentence)
+    return [s for s in parts if s in selected]
+
+
 class AnswerEngine:
     """Turns a router decision into something printable."""
 
@@ -1154,9 +1569,106 @@ class AnswerEngine:
 
     # -- the paths ---------------------------------------------------------
 
+    def factual(self, decision: Decision, question: str = "") -> Answer | None:
+        """Checked, verbatim field lookup; None means this needs composition.
+
+        Call only after router/policy gates. Retrieval supplies real scored
+        passages, including both products for a comparison; this never fetches
+        evidence or changes the relevance threshold.
+        """
+        aliases = _product_aliases([*self.names.get("products", []),
+                                   decision.slots.get("product", ""),
+                                   *(h.document.product for h in decision.hits)])
+        products = _named_aliases(question, aliases)
+        resolved = decision.slots.get("product", "")
+        if not products and resolved:
+            products = {_without_brand(resolved.lower())}
+        fields = _requested_fields(question, decision)
+        if decision.path not in (Path_.EXTRACT, Path_.COMPOSE):
+            return None
+        relations = _relations(question, aliases)
+        if relations and "backgrounds" in fields and not re.search(
+                r"\b(?:backgrounds?|substrates?)\b", question, re.I):
+            fields.remove("backgrounds")
+        if not products or not (fields or relations):
+            return None
+        hits = scoped_evidence(decision, question, self.names.get("products", []))
+        rows, missing = self._relationship_rows(decision, question, aliases)
+        claims = [r for r in rows if _CITE.search(r)]
+        for product in sorted(products):
+            if fields:
+                rows.append(f"{product}:")
+            for prop in fields:
+                found = False
+                seen = set()
+                for marker, hit in enumerate(hits, 1):
+                    sentences = _field_sentences(hit, prop, product, aliases)
+                    if not sentences:
+                        continue
+                    cited = " ".join(f"“{s}” [{marker}]." for s in sentences)
+                    if run_checks(cited, hits, self.names, [], product=product,
+                                  asked_products=tuple(products)):
+                        continue
+                    key = " ".join(sentences).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(f"- {prop}: {cited}")
+                    claims.append(cited)
+                    found = True
+                if not found:
+                    rows.append(f"- {prop}: the retrieved evidence does not establish "
+                                f"this for {product}.")
+                    missing.append(f"{product}: {prop}")
+        if decision.sum_refused or _PURCHASE.search(question):
+            if any(f"{p}: coverage" not in missing for p in products):
+                rows.append("I have printed the published coverage rather than "
+                            "multiplying it out.")
+            rows.append("I cannot give an exact purchase quantity or bag count. "
+                        "Published coverage is not a calculation for your measurements.")
+        if missing:
+            rows.append(_contact_line(self.names))
+        answer = self._finish(replace(decision, path=Path_.EXTRACT),
+                              "\n".join(rows), hits if claims else [], question)
+        answer.refused = not claims
+        answer.diagnostics["deterministic_fields"] = fields
+        answer.diagnostics["unsupported_fields"] = missing
+        return answer
+
+    def _relationship_rows(self, decision: Decision, question: str,
+                           aliases: dict[str, str]) -> tuple[list[str], list[str]]:
+        requested = _relations(question, aliases)
+        hits = scoped_evidence(decision, question, self.names.get("products", []))
+        rows, unsupported = [], []
+        for relation in requested:
+            found = []
+            for marker, hit in enumerate(hits, 1):
+                for sentence in _SENTENCE.split(hit.chunk.content):
+                    if "?" in sentence:
+                        continue
+                    if not any(r[:3] == relation[:3] for r in _relations(sentence, aliases)):
+                        continue
+                    cited = f"“{sentence}” [{marker}]."
+                    if not run_checks(cited, hits, self.names, [],
+                                      asked_products=(relation[1], relation[2])):
+                        found.append(cited)
+            if found:
+                rows.extend(dict.fromkeys(found))
+            else:
+                rows.append("The retrieved evidence does not establish the requested "
+                            f"layer order between {relation[1]} and {relation[2]}.")
+                unsupported.append("layer order")
+        return rows, unsupported
+
     def extract(self, decision: Decision, question: str = "") -> Answer:
         """Print the top passage whole, by code. No model, no paraphrase."""
-        hits = decision.hits
+        factual = self.factual(decision, question)
+        if factual is not None:
+            return factual
+        hits = scoped_evidence(decision, question, self.names.get("products", []))
+        if not hits:
+            return self.refuse(replace(decision, hits=[]),
+                               "no evidence for the requested product", question)
         if decision.sum_refused:
             # The calculation edge asks for coverage, so print the passage that
             # carries it rather than whichever passage ranked first. Retrieval
@@ -1219,7 +1731,10 @@ class AnswerEngine:
         # survives, so binding and promotion are recomputed against the scoped
         # set rather than against the one retrieval returned -- otherwise a
         # dropped passage shifts every marker after it.
-        scoped = scoped_evidence(decision)
+        scoped = scoped_evidence(decision, question, self.names.get("products", []))
+        if not scoped:
+            return self.refuse(replace(decision, hits=[]),
+                               "no evidence for the requested product", question)
         hits = promote_bound(scoped,
                              evidence_binding(replace(decision, hits=scoped)))
         passages = "\n\n".join(
@@ -1306,9 +1821,10 @@ class AnswerEngine:
         scope = decision.slots.get("product", "")
         asked_products = tuple(products_named(question,
                                               self.names.get("products", [])))
-        with obs.span("checks", count=7, product=scope) as checking:
+        with obs.span("checks", count=8, product=scope) as checking:
             failures = run_checks(text, hits, self.names, terms,
-                                  product=scope, asked_products=asked_products)
+                                  product=scope, asked_products=asked_products,
+                                  question=question)
             # The check *numbers*, not the failure messages. The review's table
             # asks for "check numbers and text" and the text cannot come: check
             # 1 quotes seventy characters of the offending sentence and check 5
@@ -1748,7 +2264,9 @@ class AnswerEngine:
 
     def _finish(self, decision: Decision, text: str, hits: list[Retrieved],
                 question: str = "") -> Answer:
-        caveats = _caveat_lines(decision, self.repo, question)
+        markers = {int(m) for m in _CITE.findall(text)}
+        cited = [h for i, h in enumerate(hits, 1) if i in markers] if markers else hits
+        caveats = _caveat_lines(decision, self.repo, question, cited_hits=cited)
         facts = self._facts(decision, question)
         if decision.photograph:
             text = f"{text}\n\n{PHOTO_LINE}"

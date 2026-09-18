@@ -49,8 +49,8 @@ from enum import Enum
 
 from . import observability as obs
 from . import ollama
-from .answer import Provenance
-from .conversation import ConversationState, SessionFact
+from .answer import Answer, Provenance, SlotFact, _named_aliases, _product_aliases
+from .conversation import ConversationState, Denial, SessionFact
 
 # The model is asked for one small object and nothing else, so the budget is a
 # fraction of an answer's. A reply longer than this is a malfunction, not a
@@ -62,6 +62,7 @@ MAX_UNDERSTANDING_TOKENS = 200
 # absurdity.
 MAX_AREA_M2 = 10_000.0
 MAX_THICKNESS_MM = 500.0
+MANDATORY_TOPICS = frozenset({"structural_judgement", "compliance_signoff", "health"})
 
 
 class Intent(Enum):
@@ -212,6 +213,18 @@ class ResolvedRequest:
     # read it off a photograph" are different answers to that.
     provenance: dict = field(default_factory=dict)
     unsettled: tuple[str, ...] = ()
+    # Building slots this turn supplied as part of a *scenario* rather than as
+    # a description of the caller's own wall. They constrain this request
+    # exactly as a stated slot does -- retrieval and routing cannot tell the
+    # difference and must not -- and they are the one thing that does not
+    # become a remembered fact. See `scenario_only`.
+    transient: tuple[str, ...] = ()
+    # Building slots this turn explicitly took back, mapped to the value being
+    # withdrawn. Excluded from the request as well as from what is remembered:
+    # a value the person has just denied must not shape the answer they are
+    # about to read, and must not be inherited on the turns after it. See
+    # `denials_in`.
+    denied: dict = field(default_factory=dict)
 
     def slots(self) -> dict[str, str]:
         """The shape `Router.route(carried=...)` already takes."""
@@ -244,6 +257,180 @@ _SELECT_SHAPE = re.compile(
 
 _AREA = re.compile(r"(\d+(?:\.\d+)?)\s*(?:square\s*met(?:re|er)s?|m2|m²|sqm)", re.I)
 _THICKNESS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:mm|millimet(?:re|er)s?)", re.I)
+
+_NON_ASSERTION = re.compile(
+    r"\b(?:not|never|no|if|unless|suppose|supposing|assuming|hypothetically|"
+    r"might|maybe|perhaps|said|says|quote|example|imagine|imagining|"
+    r"considering|consider|remember|recall|mention|mentioned|told)\b"
+    r"|\b(?:other than|except|excluding|without|anything but)\b"
+    r"|\b(?:i|we)\s+(?:would|could|may)\b|\b\w+n['’]t\b", re.I)
+_QUOTED = re.compile(
+    r'"[^"]*"|“[^”]*”|‘[^’]*’|(?<!\w)\'[^\']*\'(?!\w)|`[^`]*`',
+    re.S)
+_BACKGROUND_LOOKUP = re.compile(
+    r"\b(?:what|which)\s+(?:backgrounds?|substrates?|surfaces?)\b"
+    r".*\b(?:suitable|compatible|appl(?:y|ied)|use[ds]?)\b", re.I)
+_PRODUCT_REFERENCE = re.compile(
+    r"\b(?:it|its|this product|that product|this plaster|that plaster)\b", re.I)
+_COMPARISON = re.compile(
+    r"\b(?:compare|comparison|versus|vs|difference|different|differ|"
+    r"rather than|better than|instead of|or)\b", re.I)
+_FACT_QUESTION = re.compile(
+    r"^\s*(?:am|are|is|was|were|did|do|does|have|has|had)\s+(?:i|we|my|our)\b"
+    r"|^\s*(?:is|was)\s+(?:the|this|that)\s+(?:wall|substrate|material|product)\b"
+    r"|\b(?:what|which)\s+(?:product|substrate|material)\s+"
+    r"(?:am|are|is|was|were|did)\b", re.I)
+
+
+def reference_text(question: str) -> str:
+    """Unquoted, nonhypothetical text that may name a lookup target.
+
+    A semicolon or newline cannot end a conditional's scope. An independent
+    sentence can, allowing a subsequent explicit correction to stand.
+    """
+    text = _QUOTED.sub(" QUOTED_CONTENT ", question)
+    # An unmatched opening quote is still quoted input, not testimony.
+    text = re.sub(r'(["“‘`]|(?<!\w)\').*', " QUOTED_CONTENT ", text, flags=re.S)
+    return " ".join(part for part in re.split(r"(?<=[.!?])\s+", text)
+                    if "QUOTED_CONTENT" not in part
+                    and not _NON_ASSERTION.search(part)
+                    and not _FACT_QUESTION.search(part))
+
+
+def asserted_text(question: str) -> str:
+    """Eligible fact context; comparing alternatives asserts neither."""
+    return " ".join(part for part in re.split(
+        r"(?<=[.!?])\s+", reference_text(question))
+        if not _COMPARISON.search(part)
+        and not re.match(r"\s*(?:can|could|would|should|may|might|will)\s+"
+                         r"(?:i|we)\b", part, re.I)
+        and not (part.rstrip().endswith("?")
+                 and re.match(r"\s*(?:i|we|my|our)\b", part, re.I)
+                 and not re.search(r"\b(?:what|which|how|why|where|when)\b",
+                                   part, re.I))
+        and not re.match(r"\s*(?:tell me about|explain|describe|"
+                         r"what (?:is|are))\b", part, re.I))
+
+
+def topic_product(question: str, registry) -> str:
+    """One named discussion target; alternatives and recall establish none."""
+    text = reference_text(question)
+    return "" if _COMPARISON.search(text) else _named_in(text, registry)
+
+
+def stated_product(question: str, registry) -> str:
+    """An actual use statement, not merely the product a question names."""
+    for part in re.split(r"(?<=[.!?])\s+", asserted_text(question)):
+        if re.search(
+                r"^\s*(?:(?:actually|now|also)[, ]+)?"
+                r"(?:(?:i|we)\s+(?:(?:am|are)\s+)?(?:use|using|apply|applying)"
+                r"|i['’]m\s+(?:using|applying)|my product is)\b", part, re.I):
+            return _named_in(part, registry)
+    return ""
+
+
+def state_request_slot(question: str) -> str:
+    """Recognise personal-state questions, not product selection or properties."""
+    text = re.sub(r"\s+", " ", question.strip().rstrip("?.!")).lower()
+    for slot, pattern in (
+        ("product", r"(?:what|which) product (?:am i using|"
+         r"did i (?:say|tell you)(?: that)? i (?:was|am) using)"),
+        ("substrate", r"(?:what|which) (?:substrate|material) "
+         r"(?:is my wall|did i (?:say|tell you)(?: that)? my wall was)"
+         r"(?: (?:made|built) (?:of|from))?"),
+        ("substrate", r"what (?:is my wall|did i say my wall was) "
+         r"(?:made|built) (?:of|from)"),
+    ):
+        if re.fullmatch(pattern, text):
+            return slot
+    return ""
+
+
+def needs_product_clarification(question: str, resolved: ResolvedRequest) -> bool:
+    """Only unresolved product references block a property lookup, not materials."""
+    return (not resolved.policy_topic and not resolved.product
+            and bool(_PRODUCT_REFERENCE.search(question))
+            and resolved.intent in (Intent.LOOKUP, Intent.CALCULATE, Intent.VERIFY)
+            and bool(resolved.requested_properties
+                     or _BACKGROUND_LOOKUP.search(question)
+                     or re.search(r"\b(?:thick|thickness|apply|coverage|mix)\b",
+                                  question, re.I)))
+
+
+def state_only_answer(question: str, detector, registry,
+                      state: ConversationState | None = None,
+                      turn_index: int = 0, *, gate=None,
+                      active_product: str = "") -> Answer | None:
+    """Pure pre-model/pre-retrieval boundary shared by graph and library callers.
+
+    Returns an uncached Answer for recall, personal fact acknowledgement, or an
+    unresolved product reference; otherwise None. Does not mutate state. Callers
+    persist ``facts_from(resolve(...), turn_index)`` through their state reducer.
+    """
+    state = state or ConversationState()
+    from .router import PolicyGate
+
+    if (gate or PolicyGate()).match(question):
+        return None
+    slot = state_request_slot(question)
+    if slot:
+        history = state.facts.get(slot)
+        fact = history.current if history else None
+        facts = []
+        if fact is None or fact.provenance is Provenance.ASSUMED:
+            text = f"You have not stated a {slot} in this current chat."
+        elif fact.from_person:
+            text = f"You said your {slot} was {fact.value.replace('_', ' ')}."
+            facts = [SlotFact(slot, fact.value, Provenance.CARRIED)]
+            if history.unsettled:
+                text += " An image observation disagrees; please confirm it."
+        else:
+            text = (f"You have not stated a {slot} in this current chat. "
+                    f"The photograph suggested {fact.value.replace('_', ' ')}; "
+                    "that is an observation, not something you said.")
+            facts = [SlotFact(slot, fact.value, fact.provenance)]
+        return Answer(path="state", text=text, facts=facts,
+                      observed=[f.sentence for f in facts
+                                if f.provenance is Provenance.OBSERVED],
+                      diagnostics={"step": "conversation state", "state_slot": slot,
+                                   "slots": {f.slot: f.value for f in facts},
+                                   "cached": False})
+
+    reading = deterministic(question, detector, registry=registry)
+    resolved = resolve(reading, question, detector, registry, state, turn_index,
+                       active_product=active_product)
+    if needs_product_clarification(question, resolved):
+        return Answer(path="ask_back",
+                      text="Which product are you using? Please give its name.",
+                      facts=[SlotFact(name, value, resolved.provenance[name])
+                             for name, value in resolved.slots().items()],
+                      diagnostics={"step": "product reference", "missing": ["product"],
+                                   "slots": resolved.slots(),
+                                   "cached": False})
+
+    # An acknowledgement must not swallow an accompanying technical question.
+    clean = asserted_text(question)
+    personal = re.match(
+        r"^\s*(?:(?:actually|now)[, ]+)?(?:i (?:am|have|use)|i['’]m|my\b)",
+        clean, re.I)
+    if (personal and clean.strip() == question.strip()
+            and not re.search(r"\?|\b(?:what|which|how|why|when|where|"
+                              r"should|can|please|recommend|tell|explain)\b",
+                              question, re.I)):
+        new = {slot: fact
+               for slot, fact in facts_from(resolved, turn_index).items()
+               if isinstance(fact, SessionFact)}
+        if new:
+            text = "Noted for this chat: " + "; ".join(
+                f"{name}: {fact.value.replace('_', ' ')}"
+                for name, fact in new.items()) + "."
+            return Answer(path="acknowledge", text=text,
+                          facts=[SlotFact(f.slot, f.value, f.provenance)
+                                 for f in new.values()],
+                          diagnostics={"step": "conversation state",
+                                       "slots": {name: f.value for name, f in new.items()},
+                                       "cached": False})
+    return None
 
 
 def measurements_in(question: str) -> dict:
@@ -283,16 +470,22 @@ def deterministic(question: str, detector, gate=None,
     slots = detector.detect(question)
     measured = measurements_in(question)
 
-    matched = gate.match(question) if gate is not None else None
+    from .router import PolicyGate
+
+    matched = (gate or PolicyGate()).match(question)
     if matched:
         return TurnUnderstanding(
             intent=Intent.ESCALATE, policy_topic=matched[0],
             measurements=measured, source="deterministic")
 
-    if "cause_asked" in slots or "symptom" in slots:
+    if state_request_slot(question):
+        intent = Intent.LOOKUP
+    elif "cause_asked" in slots or "symptom" in slots:
         intent = Intent.TROUBLESHOOT
     elif "calculation" in slots or measured:
         intent = Intent.CALCULATE
+    elif _BACKGROUND_LOOKUP.search(question):
+        intent = Intent.LOOKUP
     elif _SELECT_SHAPE.search(question):
         # Naming a product turns a selection into a verification, and the
         # difference is not cosmetic. "What plaster should I use?" asks the
@@ -564,11 +757,10 @@ def _named_in(question: str, registry) -> str:
     the evaluation harness went from pass to "answer does not contain '0.6' as
     published" the moment this function returned the longer name.
     """
-    lowered = question.lower()
-    found = [p for p in registry if p and p.lower() in lowered]
-    if not found:
+    found = _named_aliases(question, _product_aliases(registry))
+    if len(found) != 1:
         return ""
-    return normalise_product(max(found, key=len))
+    return normalise_product(next(iter(found)))
 
 
 def _registered(name: str, registry) -> str:
@@ -588,9 +780,137 @@ def _registered(name: str, registry) -> str:
     return max(matches, key=len) if matches else ""
 
 
+# The slots that describe the building rather than the shape of the question.
+# Only these can be scenario-transient or denied: `product` is the subject under
+# discussion rather than a claim about a wall, so "would Ultra be suitable..."
+# legitimately leaves Ultra as the topic while leaving the wall unknown.
+BUILDING_SLOTS = ("substrate", "location", "exposure")
+
+# A question that opens in the conditional or interrogative *and* asks whether
+# something is suitable. Both halves are required, and the pairing is what keeps
+# this from being a general discourse parser: it recognises one very common
+# shape -- "would X be suitable on a Y wall" -- and nothing else.
+#
+# It is deliberately narrower than `_NON_ASSERTION` and does a different job.
+# That filter asks whether a *sentence* is testimony at all; this asks whether a
+# sentence which is plainly the caller's own question is describing their
+# building or naming the conditions of a catalogue enquiry. "Would Ultra be
+# suitable on an internal brick wall?" passes `asserted_text` untouched -- it
+# hedges nothing and quotes nobody -- and is still not a statement that the
+# person has a brick wall.
+_SCENARIO_ASK = re.compile(
+    r"^\s*(?:would|could|can|is|are|does|do|will|shall|should|what\s+if|"
+    r"suppose|hypothetically)\b", re.I)
+_SUITABILITY = re.compile(
+    r"\b(?:suitable|suited|appropriate|compatible|recommended|ok|okay|fine|"
+    r"work|works|be\s+used|be\s+applied|go\s+on)\b", re.I)
+
+# Anything that makes the sentence a claim about the caller's own building. Its
+# presence is a veto: "is Ultra suitable on my internal brick wall" describes a
+# real wall and the substrate is theirs to have remembered.
+_OWN_BUILDING = re.compile(
+    r"\b(?:my|our|mine)\b"
+    r"|\bi\s+(?:have|am|was|ve|m)\b|\bi\s*[’']\s*(?:ve|m)\b"
+    r"|\we\s+(?:have|are|ve)\b|\bi\s+got\b"
+    r"|\bthe\s+wall\s+is\b|\bit\s+is\b|\bit\s*[’']s\b"
+    r"|\bthey\s+are\b|\working\s+on\b", re.I)
+
+
+def scenario_only(question: str) -> bool:
+    """Is this turn asking about a hypothetical wall rather than describing one?
+
+    The distinction exists because the two are indistinguishable to a slot
+    detector and must not be to conversation state. "Would Ultra be suitable on
+    an internal brick wall?" mentions brick the way a catalogue question
+    mentions it -- as the condition being asked about. Recording it as a fact
+    means every later turn is answered for a brick wall the person never said
+    they had, and `Provenance.STATED` makes the answer print it back as "brick,
+    as you said" -- attributing an invention to the customer, which is the same
+    shape of failure the case boundaries in `assistant/conversation.py` exist to
+    prevent.
+
+    **The two errors are not symmetric and this errs the safe way.** Treating a
+    real description as a scenario costs the person one extra question later.
+    Treating a scenario as a description answers the next four turns about the
+    wrong wall. So the rule is deliberately narrow -- a conditional opener, a
+    suitability word, and no first-person claim anywhere in the sentence -- and
+    anything it does not recognise is remembered exactly as before.
+    """
+    return bool(_SCENARIO_ASK.match(question or "")
+                and _SUITABILITY.search(question or "")
+                and not _OWN_BUILDING.search(question or ""))
+
+
+_NEGATOR = (r"(?:not|isn\s*[’']?\s*t|aren\s*[’']?\s*t|"
+            r"wasn\s*[’']?\s*t|weren\s*[’']?\s*t|"
+            r"no\s+longer|never)")
+
+
+def _negation_count(question: str, term: str) -> tuple[int, int]:
+    """How many occurrences of `term` are negated, and how many there are.
+
+    Positional rather than a whole-sentence search, because a sentence can carry
+    a negation and an assertion at once: "it is not render, it is brick" negates
+    one term and asserts the other, and a search that only asked "does this
+    sentence contain 'not'" would throw away the half that matters.
+
+    The window is short and word-only on purpose. It spans "not a", "isn't the"
+    and "is no longer", and stops at punctuation or a longer intervening
+    phrase. That is what keeps this from firing on the sentences
+    `_NON_ASSERTION` already refuses for a different reason: in "I am not
+    applying 12.5 mm of Solo on a stone wall" the negation governs *applying*,
+    eight words away from the substrate, so stone is not read as denied -- it is
+    simply never asserted, which that filter had already established.
+    """
+    negated = total = 0
+    for match in re.finditer(rf"\b{re.escape(term)}\b", question, re.I):
+        total += 1
+        before = question[max(0, match.start() - 30):match.start()]
+        if re.search(rf"\b{_NEGATOR}\b[\s\w]{{0,7}}$", before, re.I):
+            negated += 1
+    return negated, total
+
+
+def denials_in(question: str, detected: dict, detector) -> dict[str, str]:
+    """Building slots this turn takes back rather than states.
+
+    Read from the **raw** question rather than from `asserted_text`, which is
+    the whole reason this is a separate stage. `_NON_ASSERTION` matches "not",
+    so a denial is exactly the kind of sentence that filter removes -- correctly,
+    because "my wall is not brick" asserts nothing. But removing it also made it
+    inert: the fact stated three turns ago stayed active and went on being
+    inherited into every later request. Silence and retraction are different
+    inputs and only one of them leaves a belief standing.
+
+    A denial is recognised only when *every* occurrence of the matched value's
+    vocabulary is negated. One un-negated mention means the person is
+    contrasting rather than retracting -- "it is not brick, it is stone" detects
+    stone, and brick is then simply not the winning value -- and a partial
+    reading would unsettle a slot the same sentence had just filled.
+
+    What this returns is the value being withdrawn, not a new value: "not brick"
+    says nothing about what the wall *is*. `Denial` in
+    `assistant/conversation.py` turns that into a state change, so the
+    supersession rule stays in the one place that owns it.
+    """
+    denied: dict[str, str] = {}
+    for slot in BUILDING_SLOTS:
+        value = detected.get(slot)
+        if not value:
+            continue
+        negated = present = 0
+        for term in detector.terms_for(slot, value):
+            found, total = _negation_count(question, term)
+            negated += found
+            present += total
+        if present and negated == present:
+            denied[slot] = value
+    return denied
+
+
 def resolve(reading: TurnUnderstanding, question: str, detector, registry,
             state: ConversationState | None = None,
-            turn_index: int = 0) -> ResolvedRequest:
+            turn_index: int = 0, *, active_product: str = "") -> ResolvedRequest:
     """Validate this turn's reading, then merge what the conversation knows.
 
     Merge order is the same one the router has always used and the same one
@@ -604,7 +924,11 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
     rather than pick a winner.
     """
     state = state or ConversationState()
-    detected = detector.detect(question)
+    asserted = asserted_text(question)
+    detected = detector.detect(asserted)
+    # Denials are read from the raw question, because `asserted_text` removes
+    # the sentence that carries one. See `denials_in`.
+    denied = denials_in(question, detector.detect(question), detector)
     provenance: dict = {}
 
     def take(slot: str, model_value: str) -> str:
@@ -625,12 +949,18 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
         phrasing the regexes do not match -- and what it can no longer do is
         supply a fact from nowhere.
         """
+        if slot in denied:
+            # Named in this sentence, and negated in it. Neither the detector
+            # nor the model's reading can tell those apart; this is where the
+            # difference is made.
+            return ""
         if slot in detected:
             provenance[slot] = Provenance.STATED
             return detected[slot]
         if model_value:
             word = model_value.strip().lower()
-            if word and word in question.lower():
+            if word and re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)",
+                                  asserted, re.I):
                 confirmed = detector.detect(model_value).get(slot, "")
                 if confirmed:
                     provenance[slot] = Provenance.STATED
@@ -641,8 +971,16 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
     location = take("location", reading.location)
     exposure = take("exposure", "")
 
-    # The product this turn names, from the question itself first and from the
-    # model only as a fallback. That order matters and the reverse was a real
+    # Building slots this turn supplied, captured here rather than after the
+    # inheritance loop below so an inherited value can never be mistaken for
+    # one the sentence carried. If the sentence is a scenario rather than a
+    # description, these constrain the request and nothing more.
+    transient = (tuple(slot for slot in BUILDING_SLOTS
+                       if provenance.get(slot) is Provenance.STATED)
+                 if scenario_only(question) else ())
+
+    # The product this turn names must occur in eligible question text; a model
+    # suggestion alone cannot establish it. That order matters and the reverse was a real
     # gap: `deterministic()` never sets `explicit_product`, so on every turn the
     # model did not run -- which is most turns, by design -- `ResolvedRequest.
     # product` came back empty even when the question said "Duro" in plain
@@ -652,11 +990,14 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
     # Longest match wins, the same rule `Assistant._named_product` uses, because
     # "Lime Green Ultra" and "Ultra" are both harvested names and the longer one
     # is the more specific claim.
-    product = _named_in(question, registry)
-    if not product and reading.explicit_product:
-        product = _registered(reading.explicit_product, registry)
+    product = topic_product(question, registry)
     if product:
-        provenance["product"] = Provenance.STATED
+        provenance["product"] = (
+            Provenance.STATED if stated_product(question, registry) == product
+            else Provenance.ASSUMED)
+    elif active_product and not _COMPARISON.search(question):
+        product = active_product
+        provenance["product"] = Provenance.ASSUMED
 
     def origin_of(slot: str) -> Provenance:
         """How to describe a fact this turn inherited rather than heard.
@@ -682,7 +1023,15 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
 
     inherited = state.active()
     for slot, value in inherited.items():
-        if slot == "product" and not product:
+        if slot in denied:
+            # Retracted in this very sentence. The reducer is about to retire
+            # it, and inheriting it here would answer this turn from the value
+            # the person has just withdrawn -- which is what made the denial
+            # inert rather than merely unrecorded.
+            continue
+        if (slot == "product" and not _COMPARISON.search(question)
+                and (not product or (product == value
+                     and provenance.get("product") is Provenance.ASSUMED))):
             product = value
             provenance["product"] = origin_of(slot)
         elif slot == "substrate" and not substrate:
@@ -695,7 +1044,7 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
             exposure = value
             provenance["exposure"] = origin_of(slot)
 
-    measurements = dict(reading.measurements)
+    measurements = measurements_in(asserted)
     if measurements:
         provenance["measurements"] = Provenance.STATED
 
@@ -717,6 +1066,8 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
                                         for p in reading.candidate_products)))),
         provenance=provenance,
         unsettled=tuple(state.unsettled()),
+        transient=transient,
+        denied=dict(denied),
     )
 
     obs.event("state_resolution", intent=resolved.intent.value,
@@ -725,17 +1076,61 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
                                if provenance.get(s) in (Provenance.CARRIED,
                                                         Provenance.OBSERVED)),
               unsettled=list(resolved.unsettled),
+              transient=list(resolved.transient),
+              denied=sorted(resolved.denied),
               candidates=len(resolved.candidate_products))
     return resolved
 
 
-def facts_from(resolved: ResolvedRequest, turn_index: int) -> dict[str, SessionFact]:
+def facts_from(resolved: ResolvedRequest,
+               turn_index: int) -> dict[str, SessionFact | Denial]:
     """This turn's contribution to conversation state.
 
     Only what the person supplied in *this* turn becomes a new fact. Inherited
     values are already in the state and re-writing them would reset their
     source turn, making a value stated four turns ago look freshly confirmed.
+
+    Two things this turn said are deliberately not facts about the building.
+
+    A **scenario constraint** shaped the request and stops there. "Would Ultra
+    be suitable on an internal brick wall?" is a question about a hypothetical
+    wall, and `resolved.substrate` is set so retrieval and routing can use it --
+    but writing it here would make every later turn an answer about a brick wall
+    the person never said they had, printed back as "brick, as you said".
+
+    A **denial** produces a `Denial` rather than a fact, and is emitted before
+    the eligibility checks below rather than after. That order is the point: a
+    retraction contains "not", so `asserted_text` empties it and every one of
+    those checks would refuse it -- correctly reading it as no testimony, and
+    thereby leaving the belief it contradicts standing. Silence and retraction
+    are different inputs.
+
+    Denials are revalidated here rather than trusted from `resolved`, for the
+    same reason every value below is: a caller can construct a
+    `ResolvedRequest` directly, and a forged field must not be able to retire a
+    fact any more than it can create one.
     """
-    return {slot: SessionFact(slot, value, Provenance.STATED, turn_index)
-            for slot, value in resolved.slots().items()
-            if resolved.provenance.get(slot) is Provenance.STATED}
+    from .router import SlotDetector
+
+    detector = SlotDetector()
+    out: dict[str, SessionFact | Denial] = {
+        slot: Denial(slot, value) for slot, value in denials_in(
+            resolved.raw_question,
+            detector.detect(resolved.raw_question), detector).items()}
+
+    asserted = asserted_text(resolved.raw_question)
+    if state_request_slot(resolved.raw_question) or not asserted.strip():
+        return out
+    # Revalidate every value: callers can construct ResolvedRequest directly,
+    # and a harmless second sentence must not legitimise a rejected first one.
+    grounded = detector.detect(asserted)
+    product = stated_product(resolved.raw_question, (resolved.product,))
+    if product:
+        grounded["product"] = product
+    for slot, value in resolved.slots().items():
+        if slot in resolved.transient or slot in out:
+            continue
+        if (resolved.provenance.get(slot) is Provenance.STATED
+                and grounded.get(slot) == value):
+            out[slot] = SessionFact(slot, value, Provenance.STATED, turn_index)
+    return out

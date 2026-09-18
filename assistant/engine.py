@@ -19,7 +19,8 @@ from dataclasses import dataclass, field, replace
 from . import observability as obs
 from . import ollama
 from . import vision
-from .answer import Answer, AnswerEngine, Provenance
+from .answer import (Answer, AnswerEngine, Provenance, _named_aliases,
+                     _product_aliases, _requested_fields)
 from .cache import AnswerCache
 from .model import AnswerLogEntry
 from .retrieve import Retriever
@@ -37,6 +38,16 @@ MAX_WORDS = 500
 # the calculation edge. Lexical rather than semantic on purpose: this runs when
 # similarity has already failed to surface the passage.
 COVERAGE_TERMS = ("coverage", "covers", "cover", "m2", "m²", "per bag", "per sack")
+
+PROPERTY_TERMS = {
+    "water": ("water",),
+    "coverage": COVERAGE_TERMS,
+    "thickness": ("thickness", "thick", "mm"),
+    "backgrounds": ("background", "substrate", "masonry", "lath", "suitable"),
+    "preparation": ("preparation", "prepare", "dampen", "dust", "suction", "primer"),
+    "curing": ("curing", "cure", "drying", "protect", "dampen"),
+    "conditions": ("temperature", "weather", "frost", "degrees", "°c"),
+}
 
 # The manufacturer, as the website writes it in front of its own product names.
 # Stripped before matching, because chunks are tagged with the catalogue name.
@@ -85,6 +96,29 @@ def cap(question: str) -> str:
     return " ".join(words[:MAX_WORDS])
 
 
+class _AssertionSlots:
+    """Keep routing cues raw, but accept building facts only as assertions."""
+
+    def __init__(self, detector):
+        self.detector = detector
+
+    def __getattr__(self, name):
+        return getattr(self.detector, name)
+
+    def detect(self, question):
+        from .understanding import asserted_text
+
+        slots = self.detector.detect(question)
+        asserted = asserted_text(question)
+        if asserted != question:
+            facts = self.detector.detect(asserted)
+            for slot in ("substrate", "location", "exposure"):
+                slots.pop(slot, None)
+                if slot in facts:
+                    slots[slot] = facts[slot]
+        return slots
+
+
 @dataclass
 class Reply:
     """The composite answer to a message, part by part."""
@@ -120,6 +154,7 @@ class Assistant:
         self.retriever = Retriever(repo, **({"threshold": threshold}
                                             if threshold is not None else {}))
         self.router = Router()
+        self.router.slots = _AssertionSlots(self.router.slots)
         self.engine = AnswerEngine(repo, self.router)
         # Exact-key, audience-scoped, snapshot-scoped. See assistant/cache.py
         # for why it is not the template-keyed cache decision 14 designs.
@@ -176,7 +211,7 @@ class Assistant:
     def ask(self, question: str, audiences: tuple[str, ...] = ("public",),
             correlation_id: str = "", carried: dict | None = None,
             images=None, session_id: str = "", turn_id: str = "",
-            context: str = "") -> Reply:
+            context: str = "", *, state=None, turn_index: int = 0) -> Reply:
         """One message in, one composite reply out.
 
         `carried` is what the caller already knows that this question does not
@@ -266,6 +301,9 @@ class Assistant:
         observed: dict[str, str] = {}
         carried = dict(carried or {})
         origins: dict[str, Provenance] = {}
+        if state is not None:
+            carried = state.active()
+            origins = state.provenance_of()
 
         # One id for the whole message, including every part it splits into, so
         # the lines for a two-topic question can be read as one event. A caller
@@ -281,7 +319,9 @@ class Assistant:
                 with obs.span("answer", audiences=list(audiences),
                               question_words=len(question.split()),
                               question=obs.fingerprint(question)) as summary:
-                    if images:
+                    boundary = self._state_answer(
+                        question, carried, origins, state, turn_index)
+                    if images and boundary is None:
                         # Counts and slot names only. No question text, no
                         # passage text, and the photograph is named nowhere at
                         # all — which is why the uploaded filename is not
@@ -310,7 +350,15 @@ class Assistant:
                         origins.update({slot: Provenance.OBSERVED
                                         for slot in observed})
                     self._ask(question, audiences, reply, cid, carried,
-                              origins, history)
+                              origins, history, state, turn_index)
+                    if images and boundary is not None:
+                        note = ("The uploaded photograph was not analysed for this "
+                                "conversation-state response and has supplied no facts. "
+                                "Ask the technical team to review it.")
+                        for _, answer in reply.parts:
+                            answer.text += "\n\n" + note
+                            answer.diagnostics["perception"] = {
+                                **vision.disabled_report(), "summary": [note]}
                     summary["parts"] = len(reply.parts)
                     summary["paths"] = reply.paths
                     summary["refused"] = reply.refused
@@ -324,7 +372,8 @@ class Assistant:
 
     def answer_part(self, part: str, audiences: tuple = ("public",),
                     carried: dict | None = None, origins: dict | None = None,
-                    history: str = "") -> Answer:
+                    history: str = "", *, state=None,
+                    turn_index: int = 0) -> Answer:
         """The per-topic answering path, under a name the graph may call.
 
         `_answer_part` stays private and unchanged; this is the seam. Naming it
@@ -333,6 +382,12 @@ class Assistant:
         everything this does -- the policy gate, retrieval, the router, the six
         checks -- is the code that was already there.
         """
+        if state is not None:
+            carried = state.active()
+            origins = state.provenance_of()
+        boundary = self._state_answer(part, carried, origins, state, turn_index)
+        if boundary is not None:
+            return boundary
         # Cached, like the path it replaces. `Assistant._ask` looks the answer
         # up before calling `_answer_part` and stores it after, and moving the
         # UI onto the graph quietly left that behind -- decision 14's measured
@@ -363,6 +418,28 @@ class Assistant:
             answer.diagnostics["chunking_version"] = snapshot.chunking_version
             self.cache.put(key, answer)
         return answer
+
+    def _state_answer(self, question, carried=None, origins=None, state=None,
+                      turn_index=0):
+        """Use trusted state, never the transcript, before cache or model work.
+
+        Legacy dictionaries represent user-stated facts unless an explicit
+        origin says otherwise. A supplied ConversationState is authoritative,
+        retaining conflicts and observation provenance rather than flattening it.
+        """
+        from .conversation import ConversationState, FactHistory, SessionFact
+        from .understanding import state_only_answer
+
+        if state is None:
+            state = ConversationState(facts={
+                slot: FactHistory(SessionFact(
+                    slot, value, Provenance((origins or {}).get(
+                        slot, Provenance.CARRIED))))
+                for slot, value in (carried or {}).items()
+            })
+        return state_only_answer(
+            question, self.router.slots, self.engine.names.get("products", []),
+            state, turn_index, gate=self.router.gate)
 
     def recommend(self, resolved, decision, hits, history: str = "") -> Answer:
         return self.engine.recommend(resolved, decision, hits, history=history)
@@ -482,9 +559,22 @@ class Assistant:
         if not saved:
             return ConversationState()
         values = saved.get("channel_values", {}) or {}
-        return ConversationState(facts=dict(values.get("facts") or {}),
+        return ConversationState(facts=self._conversation_facts(values),
                                  observations=tuple(values.get("observations") or ()),
                                  turn_index=values.get("turn_index", 0))
+
+    @staticmethod
+    def _conversation_facts(values):
+        from .conversation import FactHistory, SessionFact
+
+        facts = dict(values.get("facts") or {})
+        topic = values.get("active_product")
+        if topic and "product" not in facts:
+            # Preserve the legacy active() view without claiming the caller
+            # installed the product that their datasheet question named.
+            facts["product"] = FactHistory(SessionFact(
+                "product", topic, Provenance.ASSUMED, values.get("turn_index", 0)))
+        return facts
 
     def forget(self, thread: str) -> None:
         """Drop a conversation entirely. What "New chat" means underneath."""
@@ -543,8 +633,9 @@ class Assistant:
                                                  ("contact", {}))}
                         app = self._graph_for(vision, matrix, understanding)
                         paused = self._paused_on(app, thread)
-                        if paused and not self.router.slots.is_answer_to_askback(
-                                turn.raw_question):
+                        if paused and (self.router.gate.match(turn.raw_question)
+                                       or not self.router.slots.is_answer_to_askback(
+                                           turn.raw_question)):
                             # Parked waiting for a substrate, and this message is
                             # a new question rather than an answer to that. The
                             # person moved on, and resuming would feed their
@@ -640,7 +731,7 @@ class Assistant:
         opened = final.get("case_opened")
         if opened:
             state.open_case(turn.turn_index, because=opened)
-        state.facts = dict(final.get("facts") or {})
+        state.facts = self._conversation_facts(final)
         state.observations = tuple(final.get("observations") or ())
         state.turn_index = turn.turn_index
         return reply, state
@@ -674,7 +765,10 @@ class Assistant:
 
     def _ask(self, question: str, audiences: tuple[str, ...], reply: Reply,
              cid: str, carried: dict | None = None,
-             origins: dict | None = None, history: str = "") -> None:
+             origins: dict | None = None, history: str = "", state=None,
+             turn_index: int = 0) -> None:
+        from .understanding import MANDATORY_TOPICS
+
         with self.repo.read_snapshot() as snapshot:
             self.retriever._verify()
             # Names/contact are release metadata too; refresh them together
@@ -682,7 +776,10 @@ class Assistant:
             self.engine.names = {key: snapshot.notes.get(key, default) for key, default in
                                  (("products", []), ("colours", []), ("merchants", []), ("contact", {}))}
             with obs.span("split_by_topic") as split:
-                parts = split_by_topic(question)
+                matched = self.router.gate.match(question)
+                # Do not answer a meta/state fragment before the safety request.
+                parts = ([question] if matched and matched[0] in MANDATORY_TOPICS
+                         else split_by_topic(question))
                 split["parts"] = len(parts)
             for part in parts:
                 # One span per topic, and every stage below it hangs off this
@@ -690,16 +787,22 @@ class Assistant:
                 # as one interleaved list.
                 with obs.span("part", question=obs.fingerprint(part),
                               snapshot_id=snapshot.snapshot_id) as part_span:
-                    key = self._cache_key(part, audiences, snapshot, carried,
-                                          origins, history)
+                    answer = self._state_answer(
+                        part, carried, origins, state, turn_index)
+                    key = (self._cache_key(part, audiences, snapshot, carried,
+                                           origins, history)
+                           if answer is None else None)
                     # `is not None`, not truthiness. AnswerCache defines __len__,
                     # so an empty cache is falsy and `if self.cache` was False on
                     # every call — the cache could never fill, because it was empty.
-                    with obs.span("cache_lookup") as lookup:
-                        answer = (self.cache.get(key)
-                                  if self.cache is not None else None)
-                        lookup["hit"] = answer is not None
-                    part_span["cached"] = answer is not None
+                    cached = False
+                    if answer is None:
+                        with obs.span("cache_lookup") as lookup:
+                            answer = (self.cache.get(key)
+                                      if self.cache is not None else None)
+                            cached = answer is not None
+                            lookup["hit"] = cached
+                    part_span["cached"] = cached
                     if answer is None:
                         answer = self._answer_part(part, audiences, carried,
                                                    origins, history)
@@ -708,7 +811,7 @@ class Assistant:
                         answer.diagnostics["chunking_version"] = snapshot.chunking_version
                         if self.cache is not None:
                             self.cache.put(key, answer)
-                    else:
+                    elif cached:
                         # Copy before annotating. The cache holds one Answer and
                         # hands the same object to every caller, so writing this
                         # request's correlation id onto it overwrites the last
@@ -829,9 +932,9 @@ class Assistant:
         wrong detection reorders and never refuses: the worst case is the same
         answer in a different order, not a silent loss.
         """
-        lowered = part.lower()
-        named = [p for p in self.engine.names.get("products", [])
-                 if p and p.lower() in lowered]
+        named = self._named_products(part)
+        if len(named) > 1:
+            return ""
 
         # If question names a product, use it. Otherwise fall back to carried.
         if not named:
@@ -852,6 +955,40 @@ class Assistant:
         # figure was unpublished while it sat in the datasheet.
         best = max(named, key=len).lower()
         return best.removeprefix(_BRAND).strip() or best
+
+    def _named_products(self, part: str) -> list[str]:
+        from .understanding import reference_text
+
+        aliases = _product_aliases(self.engine.names.get("products", []))
+        return sorted(_named_aliases(reference_text(part), aliases))
+
+    def _property_evidence(self, part, hits, products, detected, audiences):
+        """Bounded lexical recovery per requested product and field.
+
+        Keep the repository's scores (lexical hits are zero), audience and
+        active-version filtering. These passages never rescue a weak semantic
+        score; they only supply evidence the unchanged router can inspect.
+        """
+        fields = _requested_fields(
+            part, Decision(Path_.EXTRACT, "retrieval fields", slots=detected))
+        known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
+        added = []
+        for product in products:
+            for prop in fields:
+                terms = PROPERTY_TERMS.get(prop)
+                if not terms:
+                    continue
+                for hit in self.retriever.find_property(
+                        product, terms, audiences=audiences,
+                        limit=GATE_SECOND_CHANCE):
+                    key = (hit.chunk.canonical_url, hit.chunk.chunk_index)
+                    if key not in known:
+                        known.add(key)
+                        added.append(hit)
+        if added:
+            obs.event("targeted_retrieval", products=products, added=len(added),
+                      reason="requested product fields")
+        return hits + added
 
     def _cache_key(self, part: str, audiences: tuple[str, ...], snapshot,
                    carried: dict | None = None, origins: dict | None = None,
@@ -916,8 +1053,24 @@ class Assistant:
                 return self.engine.documents_for(part, audiences)
             return self.engine.route(topic, spec)
 
+        explicit = self._named_products(part)
         named = self._named_product(part, carried=carried)
-        hits = self.retriever.search(part, audiences=audiences, product=named)
+        carried = dict(carried or {})
+        if explicit:
+            carried.pop("product", None)
+        if named:
+            carried["product"] = named
+            from .understanding import stated_product
+
+            origins = dict(origins or {})
+            if explicit:
+                origins["product"] = (
+                    Provenance.STATED
+                    if stated_product(part, self.engine.names.get("products", [])) == named
+                    else Provenance.ASSUMED)
+        products = explicit or ([named] if named else [])
+        query = f"{named}: {part}" if named and not explicit else part
+        hits = self.retriever.search(query, audiences=audiences, product=named)
         # A quantity question embeds as a question about quantity, so the
         # coverage figure it needs may not be in the top five at all — and a
         # path that only re-sorts what it was given cannot recover from that.
@@ -940,6 +1093,27 @@ class Assistant:
             # Names only: a slot *value* is a phrase out of the question.
             detected = self.router.slots.detect(part)
             detection["slots"] = sorted(detected)
+        fields = _requested_fields(
+            part, Decision(Path_.EXTRACT, "retrieval fields", slots=detected))
+        if products and fields and not self.retriever.above_threshold(hits):
+            # A short pronoun question can embed far from its datasheet even
+            # with a metadata boost. Retry with explicit field context, without
+            # changing the routed question or inventing a similarity score.
+            for product in products:
+                terms = dict.fromkeys(
+                    term for prop in fields for term in PROPERTY_TERMS.get(prop, ()))
+                if not terms:
+                    continue
+                contextual = self.retriever.search(
+                    f"{product} {' '.join(terms)}. {part}",
+                    audiences=audiences, product=product)
+                if contextual and (not hits or contextual[0].score > hits[0].score):
+                    known = {(h.chunk.canonical_url, h.chunk.chunk_index)
+                             for h in contextual}
+                    hits = contextual + [
+                        h for h in hits
+                        if (h.chunk.canonical_url, h.chunk.chunk_index) not in known]
+        hits = self._property_evidence(part, hits, products, detected, audiences)
         if named and "calculation" in detected:
             known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
             found = [h for h in self.retriever.find_property(
@@ -990,11 +1164,11 @@ class Assistant:
         # refusing: nothing in the corpus states a U-value for Solo, so nothing
         # comes back and step 4 fires exactly as before.
         unsupported = self.router.unsupported_terms(part, hits, carried)
-        if unsupported and named:
+        if unsupported and products:
             known = {(h.chunk.canonical_url, h.chunk.chunk_index) for h in hits}
             recovered = [
-                h for h in self.retriever.find_property(
-                    named, tuple(unsupported), audiences=audiences,
+                h for product in products for h in self.retriever.find_property(
+                    product, tuple(unsupported), audiences=audiences,
                     limit=GATE_SECOND_CHANCE)
                 if (h.chunk.canonical_url, h.chunk.chunk_index) not in known]
             if recovered:
@@ -1051,8 +1225,9 @@ class Assistant:
             # (location), as you said" when external had come from a question
             # two turns earlier about render.
             Path_.EXTRACT: lambda: self.engine.extract(decision, part),
-            Path_.COMPOSE: lambda: self.engine.compose(decision, part,
-                                                       history=history),
+            Path_.COMPOSE: lambda: (
+                self.engine.factual(decision, part)
+                or self.engine.compose(decision, part, history=history)),
             Path_.DEFER: lambda: self.engine.defer(decision, part),
             Path_.DIAGNOSIS: lambda: self.engine.diagnosis(decision, part),
             Path_.ASK_BACK: lambda: self.engine.ask_back(decision, part),
@@ -1074,6 +1249,11 @@ class Assistant:
         slots = dict(decision.slots)
         if named:
             slots["product"] = named
+        for fact in answer.facts:
+            if fact.provenance is Provenance.ASSUMED:
+                slots.pop(fact.slot, None)
+        if decision.origins.get("product") is Provenance.ASSUMED:
+            slots.pop("product", None)
         answer.diagnostics["slots"] = slots
         return answer
 

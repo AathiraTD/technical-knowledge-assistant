@@ -38,6 +38,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 import threading
 import webbrowser
@@ -206,6 +207,7 @@ PAGE = """<!doctype html>
                       overflow:hidden; }}
   .chat-messages {{ flex:1; overflow-y:auto; padding:20px;
                     display:flex; flex-direction:column; gap:12px; }}
+  .answer-response {{ display:flex; flex-direction:column; gap:12px; }}
 
   .landing {{ display:flex; flex-direction:column; align-items:center;
              justify-content:center; text-align:center; padding:40px 20px; }}
@@ -477,6 +479,7 @@ function hideThinking() {{
 }}
 
 function sendMessage() {{
+  if (document.getElementById('send-btn').disabled) return;
   const input = document.getElementById('question-input');
   const question = input.value.trim();
   if (!question) return;
@@ -551,9 +554,26 @@ function addMessage(role, text, attachments) {{
   container.scrollTop = container.scrollHeight;
 }}
 
-function showError(message, correlationId) {{
-  const container = document.getElementById('chat-messages');
-  if (container.querySelector('.landing')) {{ container.innerHTML = ''; }}
+function responseContainer(correlationId) {{
+  const container = document.createElement('div');
+  container.className = 'answer-response';
+  container.dataset.state = 'rendering';
+  // Only the server's short random reference, never session or diagnostic data.
+  if (typeof correlationId === 'string' && /^[a-f0-9]{{12}}$/.test(correlationId)) {{
+    container.dataset.correlationId = correlationId;
+  }}
+  return container;
+}}
+
+function showError(message, correlationId, container) {{
+  if (!container) {{
+    container = responseContainer(correlationId);
+    document.getElementById('chat-messages').appendChild(container);
+  }}
+  correlationId = container.dataset.correlationId;
+  const chat = document.getElementById('chat-messages');
+  const landing = chat.querySelector('.landing');
+  if (landing) landing.remove();
   const el = document.createElement('div');
   el.className = 'message assistant';
   let inner = '<div class="message-bubble error-bubble">' + escapeHtml(message);
@@ -562,7 +582,8 @@ function showError(message, correlationId) {{
   }}
   el.innerHTML = inner + '</div>';
   container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  container.dataset.state = 'error';
+  chat.scrollTop = chat.scrollHeight;
 }}
 
 // One row per reading, each carrying its own certainty word and, where the
@@ -580,7 +601,7 @@ const CERTAINTY_STYLE = {{
 function renderPerception(perception, container) {{
   if (!perception) return;
   const el = document.createElement('div');
-  el.className = 'message assistant';
+  el.className = 'message assistant perception-panel';
 
   // Switched off is a supported state, not an error, and it gets its own
   // sentence rather than an empty "From the photograph" heading -- which would
@@ -637,36 +658,28 @@ function renderPerception(perception, container) {{
 }}
 
 function handleResponse(data) {{
+  const chat = document.getElementById('chat-messages');
+  const container = responseContainer(data.correlation_id);
+  const landing = chat.querySelector('.landing');
+  if (landing) landing.remove();
+  chat.appendChild(container);
+  renderPerception(data.perception, container);
+  renderUploadNotes(data.upload_notes, container);
   if (data.error) {{
-    showError(data.error, data.correlation_id);
+    showError(data.error, data.correlation_id, container);
     return;
   }}
   if (!data.parts || data.parts.length === 0) {{
-    showError('No answer came back for that question.', data.correlation_id);
+    showError('No answer came back for that question.', data.correlation_id, container);
     return;
   }}
 
-  // Before the answer, because it is what the answer was built on.
-  renderPerception(data.perception, document.getElementById('chat-messages'));
-
-  const part = data.parts[0];
-  const answer = part;
-
-  if (answer.refused) {{
-    renderRefusal(answer, data.upload_notes);
-  }} else {{
-    renderAnswer(answer, data.upload_notes);
-  }}
+  data.parts.forEach((answer, index) => renderAnswer(answer, null, container, index));
+  container.dataset.state = 'complete';
+  chat.scrollTop = chat.scrollHeight;
 }}
 
-function renderAnswer(answer, uploadNotes) {{
-  const text = answer.text || answer.body || 'No response';
-  const container = document.getElementById('chat-messages');
-
-  const msgEl = document.createElement('div');
-  msgEl.className = 'message assistant';
-
-  // Add upload notes if any
+function renderUploadNotes(uploadNotes, container) {{
   if (uploadNotes && uploadNotes.length > 0) {{
     uploadNotes.forEach(note => {{
       const noteEl = document.createElement('div');
@@ -675,6 +688,15 @@ function renderAnswer(answer, uploadNotes) {{
       container.appendChild(noteEl);
     }});
   }}
+}}
+
+function renderAnswer(answer, uploadNotes, container, index = 0) {{
+  const text = answer.text || answer.body || 'No response';
+  container = container || document.getElementById('chat-messages');
+  renderUploadNotes(uploadNotes, container);
+  const msgEl = document.createElement('div');
+  msgEl.className = 'message assistant';
+  msgEl.dataset.partIndex = String(index);
 
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
@@ -685,12 +707,6 @@ function renderAnswer(answer, uploadNotes) {{
   p.className = 'answer-text';
   p.innerHTML = textHtml;
   bubble.appendChild(p);
-
-  // Add path tag
-  const tag = document.createElement('span');
-  tag.className = 'tag' + (answer.refused ? ' refused' : '');
-  tag.textContent = answer.path;
-  p.appendChild(tag);
 
   // Add sources disclosure
   if (answer.sources && answer.sources.length > 0) {{
@@ -719,13 +735,26 @@ function renderAnswer(answer, uploadNotes) {{
   }}
 
   // Add diagnostics disclosure
-  if (answer.diagnostics && Object.keys(answer.diagnostics).length > 0) {{
+  if (answer.path || answer.diagnostics || answer.failed_checks ||
+      container.dataset.correlationId) {{
     const diagDiv = document.createElement('div');
     diagDiv.className = 'diagnostics-disclosure';
     const btn = document.createElement('button');
     btn.className = 'disclosure-btn';
     btn.textContent = 'Why this answer?';
-    const diagList = renderDiagnostics(answer.diagnostics, answer.failed_checks);
+    const diagList = renderDiagnostics(answer.diagnostics || {{}}, answer.failed_checks);
+    if (answer.path) {{
+      const tag = document.createElement('span');
+      tag.className = 'tag' + (answer.refused ? ' refused' : '');
+      tag.textContent = answer.path;
+      diagList.prepend(tag);
+    }}
+    if (container.dataset.correlationId) {{
+      const reference = document.createElement('div');
+      reference.className = 'diag-line';
+      reference.textContent = 'reference ' + container.dataset.correlationId;
+      diagList.appendChild(reference);
+    }}
     btn.onclick = (e) => {{ e.preventDefault(); toggleDiagnostics(btn, diagList); }};
     diagDiv.appendChild(btn);
     diagDiv.appendChild(diagList);
@@ -738,38 +767,7 @@ function renderAnswer(answer, uploadNotes) {{
 }}
 
 function renderRefusal(answer, uploadNotes) {{
-  const text = answer.body || answer.text || 'No response';
-  const container = document.getElementById('chat-messages');
-
-  // Add upload notes if any
-  if (uploadNotes && uploadNotes.length > 0) {{
-    uploadNotes.forEach(note => {{
-      const noteEl = document.createElement('div');
-      noteEl.className = 'message assistant';
-      noteEl.innerHTML = '<div class="message-bubble upload-note">' + escapeHtml(note) + '</div>';
-      container.appendChild(noteEl);
-    }});
-  }}
-
-  const msgEl = document.createElement('div');
-  msgEl.className = 'message assistant';
-  const bubble = document.createElement('div');
-  bubble.className = 'message-bubble';
-
-  const textHtml = renderTextWithCitations(text);
-  const p = document.createElement('p');
-  p.className = 'answer-text';
-  p.innerHTML = textHtml;
-  bubble.appendChild(p);
-
-  const tag = document.createElement('span');
-  tag.className = 'tag refused';
-  tag.textContent = answer.path;
-  p.appendChild(tag);
-
-  msgEl.appendChild(bubble);
-  container.appendChild(msgEl);
-  container.scrollTop = container.scrollHeight;
+  renderAnswer(answer, uploadNotes);
 }}
 
 function renderDiagnostics(diag, failedChecks) {{
@@ -788,7 +786,7 @@ function renderDiagnostics(diag, failedChecks) {{
   if (diag.step) addLine('step', diag.step);
   if (diag.reason) addLine('why', diag.reason);
   if (diag.refusal_reason) addLine('why', diag.refusal_reason);
-  if (diag.top_score !== undefined) addLine('top score', diag.top_score.toFixed(3));
+  if (typeof diag.top_score === 'number') addLine('top score', diag.top_score.toFixed(3));
   if (diag.evidence_count !== undefined) addLine('evidence', diag.evidence_count);
   if (diag.generation_seconds !== undefined) addLine('generated', diag.generation_seconds + 's');
   if (failedChecks && failedChecks.length > 0) {{
@@ -866,36 +864,87 @@ def render_upload_notes(notes) -> str:
             f"<ul class='upload-notes'>{items}</ul></div></div>")
 
 
-def render_html(reply, verbose: bool) -> str:
-    """Render an answer as a chat message with collapsible sources and diagnostics.
+def _public_reference(correlation_id: str) -> str:
+    """Accept only the bounded, random identifier minted by observability."""
+    return (correlation_id if isinstance(correlation_id, str)
+            and re.fullmatch(r"[a-f0-9]{12}", correlation_id) else "")
 
-    Unlike the old render_html, this outputs HTML/JS suitable for the chat
-    interface with collapsible sections for sources and diagnostics.
-    """
+
+def render_perception(perception) -> str:
+    """Keep visual uncertainty visible, outside the answer and its diagnostics."""
+    if not perception:
+        return ""
+    blocks = ['<div class="message assistant perception-panel"><div class="message-bubble">']
+    if perception.get("enabled") is False:
+        blocks.append('<strong>Photograph not read</strong><div class="perception-none">')
+        blocks.append(_esc(" ".join(perception.get("summary") or [])))
+        blocks.append('</div>')
+    else:
+        blocks.append('<strong>From the photograph</strong>')
+        rows = perception.get("observations") or []
+        if not rows:
+            blocks.append('<div class="perception-none">Nothing could be read from the '
+                          'image with enough confidence to report.</div>')
+        else:
+            certainty_labels = {
+                "OBSERVED": "seen", "LIKELY": "likely", "UNCERTAIN": "uncertain",
+                "CANNOT_DETERMINE": "cannot tell",
+            }
+            blocks.append('<ul class="perception">')
+            for row in rows:
+                certainty = row.get("certainty", "UNCERTAIN")
+                label = certainty_labels.get(certainty, "uncertain")
+                shown = _esc(str(row.get("attribute", "")).replace("_", " "))
+                if certainty in ("OBSERVED", "LIKELY"):
+                    shown += ": <b>" + _esc(str(row.get("value", "")).replace("_", " ")) + "</b>"
+                blocks.append(f'<li><span class="pill">{label}</span> {shown}')
+                if row.get("withheld"):
+                    blocks.append('<span class="withheld"> &mdash; '
+                                  + _esc(row["withheld"]) + '</span>')
+                blocks.append('</li>')
+            blocks.append('</ul>')
+        cannot = perception.get("cannot_determine_from_image") or []
+        if cannot:
+            blocks.append('<div class="cannot"><strong>Not determinable from the photograph'
+                          '</strong><ul>')
+            blocks.extend(f'<li>{_esc(item)}</li>' for item in cannot[:6])
+            blocks.append('</ul></div>')
+        if perception.get("truncated"):
+            blocks.append('<div class="withheld">The model’s answer was cut short, so '
+                          'what it did say is shown but was not acted on.</div>')
+    blocks.append('</div></div>')
+    return "".join(blocks)
+
+
+def render_html(reply, verbose: bool, correlation_id: str = "") -> str:
+    """Render every answer part, with internal labels confined to diagnostics."""
     if not reply.parts:
         return ""
+    reference = _public_reference(correlation_id)
+    blocks = [f'<div class="answer-response" data-state="complete"'
+              f' data-correlation-id="{reference}">']
+    blocks.append(render_perception(reply.parts[0][1].diagnostics.get("perception")))
+    for index, (_part, answer) in enumerate(reply.parts):
+        blocks.append(_render_answer_html(answer, index, reference))
+    blocks.append('</div>')
+    return "".join(blocks)
 
-    # For now, render only the first part (single-turn response)
-    part, answer = reply.parts[0]
+
+def _render_answer_html(answer, index: int, reference: str) -> str:
 
     blocks = []
 
     # Message container
-    blocks.append('<div class="message assistant">')
+    blocks.append(f'<div class="message assistant" data-part-index="{index}">')
     blocks.append('<div class="message-bubble">')
 
     # Answer text with citations rendered as spans
-    text = answer.body if answer.body else answer.text
+    text = answer.text or answer.body
     # Escape HTML, then restore citation markers with spans
     text_html = _esc(text)
     # Replace [n] citations with citation spans (simple loop since we expect few)
-    import re
     text_html = re.sub(r"\[(\d+)\]", r'<span class="citation">[\1]</span>', text_html)
-    blocks.append(f'<p class="answer-text">{text_html}')
-
-    # Add path tag
-    tag_class = 'tag refused' if answer.refused else 'tag'
-    blocks.append(f'<span class="{tag_class}">{_esc(answer.path)}</span></p>')
+    blocks.append(f'<p class="answer-text">{text_html}</p>')
 
     # Sources disclosure section
     if answer.sources:
@@ -916,10 +965,15 @@ def render_html(reply, verbose: bool) -> str:
         blocks.append('</div>')
 
     # Diagnostics disclosure section
-    if answer.diagnostics or answer.failed_checks:
+    if answer.path or answer.diagnostics or answer.failed_checks or reference:
         blocks.append('<div class="diagnostics-disclosure">')
         blocks.append('<button class="disclosure-btn" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\');">Why this answer?</button>')
         blocks.append('<div class="diagnostics-list">')
+        if answer.path:
+            tag_class = 'tag refused' if answer.refused else 'tag'
+            blocks.append(f'<span class="{tag_class}">{_esc(answer.path)}</span>')
+        if reference:
+            blocks.append(f'<div class="diag-line"><span class="diag-key">reference</span> {reference}</div>')
 
         d = answer.diagnostics
         if d.get('path'):
@@ -1351,7 +1405,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 reply = self._answer(question, audiences, images)
                 self._remember(question, reply)
-                initial_content = render_html(reply, verbose)
+                initial_content = render_html(reply, verbose, self.correlation_id)
             except (ollama.OllamaUnavailable, IndexMismatch) as exc:
                 initial_content = (f"<div class='message assistant'>"
                                    f"<div class='message-bubble'>Error: {_esc(str(exc))}"
