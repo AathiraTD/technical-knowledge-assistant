@@ -1,6 +1,6 @@
 """Build the index: extract, chunk, tag caveats, embed, publish a snapshot.
 
-Run it with `python -m assistant.index`. It reads the cached crawl, so it needs
+Run it with `python -m assistant.indexing.index`. It reads the cached crawl, so it needs
 no network — only Ollama, running locally, for the embeddings.
 
 Three things here are deliberate rather than incidental.
@@ -32,7 +32,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import ollama, use_utf8
+from .. import ollama, use_utf8
 from .embedcache import EmbeddingCache
 from .crawl import archive_source, atomic_write
 from .extract import (
@@ -44,7 +44,7 @@ from .extract import (
     extract_pdf,
     harvest,
 )
-from .model import (
+from ..model import (
     AUTHORITY,
     Caveat,
     Chunk,
@@ -55,9 +55,10 @@ from .model import (
     Excluded,
     Snapshot,
 )
-from .store.factory import open_repository
+from ..store.factory import open_repository
+from .. import paths
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = paths.ROOT
 CACHE = ROOT / "data" / "cache"
 INDEX_DIR = ROOT / "data" / "index"
 
@@ -727,7 +728,7 @@ def summarise(report: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     use_utf8()
     parser = argparse.ArgumentParser(
-        prog="assistant.index",
+        prog="assistant.indexing.index",
         description="Index what changed since the last run.")
     parser.add_argument(
         "--rebuild", action="store_true",

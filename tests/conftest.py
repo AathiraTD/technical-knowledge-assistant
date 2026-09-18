@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant import ollama                           # noqa: E402
-from assistant.index import CHUNKING_VERSION           # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION           # noqa: E402
 from assistant.model import Snapshot                   # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository  # noqa: E402
 

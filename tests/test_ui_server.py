@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant import observability as obs, ollama                 # noqa: E402
 from assistant import ui                                           # noqa: E402
 from assistant.engine import Assistant                             # noqa: E402
-from assistant.index import CHUNKING_VERSION                       # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION                       # noqa: E402
 from assistant.model import (                                      # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Snapshot,
 )

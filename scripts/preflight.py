@@ -119,7 +119,7 @@ def check() -> dict:
     report["checks"]["index_present"] = index.exists()
     if not index.exists():
         report["fix"].append(
-            "build the index: python -m assistant.index   (about two minutes; "
+            "build the index: python -m assistant.indexing.index   (about two minutes; "
             "the embedding cache ships, so nothing is re-embedded)")
 
     # Importable is the bar this file sets. The index and the models are

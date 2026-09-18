@@ -188,7 +188,7 @@ curl -s http://127.0.0.1:8765/ready?format=text
 docker compose -f deploy/compose.yaml logs -f app        # structured JSON on stderr
 docker compose -f deploy/compose.yaml ps
 docker compose -f deploy/compose.yaml exec app python -m assistant.trace
-docker compose -f deploy/compose.yaml exec app python -m assistant.index    # incremental refresh
+docker compose -f deploy/compose.yaml exec app python -m assistant.indexing.index    # incremental refresh
 docker compose -f deploy/compose.yaml down               # keeps volumes
 docker compose -f deploy/compose.yaml down -v            # discards them
 ```

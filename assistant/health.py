@@ -39,7 +39,7 @@ import time
 
 from . import ollama, use_utf8
 from .store.factory import open_repository
-from .index import CHUNKING_VERSION
+from .indexing.index import CHUNKING_VERSION
 
 # Credentials in a DSN, and nothing else. Deliberately narrow: the host, port
 # and database name are what make the message useful, and reducing the whole
@@ -91,7 +91,7 @@ def check(db: str = "", dsn: str = "") -> dict:
         report["checks"]["active_snapshot"] = snapshot is not None
         if snapshot is None:
             report["error"] = ("no active index snapshot — run "
-                               "python -m assistant.index")
+                               "python -m assistant.indexing.index")
             return report
         report["snapshot"] = snapshot.snapshot_id
         report["documents"] = snapshot.document_count
@@ -166,11 +166,11 @@ REMEDIES = {
         "check the --db path exists, or that ASSISTANT_POSTGRES_DSN points at a "
         "running database",
     "active_snapshot":
-        "build the index: python -m assistant.index",
+        "build the index: python -m assistant.indexing.index",
     "chunks_present":
-        "the snapshot published no passages; rebuild: python -m assistant.index --rebuild",
+        "the snapshot published no passages; rebuild: python -m assistant.indexing.index --rebuild",
     "chunking_matches_index":
-        "the chunker changed since this index was built; rebuild: python -m assistant.index",
+        "the chunker changed since this index was built; rebuild: python -m assistant.indexing.index",
     "dimensions_match_index":
         "EMBED_DIMENSIONS does not match the index; unset it, or rebuild the index",
     "ollama_reachable":
@@ -183,7 +183,7 @@ REMEDIES = {
         "pull the vision model, or unset ASSISTANT_VISION_DEMO to demonstrate "
         "the text path only",
     "embedding_model_matches_index":
-        "rebuild the index with the configured model: python -m assistant.index --rebuild",
+        "rebuild the index with the configured model: python -m assistant.indexing.index --rebuild",
 }
 
 

@@ -40,7 +40,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.index import CHUNKING_VERSION                      # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
 from assistant.model import (                                     # noqa: E402
     Chunk, Document, DocumentUpdate, DocumentVersion, Snapshot,
 )

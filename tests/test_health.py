@@ -21,7 +21,7 @@ import types
 from pathlib import Path
 
 import pytest
-from assistant.index import CHUNKING_VERSION
+from assistant.indexing.index import CHUNKING_VERSION
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -121,7 +121,7 @@ def test_no_active_snapshot_names_the_command_that_builds_one(tmp_path, ollama_h
 
     assert report["ready"] is False
     assert report["checks"]["active_snapshot"] is False
-    assert "python -m assistant.index" in report["error"]
+    assert "python -m assistant.indexing.index" in report["error"]
 
 
 def test_an_index_built_by_another_model_is_not_ready(tmp_path, ollama_has):
@@ -249,7 +249,7 @@ def test_main_exits_one_and_prints_the_reason_when_not_ready(
     assert code == 1
     assert "NOT READY" in printed
     assert "active snapshot" in printed
-    assert "python -m assistant.index" in printed
+    assert "python -m assistant.indexing.index" in printed
 
 
 def test_json_output_is_parseable(tmp_path, ollama_has, capsys):

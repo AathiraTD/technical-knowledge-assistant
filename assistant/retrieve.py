@@ -23,7 +23,7 @@ from . import observability as obs
 from . import ollama
 from .model import Retrieved
 from .repository import IndexMismatch, RetrievalRequest
-from .index import CHUNKING_VERSION
+from .indexing.index import CHUNKING_VERSION
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
 
@@ -114,14 +114,14 @@ class Retriever:
         snapshot = self.repo.snapshot()
         if snapshot is None:
             raise IndexMismatch(
-                "No active index. Build one with: python -m assistant.index"
+                "No active index. Build one with: python -m assistant.indexing.index"
             )
         if snapshot.embedding_model != self.embed_model:
             raise IndexMismatch(
                 f"This index was built with {snapshot.embedding_model!r} but the "
                 f"engine is configured for {self.embed_model!r}. Querying an index "
                 "with a different embedding model returns confident nonsense. "
-                "Rebuild with: python -m assistant.index"
+                "Rebuild with: python -m assistant.indexing.index"
             )
         if snapshot.embedding_dimensions != ollama.EMBED_DIMENSIONS:
             raise IndexMismatch(
@@ -129,7 +129,7 @@ class Retriever:
                 f"expects {ollama.EMBED_DIMENSIONS}d."
             )
         if snapshot.chunking_version != CHUNKING_VERSION:
-            raise IndexMismatch("Index chunking configuration changed; rebuild with python -m assistant.index")
+            raise IndexMismatch("Index chunking configuration changed; rebuild with python -m assistant.indexing.index")
         self.snapshot = snapshot
 
     def expand(self, question: str) -> str:

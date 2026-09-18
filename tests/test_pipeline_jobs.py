@@ -1,6 +1,6 @@
 """Durable retries survive worker restarts and retain dead-letter evidence."""
 import pytest
-from assistant import pipeline
+from assistant.indexing import pipeline
 
 
 def test_queue_success_and_deduplication(tmp_path):

@@ -24,7 +24,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import cli, observability as obs, ollama           # noqa: E402
-from assistant.index import CHUNKING_VERSION                      # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
 from assistant.model import (                                     # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Snapshot,
 )
@@ -279,7 +279,7 @@ def test_a_missing_index_is_reported_with_the_command_that_builds_one(
 
     assert code == 1
     assert "No active index" in err, err
-    assert "python -m assistant.index" in err
+    assert "python -m assistant.indexing.index" in err
     assert "Traceback" not in err
 
 

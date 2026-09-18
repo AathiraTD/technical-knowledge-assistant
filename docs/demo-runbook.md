@@ -40,7 +40,7 @@ server fails on, and it fails *before* an audience is watching.
 | Ollama running | embedding and generation | `ollama serve` |
 | `qwen3-embedding:0.6b` | 639 MB — retrieval | `ollama pull qwen3-embedding:0.6b` |
 | `qwen3.5:4b` | 3.4 GB — composition | `ollama pull qwen3.5:4b` |
-| A built index | `data/index/knowledge.db` | `python -m assistant.index` — about two minutes |
+| A built index | `data/index/knowledge.db` | `python -m assistant.indexing.index` — about two minutes |
 
 The index is **not** in the repository and is not meant to be: it is tied to the
 embedding model on the machine that built it. The *embedding cache* is shipped
@@ -403,8 +403,8 @@ Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Fo
 
 **The index is missing, empty or mismatched.** `/ready` names which.
 ```powershell
-python -m assistant.index              # incremental; unchanged documents are skipped
-python -m assistant.index --rebuild    # full, retaining version history
+python -m assistant.indexing.index              # incremental; unchanged documents are skipped
+python -m assistant.indexing.index --rebuild    # full, retaining version history
 ```
 A failed indexing run cannot replace a good release — the previous snapshot
 keeps serving.

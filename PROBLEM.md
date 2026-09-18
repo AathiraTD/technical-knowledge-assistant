@@ -167,7 +167,7 @@ what a similarity score is assumed to do.
 pip install -r requirements.txt
 ollama pull qwen3.5:4b
 ollama pull qwen3-embedding:0.6b
-python -m assistant.index      # builds from the shipped cache; no network
+python -m assistant.indexing.index      # builds from the shipped cache; no network
 python -m assistant.cli        # ask a question
 python -m assistant.ui         # the same library behind a web page
 python -m eval.run             # situations, probes, sweep, audience filter

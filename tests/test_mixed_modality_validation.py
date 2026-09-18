@@ -24,7 +24,7 @@ from assistant import ollama, vision
 from assistant.answer import Provenance
 from assistant.conversation import ConversationState, FactStatus, TurnInput
 from assistant.engine import Assistant
-from assistant.index import CHUNKING_VERSION
+from assistant.indexing.index import CHUNKING_VERSION
 from assistant.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
 from assistant.store import SQLiteKnowledgeRepository
 

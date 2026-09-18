@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant import ollama                                    # noqa: E402
 from assistant.audience import parse, resolve                   # noqa: E402
 from assistant.engine import MAX_WORDS, Assistant, cap          # noqa: E402
-from assistant.index import CHUNKING_VERSION                    # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION                    # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
 from assistant.router import Path_                              # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository           # noqa: E402

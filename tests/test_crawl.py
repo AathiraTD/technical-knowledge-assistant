@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from assistant import crawl
+from assistant.indexing import crawl
 
 HTTP_CLIENT = httpx.Client
 

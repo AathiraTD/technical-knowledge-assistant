@@ -1,7 +1,7 @@
 """Integration tests for Core 5: Retrieval, Router, Checks, Session, Concurrency.
 
 Tests against REAL PostgreSQL + pgvector + Ollama.
-Requires: docker-compose up -d && python -m assistant.index --build
+Requires: docker-compose up -d && python -m assistant.indexing.index --build
 
 These are NOT unit tests. They verify the system design end-to-end.
 """
@@ -41,10 +41,10 @@ class IntegrationTestCore5(unittest.TestCase):
         except Exception as exc:                            # noqa: BLE001
             raise unittest.SkipTest(
                 f"no usable knowledge store ({exc}); "
-                "build one with: python -m assistant.index") from exc
+                "build one with: python -m assistant.indexing.index") from exc
         if not snapshot:
             raise unittest.SkipTest(
-                "no active index; build one with: python -m assistant.index")
+                "no active index; build one with: python -m assistant.indexing.index")
         cls.snapshot_id = snapshot.snapshot_id
         cls.retriever = Retriever(cls.repo)
         cls.assistant = Assistant(cls.repo)

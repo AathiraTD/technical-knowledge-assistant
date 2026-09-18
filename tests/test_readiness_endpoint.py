@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import health, ollama                               # noqa: E402
 from assistant.engine import Assistant                             # noqa: E402
-from assistant.index import CHUNKING_VERSION                       # noqa: E402
+from assistant.indexing.index import CHUNKING_VERSION                       # noqa: E402
 from assistant.model import (                                      # noqa: E402
     Chunk, Document, DocumentVersion, Snapshot,
 )
@@ -241,7 +241,7 @@ def test_an_empty_index_stops_the_server_starting_rather_than_serving(
 
     repo = open_repository(str(path), dsn="", thread_safe=True)
     try:
-        with pytest.raises(Exception, match="python -m assistant.index"):
+        with pytest.raises(Exception, match="python -m assistant.indexing.index"):
             Assistant(repo)
     finally:
         repo.close()

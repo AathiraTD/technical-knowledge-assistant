@@ -4,7 +4,7 @@ Run once, by hand. The cache ships with the submission so the indexer — and th
 assessors — work offline. Politeness is not optional here: this is a partner's
 website, so one crawl, rate limited, identifying itself, respecting robots.txt.
 
-    python -m assistant.crawl
+    python -m assistant.indexing.crawl
 
 Corpus boundary and the exclusion rules live in config/sources.json, so the
 question "why isn't the safety data sheet in here?" has an answer on file.
@@ -28,8 +28,9 @@ from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from .. import paths
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = paths.ROOT
 CONFIG = ROOT / "config" / "sources.json"
 CACHE = ROOT / "data" / "cache"
 LEDGER = CACHE / "versions.json"

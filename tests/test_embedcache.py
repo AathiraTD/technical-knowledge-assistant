@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.embedcache import EmbeddingCache, key_for          # noqa: E402
+from assistant.indexing.embedcache import EmbeddingCache, key_for          # noqa: E402
 
 MODEL = "qwen3-embedding:0.6b"
 DIMS = 4

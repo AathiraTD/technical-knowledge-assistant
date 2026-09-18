@@ -25,9 +25,10 @@ import sqlite3
 from pathlib import Path
 
 import numpy as np
+from .. import paths
 
 DEFAULT_PATH = Path(os.environ.get("ASSISTANT_EMBEDDING_CACHE",
-                    Path(__file__).resolve().parents[1] / "data" / "embeddings.db"))
+                    paths.DATA_DIR / "embeddings.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS embedding_cache (

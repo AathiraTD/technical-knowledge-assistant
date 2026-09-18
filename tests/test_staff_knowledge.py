@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from assistant.staff_knowledge import StaffKnowledgeIngestor, StaffSubmission
+from assistant.indexing.staff_knowledge import StaffKnowledgeIngestor, StaffSubmission
 
 
 @pytest.fixture

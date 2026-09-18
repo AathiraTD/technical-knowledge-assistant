@@ -1,7 +1,7 @@
 """Only the configured publisher can supply public knowledge."""
 import httpx
 import pytest
-from assistant import crawl, index
+from assistant.indexing import crawl, index
 from test_crawl import isolated_cache, config, run_crawler, HTTP_CLIENT
 from test_pipeline_regressions import pipeline
 

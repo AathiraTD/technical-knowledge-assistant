@@ -8,9 +8,9 @@ import sqlite3
 
 import pytest
 
-from assistant import index
-from assistant.embedcache import EmbeddingCache
-from assistant.extract import Extracted
+from assistant.indexing import index
+from assistant.indexing.embedcache import EmbeddingCache
+from assistant.indexing.extract import Extracted
 from assistant.store import SQLiteKnowledgeRepository
 
 

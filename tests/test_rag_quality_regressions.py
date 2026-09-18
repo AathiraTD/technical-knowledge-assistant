@@ -250,7 +250,9 @@ from assistant import candidates as cand                            # noqa: E402
 from assistant import ollama                                        # noqa: E402
 from assistant.conversation import TurnInput                        # noqa: E402
 from assistant.engine import Assistant                              # noqa: E402
-from assistant.index import CHUNKING_VERSION                        # noqa: E402
+from assistant.indexing.index import (  # noqa: E402
+    CHUNKING_VERSION,
+)
 from assistant.model import DocumentVersion, Snapshot               # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository               # noqa: E402
 

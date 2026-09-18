@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.index import CHUNKING_VERSION
+from assistant.indexing.index import CHUNKING_VERSION
 from assistant import ollama                                  # noqa: E402
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
 from assistant.repository import RetrievalRequest               # noqa: E402
@@ -93,7 +93,7 @@ def test_an_empty_store_names_the_command_that_fixes_it():
     repo = SQLiteKnowledgeRepository(Path(tempfile.mkdtemp()) / "empty.db")
     with pytest.raises(IndexMismatch) as raised:
         Retriever(repo)
-    assert "assistant.index" in str(raised.value)
+    assert "assistant.indexing.index" in str(raised.value)
 
 
 def test_a_matching_index_is_accepted_and_its_snapshot_kept():

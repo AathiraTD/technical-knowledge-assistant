@@ -70,7 +70,7 @@ def test_postgres_readiness_uses_live_embedded_chunks():
 
 
 def test_full_index_delta_against_each_backend(pipeline, repo):
-    from assistant import index
+    from assistant.indexing import index
     from assistant.model import Excluded
     stage, _ = pipeline
     stage()

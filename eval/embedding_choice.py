@@ -30,9 +30,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant import ollama, use_utf8                    # noqa: E402
-from assistant.embedcache import EmbeddingCache           # noqa: E402
-from assistant.extract import extract_html, extract_pdf   # noqa: E402
-from assistant.index import chunk_sections, embedding_text, product_name  # noqa: E402
+from assistant.indexing.embedcache import EmbeddingCache           # noqa: E402
+from assistant.indexing.extract import extract_html, extract_pdf   # noqa: E402
+from assistant.indexing.index import (  # noqa: E402
+    chunk_sections,
+    embedding_text,
+    product_name,
+)
 from assistant.model import Chunk                         # noqa: E402
 from assistant.retrieve import QUERY_INSTRUCTION          # noqa: E402
 

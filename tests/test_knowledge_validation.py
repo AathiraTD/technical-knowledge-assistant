@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from assistant import index
+from assistant.indexing import index
 from assistant.model import DocumentUpdate
 from assistant.repository import IndexMismatch
 from test_pipeline_regressions import pipeline, URL, served_text

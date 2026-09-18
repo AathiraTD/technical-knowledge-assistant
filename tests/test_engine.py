@@ -24,10 +24,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.index import CHUNKING_VERSION
+from assistant.indexing.index import CHUNKING_VERSION
 from assistant import ollama                                      # noqa: E402
 from assistant.answer import Answer                               # noqa: E402
-from assistant.engine import MAX_WORDS, cap, Assistant, Reply, render, split_by_topic  # noqa: E402
+from assistant.engine import (  # noqa: E402
+    MAX_WORDS,
+    cap,
+    Assistant,
+    Reply,
+    render,
+    split_by_topic,
+)
 from assistant.model import (                                     # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Retrieved, Snapshot,
 )

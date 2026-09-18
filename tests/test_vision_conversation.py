@@ -42,8 +42,16 @@ from assistant.conversation import (                                # noqa: E402
     ConversationState, FactStatus, TurnInput,
 )
 from assistant.engine import Assistant                              # noqa: E402
-from assistant.index import CHUNKING_VERSION                        # noqa: E402
-from assistant.model import Caveat, Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
+from assistant.indexing.index import (  # noqa: E402
+    CHUNKING_VERSION,
+)
+from assistant.model import (  # noqa: E402
+    Caveat,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Snapshot,
+)
 from assistant.store import SQLiteKnowledgeRepository               # noqa: E402
 
 from test_engine import DIMS, quoting, unit                         # noqa: E402

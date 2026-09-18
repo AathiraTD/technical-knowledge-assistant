@@ -1,5 +1,5 @@
 """Text normalization may remove a nonempty PDF span completely."""
-from assistant.extract import _pdf_lines
+from assistant.indexing.extract import _pdf_lines
 
 
 def test_pdf_line_containing_only_invisible_unicode_is_not_evidence():

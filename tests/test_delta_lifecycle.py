@@ -25,8 +25,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import index                                    # noqa: E402
-from assistant.embedcache import EmbeddingCache                # noqa: E402
+from assistant.indexing import index
+from assistant.indexing.embedcache import EmbeddingCache                # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository          # noqa: E402
 
 PAGE = """<!doctype html><html><head><title>{title} | Lime Green</title></head>

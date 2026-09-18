@@ -43,7 +43,7 @@ flowchart LR
 
 ### Source release
 
-`python -m assistant.crawl --refresh` revalidates cached sources with HTTP
+`python -m assistant.indexing.crawl --refresh` revalidates cached sources with HTTP
 validators. A 304 reuses the body; a 200 is compared by hash. Transient network,
 429 and selected 5xx responses retry up to three times. Sitemap URLs, linked
 PDFs and redirects stay inside the configured publisher. Empty or malformed
@@ -127,11 +127,11 @@ separate work. The existing evaluation fixture remains identified as synthetic.
 ## Scheduled execution and failure handling
 
 ```sh
-python -m assistant.index
-python -m assistant.index --rebuild
-python -m assistant.pipeline --job refresh-2026-09-16 --refresh
-python -m assistant.pipeline
-python -m assistant.pipeline --status
+python -m assistant.indexing.index
+python -m assistant.indexing.index --rebuild
+python -m assistant.indexing.pipeline --job refresh-2026-09-16 --refresh
+python -m assistant.indexing.pipeline
+python -m assistant.indexing.pipeline --status
 ```
 
 Cron or Windows Task Scheduler supplies a unique period-based `--job` name for

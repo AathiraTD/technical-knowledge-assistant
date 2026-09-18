@@ -29,7 +29,7 @@ from bs4 import BeautifulSoup
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant.extract import (                                # noqa: E402
+from assistant.indexing.extract import (
     Section,
     _bold_sections,
     _faq_sections,

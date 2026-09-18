@@ -194,7 +194,7 @@ def main(argv=None) -> int:
         return 2
     snapshot = repo.snapshot()
     if snapshot is None:
-        print("no active index. Run: python -m assistant.index")
+        print("no active index. Run: python -m assistant.indexing.index")
         repo.close()
         return 2
 

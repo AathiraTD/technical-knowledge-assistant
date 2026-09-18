@@ -102,7 +102,7 @@ services:
 
   index-init:
     <<: *application
-    command: ["python", "-m", "assistant.index"]
+    command: ["python", "-m", "assistant.indexing.index"]
     depends_on:
       db:
         condition: service_healthy

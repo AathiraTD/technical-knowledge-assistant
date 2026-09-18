@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from . import observability as obs
-from .model import Chunk, Document
+from .. import observability as obs
+from ..model import Chunk, Document
 
 
 @dataclass

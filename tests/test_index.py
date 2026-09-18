@@ -33,10 +33,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import index                                       # noqa: E402
-from assistant.embedcache import EmbeddingCache                    # noqa: E402
-from assistant.extract import Section                              # noqa: E402
-from assistant.index import (                                      # noqa: E402
+from assistant.indexing import index
+from assistant.indexing.embedcache import EmbeddingCache                    # noqa: E402
+from assistant.indexing.extract import Section                              # noqa: E402
+from assistant.indexing.index import (
     HARD_MAX,
     MIN_CHARS,
     TARGET_CHARS,
@@ -143,7 +143,7 @@ def test_a_bullet_less_section_over_the_ceiling_splits_at_blank_lines_only():
 
 def test_every_passage_of_the_real_solo_datasheet_keeps_its_bullets_intact():
     """The section this rule was written for, checked against the sheet rather than against a fixture."""
-    from assistant.extract import extract_pdf
+    from assistant.indexing.extract import extract_pdf
 
     sheet = CACHE / "documents" / "solo-one-coat-lime-plaster-tds.pdf"
     if not sheet.exists():
