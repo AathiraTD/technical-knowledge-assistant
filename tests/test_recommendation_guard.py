@@ -320,8 +320,7 @@ def test_the_exemption_covers_every_product_the_caller_named(assistant, monkeypa
     misclassify_as(monkeypatch, und.Intent.LOOKUP)
     monkeypatch.setattr(ollama, "generate", recommending_but_well_cited("Duro"))
 
-    reply, _ = assistant.ask_turn(
-        turn("Compare Solo and Duro for backgrounds and application thickness."))
+    reply, _ = assistant.ask_turn(turn("Would Solo or Duro work on my brick wall?"))
     answer = reply.parts[0][1]
 
     assert not answer.refused, answer.text[:200]

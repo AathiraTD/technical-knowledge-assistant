@@ -1,0 +1,835 @@
+TECHNICAL KNOWLEDGE ASSISTANT
+Windows setup: ZIP file to local browser, with text and image support
+==================================================================
+
+1. OVERVIEW
+
+This guide runs the Lime Green Technical Knowledge Assistant locally on
+Windows. It uses Python, SQLite and Ollama. Questions are answered from the
+supplied knowledge sources, with citations and explicit refusals when the
+evidence is insufficient.
+
+The setup below enables image reading as well as text questions. Image
+reading is OFF by default in the application, so do not omit the environment
+settings in section 10.
+
+No Git checkout, Docker, PostgreSQL, Node.js, paid AI service or API key is
+needed for this local setup. Do not start the container stack as well.
+
+Run the PowerShell commands in order. Commands are indented; blocks labelled
+as file lists, example questions or expected output are for reference.
+Run each step successfully before continuing; if a command reports an
+error, use section 19 rather than skipping the step.
+
+This guide uses the current Python module paths. The supplied
+scripts\start-demo.ps1 still calls older paths, including assistant.ui,
+assistant.index and assistant.health, which no longer exist. Use the manual
+commands in this guide instead of that launcher.
+
+
+2. SYSTEM REQUIREMENTS
+
+- A Windows machine capable of running native Python and Ollama.
+- Python 3.13, using an installer appropriate for the machine's architecture.
+  The dependency build was recorded on Windows ARM64 with Python 3.13, and
+  CI also uses Python 3.13. Use a normal, non-free-threaded Python build.
+- The repository's measured CPU-only setup has 24 GB RAM and no graphics
+  card. Comparable or better resources are recommended; the project does
+  not establish a tested minimum RAM requirement.
+- Disk space for the extracted project, Python environment, model files
+  and generated index. The two documented model downloads total roughly
+  4 GB (about 3.4 GB plus 639 MB); this is NOT the total disk requirement.
+  Leave additional space for the software, caches and working files.
+- A current browser, such as Microsoft Edge, with JavaScript and cookies
+  enabled for the local application.
+- Internet access for installing Python/Ollama, downloading Python packages
+  and pulling the models. Once these and the supplied source data are
+  present, indexing and answering can run without an internet connection.
+  Ollama must still run locally. Opening cited website links needs internet.
+
+Important Python version detail: older project text and the preflight
+script say "3.11+". However, the pinned numpy==2.5.3 package declares
+Python >=3.12. Python 3.11 cannot install this complete dependency set.
+Python 3.13 is the recommended, verified version for these instructions.
+
+Expect CPU inference to be slow. A new text question can take tens of
+seconds to minutes; an image can take several minutes before the text
+answer is composed. A GPU is not required by the application.
+
+
+3. PREREQUISITES
+
+Install Python 3.13 from:
+
+    https://www.python.org/downloads/windows/
+
+Enable the Python launcher and the option to add Python to PATH if offered.
+After installation, close and reopen PowerShell so it sees the new commands.
+Confirm the installed version:
+
+    py -3.13 --version
+
+The result should start with "Python 3.13". If the launcher is unavailable
+but "python --version" reports Python 3.13, use "python" instead of
+"py -3.13" in the environment-creation command in section 6.
+
+Ollama is a separate Windows application, NOT a Python package. Its
+installation and model downloads are covered in sections 8 and 9.
+
+
+4. EXTRACTING THE ZIP
+
+In File Explorer, right-click the downloaded ZIP and select "Extract All".
+Extract the complete project to a folder you can write to. Do not run files
+inside the compressed ZIP, or extract only the assistant folder.
+
+Use a short local path if possible. For the examples below, the project
+root is:
+
+    C:\TKA\technical-knowledge-assistant
+
+Your ZIP may contain an extra enclosing folder. The correct project root is
+the folder containing requirements.txt, README.md and this SETUP.txt.
+
+Keep the supplied layout intact, including:
+
+    assistant\                  Application code
+    config\                     Routing, vocabulary and source configuration
+    db\                         Database schemas
+    scripts\                    Operational helpers
+    data\cache\pages\            Cached HTML sources
+    data\cache\documents\        Cached PDF sources
+    data\cache\crawl-log.json    Source inventory used by the indexer
+    data\cache\versions.json     Source version/hash records
+    data\embeddings.db          Reusable embedding cache, not the live index
+    data\staff\                 Optional approved staff-source directory
+    eval\fixtures\              Evaluation fixture used during indexing
+    eval\fixtures\images\       Sample images for the image walkthrough
+    tests\                      Optional automated checks
+
+The standard source archive does not include data\index\knowledge.db:
+data\index is generated and excluded from version control. Section 11
+builds it. A separately prepared ZIP might include a generated database,
+but its presence alone is not proof that it matches this code and model.
+
+If the cached sources are absent, use the recovery instructions in section
+11. Do not substitute an empty database or fabricate source files.
+
+
+5. OPENING A TERMINAL
+
+Open Windows PowerShell or a PowerShell tab in Windows Terminal. An
+administrator terminal is not normally needed after installing the tools.
+
+Change to the extracted project root, replacing this path with your own:
+
+    Set-Location "C:\TKA\technical-knowledge-assistant"
+    Get-Location
+    Test-Path .\requirements.txt
+
+The last command must print True. Keep this as the application terminal.
+All subsequent project commands assume this working directory.
+
+If Ollama needs to be started manually, use a SECOND PowerShell terminal
+for "ollama serve". Leave the application terminal available for Python.
+
+
+6. CREATING / ACTIVATING THE PYTHON ENVIRONMENT
+
+Create a fresh environment using the installed Python 3.13:
+
+    py -3.13 -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+
+The prompt should now begin with (.venv). Verify the selected interpreter:
+
+    python --version
+    python -c "import sys; print(sys.executable)"
+
+The executable path should end in this project's
+.venv\Scripts\python.exe. Use a new environment on this machine, not a
+.venv folder copied from another computer.
+
+If PowerShell blocks Activate.ps1, either use the non-activation alternative
+below or, where local policy permits, allow scripts for this terminal only:
+
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+    .\.venv\Scripts\Activate.ps1
+
+This does not change machine-wide policy. Do not override an organisation's
+managed policy. Activation is a convenience, not a runtime requirement:
+without activation, replace every subsequent "python" command with
+".\.venv\Scripts\python.exe", for example:
+
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+
+7. INSTALLING PYTHON DEPENDENCIES
+
+With the environment active, run:
+
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
+    python -m pip check
+
+The final command should report "No broken requirements found".
+
+requirements.txt installs all six direct runtime dependencies:
+
+    httpx==0.28.1             HTTP access to Ollama and the source crawler
+    beautifulsoup4==4.15.0    HTML parsing
+    lxml==6.1.3              HTML parser backend
+    pymupdf==1.28.2          PDF extraction
+    numpy==2.5.3             Vector operations / SQLite retrieval
+    langgraph==1.2.11        Conversation orchestration
+
+pip also installs their required transitive dependencies automatically,
+including LangGraph's supporting packages. Do not install only the six
+top-level packages with dependency resolution disabled. The direct
+requirements are pinned; transitive versions are resolved by pip.
+
+SQLite, the web server and upload parsing use Python's standard library.
+There is no separate SQLite server, front-end build, Streamlit installation,
+Ollama Python SDK or additional image-processing library to install.
+
+requirements-dev.txt adds playwright==1.62.0 and includes requirements.txt.
+It is NOT needed for normal text/image use. pytest and coverage are separate
+test tools, not installed by either requirements file; see section 20.
+The PostgreSQL adapter's psycopg dependency is also optional and not needed
+for the SQLite setup here.
+
+An initial import/dependency check is available:
+
+    python scripts\preflight.py
+
+At this stage it may correctly report that Ollama or the index is missing.
+Its successful exit status only proves the Python/dependency checks passed;
+it does not replace the full readiness check in section 12.
+
+
+8. INSTALLING OLLAMA
+
+Download and install the Windows application from:
+
+    https://ollama.com/download/windows
+
+Start Ollama from the Start menu. Reopen PowerShell if "ollama" is not yet
+recognised, then return to the project and reactivate .venv.
+
+Check the CLI and the local service:
+
+    ollama --version
+    $env:OLLAMA_HOST = "http://127.0.0.1:11434"
+    Invoke-RestMethod -Uri "$env:OLLAMA_HOST/api/tags"
+
+The service should return a models response, which can initially be empty.
+The repository does not pin an Ollama installer version; use a current
+version that supports the required models and structured image responses.
+
+If the service is not reachable, run this in the second terminal:
+
+    $env:OLLAMA_HOST = "http://127.0.0.1:11434"
+    ollama serve
+
+Leave that terminal open. If it reports that the address is already in use,
+check /api/tags again: the Ollama desktop application may already be serving.
+Do not start a second server when the first is responding.
+
+Ollama listens on port 11434. This is not the assistant's browser port.
+
+
+9. DOWNLOADING REQUIRED MODELS
+
+In the application terminal, with Ollama running:
+
+    ollama pull qwen3.5:4b
+    ollama pull qwen3-embedding:0.6b
+    ollama list
+
+Wait for BOTH downloads to finish. Check that these exact tags appear:
+
+    qwen3.5:4b                 Text generation AND image perception
+    qwen3-embedding:0.6b       Retrieval embeddings, configured as 1024 values
+
+No third vision model is needed for this setup: qwen3.5:4b is multimodal
+and is used for both roles. Pulling it once supplies both.
+
+The embedding tag is the repository's development default, not a claim
+that a final comparative model selection has been completed. Keep this
+default for the supplied embedding cache and the reference corpus counts.
+
+Do not substitute the text-only qwen3:4b-instruct fallback for the vision
+model. A different embedding model or dimension requires reindexing; simply
+renaming a model or editing the database does not make it compatible.
+
+
+10. CONFIGURATION / ENVIRONMENT VARIABLES
+
+Set the following in the SAME application terminal used to build and start
+the assistant, while still in the project root:
+
+    $env:OLLAMA_HOST = "http://127.0.0.1:11434"
+    $env:GENERATION_MODEL = "qwen3.5:4b"
+    $env:EMBED_MODEL = "qwen3-embedding:0.6b"
+    $env:EMBED_DIMENSIONS = "1024"
+    $env:VISION_MODEL = "qwen3.5:4b"
+    $env:ASSISTANT_VISION_DEMO = "1"
+    $env:ASSISTANT_PHRASING = "0"
+    $env:OLLAMA_NUM_CTX = "8192"
+    $env:OLLAMA_KEEP_ALIVE = "30m"
+    $env:ASSISTANT_EMBEDDING_CACHE = Join-Path (Get-Location) "data\embeddings.db"
+    $env:ASSISTANT_POSTGRES_DSN = ""
+    $env:ASSISTANT_CHECKPOINT_DSN = ""
+    $env:OTEL_EXPORTER_OTLP_ENDPOINT = ""
+
+These settings make the local profile explicit:
+
+- ASSISTANT_VISION_DEMO=1 enables actual image reading. Unset or 0 means
+  images are acknowledged but not perceived; the user is asked for details.
+- ASSISTANT_PHRASING=0 is recommended for the first run and CPU use. This
+  disables only the optional extra wording-polish model call, not normal
+  text generation, citations or image support. Set it to 1 before starting
+  the server if you want the extra verified phrasing pass and accept the
+  added latency. Its default is off.
+- OLLAMA_NUM_CTX controls the shared text/vision context window. There is
+  no separate VISION_NUM_CTX environment setting to configure.
+- OLLAMA_KEEP_ALIVE keeps a used model resident for up to 30 minutes.
+- ASSISTANT_EMBEDDING_CACHE points to the supplied data\embeddings.db.
+  This is also the code's default; it is NOT the live knowledge database.
+- Empty ASSISTANT_POSTGRES_DSN selects SQLite. No database password is
+  required. Empty ASSISTANT_CHECKPOINT_DSN selects in-memory graph
+  checkpoints; the PostgreSQL checkpointer is not available in this build.
+- Empty OTEL_EXPORTER_OTLP_ENDPOINT disables optional telemetry export.
+  Hosted LangSmith/LangChain tracing is disabled by the application.
+
+Other optional vision overrides exist, but leave their defaults unchanged:
+
+    VISION_TIMEOUT              600 seconds per perception request
+    VISION_MAX_IMAGE_BYTES      8388608 (8 MiB) per image
+    VISION_MAX_TOKENS           900
+    VISION_MAX_OBSERVATIONS     6
+    VISION_REPEAT_PENALTY       1.15
+
+Optional telemetry labels are OTEL_SERVICE_NAME, OTEL_SERVICE_VERSION and
+OTEL_DEPLOYMENT_ENVIRONMENT. They are not required for local operation.
+The application's port is a --port command-line option, not APP_PORT.
+
+IMPORTANT: the Python application does NOT load .env files. Copying
+.env.example to .env does not configure a local "python -m" command.
+The example files also contain container-oriented addresses such as
+http://ollama:11434, which are wrong for this native Windows setup.
+
+PowerShell $env: assignments affect this terminal and processes started
+from it only. They do not reconfigure an already running server and do not
+survive closing the terminal. Repeat this section in a new terminal.
+
+
+11. KNOWLEDGE DATA / INDEX SETUP
+
+Check the supplied inputs:
+
+    Test-Path .\data\cache\crawl-log.json
+    Test-Path .\data\cache\versions.json
+    Test-Path .\data\cache\pages
+    Test-Path .\data\cache\documents
+    Test-Path .\data\embeddings.db
+    Test-Path .\eval\fixtures
+
+For the standard complete bundle these should all print True.
+
+Build the live knowledge index:
+
+    python -m assistant.indexing.index
+
+This reads the cached source files, extracts/chunks them, reuses valid
+cached embeddings and publishes a SQLite index. It does NOT crawl the
+live website. Ollama must be reachable with the embedding model pulled,
+even when every embedding is already cached.
+
+Generated outputs include:
+
+    data\index\knowledge.db          Live knowledge database
+    data\index\ingestion-report.json Build counts, timings and failures
+    data\cache\versions\             Content-addressed source archive
+
+The indexer creates its output directories. The project folder must remain
+writable. Keep the source cache and generated version archive alongside
+the database; do not delete originals just because indexing succeeded.
+
+The supplied reference corpus produces 95 documents: 94 published
+documents plus one staff-only evaluation fixture, and 552 passages. The
+default public UI cannot retrieve the staff-only fixture. A clean build
+checked for this guide used 552 cached embeddings, computed none, and
+reported zero failed documents. Timings vary by machine.
+
+Inspect the report:
+
+    $report = Get-Content .\data\index\ingestion-report.json -Raw | ConvertFrom-Json
+    $report | Select-Object documents, public_documents, evaluation_fixtures, chunks, embeddings_cached, embeddings_computed, total_seconds
+    $report.delta
+
+For an unchanged supplied bundle, expect documents=95, chunks=552 and
+delta.failed=0. Changed source data or explicitly approved staff imports
+can change the counts. Unexpected lower counts or failed documents need
+investigation even if the application reports READY.
+
+The normal command is incremental. Repeating it is safe; unchanged
+sources are not unnecessarily reprocessed. To force reprocessing:
+
+    python -m assistant.indexing.index --rebuild
+
+Stop the UI first for this simple local recovery workflow, run the rebuild,
+then run readiness again. Rebuild retains version history; do not delete
+knowledge.db as the routine way to rebuild.
+
+If data\embeddings.db is missing, the indexer can regenerate embeddings
+through local Ollama, but this can take substantially longer on CPU.
+This cache is not a substitute for the cached HTML/PDF source files.
+
+If the source cache or inventory is missing, first obtain the complete,
+authorised data bundle from the project provider. The code-only ZIP is not
+enough for the offline path. If fetching the publisher's current website
+is authorised and internet access is available, the alternative is:
+
+    python -m assistant.indexing.crawl --refresh
+    python -m assistant.indexing.index
+
+Only index after a successful crawl. This obtains CURRENT sources, so it
+may not reproduce the supplied corpus, counts or historical evaluations.
+Website availability and permission to redistribute downloaded material
+are separate from the application's ability to fetch it.
+
+
+12. HEALTH / READINESS CHECK
+
+With section 10's settings still active:
+
+    python scripts\preflight.py
+    python -m assistant.infrastructure.health
+
+Do not start the UI until the second command begins with READY and exits
+successfully. It verifies the store, active snapshot, passages, embedding
+model/dimension/chunking compatibility, reachable Ollama and pulled models.
+Because vision is enabled, a pulled vision model is also required.
+
+For machine-readable details and the exit code:
+
+    python -m assistant.infrastructure.health --json
+    $LASTEXITCODE
+
+Expect ready=true, store="sqlite", documents=95, chunks=552, embedding
+dimensions=1024, and vision.required=true with vision.pulled=true for the
+unchanged reference build. A successful command exits with 0.
+
+Readiness checks model availability, not a full generated answer or a
+successful interpretation of every image. Complete sections 15 and 16
+to verify those user-facing paths.
+
+If Ollama is still starting, a bounded readiness wait is available:
+
+    python -m assistant.infrastructure.health --wait 60 --interval 2
+
+
+13. STARTING THE APPLICATION
+
+Start in the same configured, activated terminal:
+
+    python -m assistant.interfaces.ui
+
+Keep the terminal open. A successful start prints:
+
+    Lime Green technical assistant on http://127.0.0.1:8765/
+
+The process remains running and opens the default browser automatically.
+Operational JSON events appear in the terminal; this is normal.
+
+To avoid automatic browser opening:
+
+    python -m assistant.interfaces.ui --no-browser
+
+To use a different port if 8765 is occupied:
+
+    python -m assistant.interfaces.ui --port 8766
+
+Use the matching port in every browser/readiness URL. The default bind
+address is 127.0.0.1, which keeps the application local to this machine.
+The default audience is public; no login is needed. Do not expose this
+demonstration server to the internet or enable staff access unnecessarily.
+
+
+14. OPENING THE WEB UI
+
+If a browser did not open, enter this exact address in its address bar:
+
+    http://127.0.0.1:8765/
+
+Use http, not https. The page is titled "Lime Green technical assistant".
+It contains a question box, a "+" image-attachment button, a send-arrow
+button and "New chat". The footer shows the index counts and model tags.
+
+While the server runs, a second PowerShell terminal can check:
+
+    Invoke-RestMethod -Uri "http://127.0.0.1:8765/health"
+    Invoke-RestMethod -Uri "http://127.0.0.1:8765/ready"
+
+/health returns OK when the process is alive. /ready returns readiness
+JSON with HTTP 200 when ready, or HTTP 503 when a required check fails.
+For the readable table, open:
+
+    http://127.0.0.1:8765/ready?format=text
+
+The terminal readiness command does not itself start a web server.
+
+
+15. USING TEXT QUESTIONS
+
+Type a question into the question box and press Enter or click the send
+arrow. For an initial question grounded in the supplied corpus, try:
+
+    How much water does Solo Onecoat need per bag?
+
+Wait for the answer. "Searching Lime Green sources" is the working
+indicator, not an error. The first model-backed question may be much
+slower than repeated questions.
+
+Check for numbered citations and open "Sources" to see document names,
+sections and links. Replies may ask for missing details, quote published
+guidance, or refuse an unsupported request. A refusal or human hand-off
+is intended behaviour, not necessarily a failed setup.
+
+Reply to a clarification in the same chat. Use "New chat" before changing
+to a different wall or scenario so prior details are not carried over.
+For optional routing diagnostics, open the UI at:
+
+    http://127.0.0.1:8765/?v=1
+
+
+16. USING IMAGE + TEXT QUESTIONS
+
+Confirm the running server was started with ASSISTANT_VISION_DEMO=1 and
+VISION_MODEL=qwen3.5:4b. Changing another terminal's variables after startup
+does not enable vision in the existing process.
+
+1) Click "New chat".
+2) Click the "+" attachment button beside the question box.
+3) Select a clear JPG/JPEG or PNG photograph. A supplied example is:
+
+       eval\fixtures\images\brick-exposed-clear.jpg
+
+4) Confirm the selected filename is listed beside the input.
+5) Enter accompanying text, for example:
+
+       This is an internal wall. What can you observe in this photograph,
+       and what further details do you need before discussing a lime finish?
+
+6) Click the send arrow or press Enter once. An image without a nonempty
+   text question will not be submitted by this UI.
+7) Wait while the page says it is reading the photograph and searching
+   sources. Do not repeatedly resubmit the same request.
+
+The response can show observations, uncertainty and things that cannot be
+determined from the photograph, followed by grounded guidance or a request
+for more detail. The application does not infer inside/outside from an
+image, and an intact finish may hide the substrate: state known details
+in your text. Diagnosis still requires a human hand-off.
+
+Upload limits in this build:
+
+- Up to 4 images per request; excess images are not read and are reported.
+- Up to 12 images per conversation; use a genuine new chat for a new case.
+- At most 8 MiB per image for perception.
+- At most 12 MiB for the ENTIRE HTTP upload, including multipart overhead.
+  Four images of 8 MiB each will therefore not fit in one request.
+- The upload boundary recognises JPEG, PNG, GIF, BMP and WebP signatures.
+  JPG/PNG is the simplest choice for the walkthrough. HEIC, PDF, SVG or a
+  renamed non-image file is not a supported photograph upload.
+
+A smaller, clear image reduces unnecessary upload work. Perception has a
+600-second default timeout per request to the vision model, and answering
+can add more time. Recognition is not guaranteed: an unreadable, uncertain
+or rejected image must produce a limitation rather than an invented fact.
+
+If the response explicitly says image reading is switched off, stop the
+server, repeat section 10, check readiness, then restart it. Seeing an
+attachment filename alone does not prove the model read the image.
+
+
+17. STOPPING THE APPLICATION
+
+In the terminal running the UI, press Ctrl+C. Wait for the process to stop
+and the PowerShell prompt to return. You can then run:
+
+    deactivate
+
+Stopping the UI does not stop Ollama. If you started "ollama serve" in
+another terminal, press Ctrl+C there separately when finished. If the
+desktop application started it, quit Ollama from its tray menu if desired.
+
+Do not delete the database, source archive, environment or model files as
+part of shutdown. Keep the complete project folder for the next run.
+
+
+18. RESTARTING THE APPLICATION
+
+In a new PowerShell terminal:
+
+    Set-Location "C:\TKA\technical-knowledge-assistant"
+    .\.venv\Scripts\Activate.ps1
+
+Start Ollama if it is not already running. Repeat the environment block in
+section 10, then:
+
+    python -m assistant.infrastructure.health
+    python -m assistant.interfaces.ui
+
+There is no need to reinstall packages, repull existing models or rebuild
+an unchanged compatible index on every start. If readiness reports an
+index mismatch, follow section 11 first.
+
+Use "New chat" for a clean scenario after restarting. Graph checkpoints
+are in memory even though the UI also stores session records locally;
+do not rely on seamless restoration of an interrupted conversation.
+
+
+19. TROUBLESHOOTING
+
+Python is missing, opens the Microsoft Store, or is the wrong version:
+    Install Python 3.13, reopen PowerShell and check "py -3.13 --version".
+    Create the environment with that explicit version. After activation,
+    verify sys.executable as shown in section 6.
+
+Activate.ps1 cannot run:
+    Use the process-scoped policy setting in section 6 where permitted,
+    or call .\.venv\Scripts\python.exe directly. No administrator-wide
+    execution-policy change is required.
+
+pip reports "No matching distribution" or attempts a compiler build:
+    Confirm Python 3.13 and the correct Windows architecture, upgrade pip,
+    and use the pinned requirements file. Python 3.11 is insufficient for
+    this NumPy pin. Check that your package index can supply these exact
+    versions; do not silently substitute older packages. For a restricted
+    network, obtain the approved proxy/certificate or package mirror
+    configuration from its administrator; do not disable TLS validation.
+
+ModuleNotFoundError for httpx, bs4, lxml, pymupdf, numpy or langgraph:
+    Run "python -m pip install -r requirements.txt" in the active environment,
+    then "python -m pip check" and "python scripts\preflight.py".
+    The import name bs4 is provided by beautifulsoup4.
+
+Cannot import assistant, or config/db files cannot be found:
+    Run from the extracted root that contains requirements.txt and assistant.
+    Keep the whole directory structure. Do not run from inside assistant.
+
+The startup helper reports old assistant.* modules do not exist:
+    This ZIP's scripts\start-demo.ps1 has stale imports/module commands.
+    Use assistant.indexing.index, assistant.infrastructure.health and
+    assistant.interfaces.ui exactly as shown here. Do not install an
+    unrelated package named "assistant" to work around this.
+
+Ollama is not recognised or connection to port 11434 is refused:
+    Install/start Ollama, reopen the terminal and run "ollama --version".
+    Confirm OLLAMA_HOST=http://127.0.0.1:11434, not http://ollama:11434.
+    Start "ollama serve" in a second terminal if needed and check /api/tags.
+
+A model is missing, or Ollama returns a model-not-found error:
+    Run "ollama list" and pull the exact missing tag:
+
+        ollama pull qwen3.5:4b
+        ollama pull qwen3-embedding:0.6b
+
+    If an image request says the model cannot accept images or structured
+    output, update Ollama and confirm VISION_MODEL=qwen3.5:4b.
+
+NOT READY / no active snapshot / knowledge.db missing:
+    Run "python -m assistant.indexing.index", then readiness again.
+    An empty database created during a check is not a populated index.
+
+Embedding model, dimensions or chunking do not match:
+    Reapply section 10, then "python -m assistant.indexing.index --rebuild".
+    Do not edit snapshot metadata to hide a mismatch.
+
+Missing cached source, hash mismatch, failed extraction or low counts:
+    Read data\index\ingestion-report.json and, if written,
+    data\index\ingestion-failure.json. Restore the complete approved source
+    bundle or use the authorised refresh route in section 11. A partial
+    index with some passages is not proof that all sources were indexed.
+
+Permission error / database locked:
+    Ensure the project is in a writable local folder. Stop duplicate UI or
+    index processes and close database tools before retrying. Do not delete
+    .db-wal or .db-shm files while a process is using the database.
+
+Address already in use / Windows socket error 10048:
+    Stop the UI instance you started, or use "--port 8766" and browse to
+    http://127.0.0.1:8766/. Do not terminate unrelated processes.
+
+Browser cannot connect:
+    Check the UI terminal is still running and use the exact printed http
+    address and port. Passing the Python readiness command alone does not
+    mean a web server is running. Check /health in a second terminal.
+
+Images are ignored or image reading is off:
+    Set ASSISTANT_VISION_DEMO=1 BEFORE starting the UI, restart it, and
+    verify vision.required=true in readiness. Add a text question and
+    check the selected filename before sending.
+
+Upload rejected / HTTP 413 / response is not valid JSON after upload:
+    Reduce the total upload below 12 MiB including overhead, keep each
+    image below 8 MiB, and try one small JPG/PNG. A rejected HTTP upload
+    can surface as a browser error rather than as an answer.
+
+Image format rejected:
+    Export the photograph as JPG or PNG. Renaming a HEIC/PDF file to .jpg
+    does not convert it. Check any upload notes in the response.
+
+Answers or images take a long time:
+    Allow the first request to finish and inspect the UI terminal.
+    Keep ASSISTANT_PHRASING=0, submit one image at a time and avoid running
+    model-heavy tests simultaneously. "ollama ps" shows loaded models,
+    but a loaded model alone does not prove a request has completed.
+    If a request fails or times out, use the reported error; a refusal is
+    preferable to forcing an unsupported answer.
+
+Unexpected PostgreSQL / checkpointer errors:
+    Clear ASSISTANT_POSTGRES_DSN and ASSISTANT_CHECKPOINT_DSN as in section
+    10. PostgreSQL is not required here, and a PostgreSQL graph
+    checkpointer is dependency-blocked in this build.
+
+
+20. OPTIONAL DEVELOPER / TEST COMMANDS
+
+These checks are not prerequisites for ordinary browser use. Stop the UI
+before longer test/evaluation runs to avoid competing for local inference.
+Use the same project root and active Python environment.
+
+A. Deterministic Python checks
+
+Install the test tools explicitly (as the repository's CI does):
+
+    python -m pip install pytest coverage
+
+Targeted readiness and image-boundary checks:
+
+    python -m pytest -q tests\test_health.py tests\test_readiness_endpoint.py tests\test_vision_flag.py tests\test_vision_ui.py
+
+Acceptance-boundary tests:
+
+    python -m pytest -q tests -k acceptance -rs
+
+Full Python suite:
+
+    python -m pytest -q tests -rs
+
+The ordinary deterministic tests use fixtures/mocked model calls.
+Browser tests and real vision tests are opt-in. PostgreSQL contract
+variants skip when no test database DSN is provided. Read the skip/failure
+summary; skipped tests are not evidence that their paths passed.
+
+B. Optional browser smoke checks
+
+Install the separate browser-test dependencies AND the Chromium binary:
+
+    python -m pip install -r requirements-dev.txt
+    python -m playwright install chromium
+    $env:ASSISTANT_E2E = "1"
+    python -m pytest -q tests\e2e -m smoke -rs
+    Remove-Item Env:ASSISTANT_E2E
+
+pytest from A is also required. These tests launch their own local UI.
+Ollama and a ready index are required; the smoke selection avoids the
+slower composed-answer/image journeys. Browser automation is a diagnostic
+check, not a guarantee of live answer quality.
+
+C. Optional real-model checks
+
+Single question through the CLI:
+
+    python -m assistant.interfaces.cli -q "How much water does Solo Onecoat need per bag?"
+
+Gold-scenario evaluation (may take a long time on CPU):
+
+    python -m eval.run --gold-only
+
+This writes reports under eval\results, including gold.json, gold.md and
+gold-transcript.txt. It uses real models; results must be inspected rather
+than assumed to pass.
+
+Real vision contract checks with the supplied photographs:
+
+    $env:ASSISTANT_VISION_LIVE = "1"
+    python -m pytest -q tests\test_vision_live.py -rs
+    Remove-Item Env:ASSISTANT_VISION_LIVE
+
+These may take many minutes and can skip on model failure or timeout.
+No test run should be described as a successful live image check if the
+relevant tests were skipped.
+
+D. Supplied operational helpers
+
+- scripts\preflight.py: runnable Python/dependency inventory and basic
+  Ollama/index presence report.
+- scripts\start-demo.ps1: intended startup wrapper with -CheckOnly,
+  -BuildIndex, -Rebuild, -VisionDemo, -Port, -Audience and -NoBrowser;
+  its old module references make it unsuitable for this ZIP's main flow.
+- scripts\verify-docker-deployment.ps1 and its .sh counterpart: separate
+  container checks, not needed for native Windows setup. Deployment files
+  also retain old entry-point references; they are not an alternative
+  verified startup route in this guide.
+- scripts\benchmark.py: optional load/latency tooling, not a dependency or
+  prerequisite for starting the application.
+
+Optional PostgreSQL work requires a real PostgreSQL/pgvector service and
+the adapter dependency used by CI:
+
+    python -m pip install "psycopg[binary]==3.3.3"
+
+Do not set a production database DSN for test runs. This is a separate
+deployment/test task; it is not required to complete this guide.
+
+
+21. QUICK START SUMMARY
+
+Prerequisites: Python 3.13 and Ollama installed; the complete ZIP extracted;
+Ollama running. Replace the path below with your extracted project root.
+Run each group successfully before proceeding.
+
+Create the environment and install all runtime Python packages:
+
+    Set-Location "C:\TKA\technical-knowledge-assistant"
+    py -3.13 -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
+    python -m pip check
+
+Configure local text + image use and pull the two required models:
+
+    $env:OLLAMA_HOST = "http://127.0.0.1:11434"
+    $env:GENERATION_MODEL = "qwen3.5:4b"
+    $env:EMBED_MODEL = "qwen3-embedding:0.6b"
+    $env:EMBED_DIMENSIONS = "1024"
+    $env:VISION_MODEL = "qwen3.5:4b"
+    $env:ASSISTANT_VISION_DEMO = "1"
+    $env:ASSISTANT_PHRASING = "0"
+    $env:OLLAMA_NUM_CTX = "8192"
+    $env:OLLAMA_KEEP_ALIVE = "30m"
+    $env:ASSISTANT_EMBEDDING_CACHE = Join-Path (Get-Location) "data\embeddings.db"
+    $env:ASSISTANT_POSTGRES_DSN = ""
+    $env:ASSISTANT_CHECKPOINT_DSN = ""
+    $env:OTEL_EXPORTER_OTLP_ENDPOINT = ""
+    ollama pull qwen3.5:4b
+    ollama pull qwen3-embedding:0.6b
+    ollama list
+
+Build, verify, then start:
+
+    python -m assistant.indexing.index
+    python -m assistant.infrastructure.health
+    python -m assistant.interfaces.ui
+
+Only proceed to the UI command after readiness reports READY.
+
+Open http://127.0.0.1:8765/. Ask a text question, then use "+" to attach
+a JPG/PNG and send it with a text question. Confirm cited text responses
+and an image observation/limitation response. Press Ctrl+C in the
+application terminal to stop.
