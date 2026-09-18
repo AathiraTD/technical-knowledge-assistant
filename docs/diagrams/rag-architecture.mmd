@@ -1,0 +1,114 @@
+---
+title: Technical Knowledge Assistant — RAG architecture
+---
+flowchart LR
+    classDef input fill:#fff7ed,stroke:#fb923c,color:#7c2d12,stroke-width:2px
+    classDef det fill:#fffbeb,stroke:#d97706,color:#92400e,stroke-width:2px
+    classDef model fill:#f5f3ff,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef store fill:#ecfeff,stroke:#0891b2,color:#155e75,stroke-width:2px
+    classDef good fill:#f0fdf4,stroke:#16a34a,color:#166534,stroke-width:2px
+    classDef stop fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    classDef orch fill:#eff6ff,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+
+    DOCS["Published technical content<br/>Datasheets · system guides · knowledge-base articles · FAQs"]
+    QUESTION["Customer question<br/>Includes audience: public · trade · staff"]
+
+    subgraph INDEXING["1 · INDEXING — publish trusted, searchable evidence"]
+        direction TB
+        FETCH["Detect content changes<br/>Use site validators; confirm with SHA-256"]:::det
+        ORIGINALS[(Archive original files<br/>Content-addressed · immutable)]
+        DELTA["Identify the release delta<br/>New · changed · withdrawn; skip unchanged files"]:::det
+        CHUNK["Create labelled passages<br/>Keep headings and lists intact<br/>Add product · audience · authority · caveats"]:::det
+        EMBED["Create search vectors<br/>Reuse cached embeddings when unchanged"]:::model
+        PUBLISH["Publish one complete release<br/>One live version; retain history"]:::det
+    end
+
+    REPO[(Knowledge store<br/>Passages · vectors · versions · caveats · release history)]
+
+    subgraph RETRIEVAL["2 · RETRIEVAL — resolve the request and find evidence"]
+        direction TB
+        VISION["Read photographs safely<br/>Return observations and confidence, not product names"]:::model
+        RESOLVE["Resolve the request<br/>Current message overrides history and photo findings"]:::orch
+        INTENT{"Classify the request<br/>Recommendation or factual lookup?"}:::det
+        CACHE[(Exact-answer cache<br/>Question · audience · release · model · provenance)]
+        GATE{"Policy gate<br/>Does this require a human?"}:::det
+        RETRIEVE["Search allowed evidence<br/>Live release · audience filter · authority-aware ranking"]:::det
+        LEXICAL["Check requested terms<br/>Find literal keyword evidence"]:::det
+        SUFFICIENT{"Evidence sufficient to recommend?<br/>Check each product and property"}:::det
+    end
+
+    subgraph GENERATION["3 · GENERATION — create, verify, and safely release an answer"]
+        direction TB
+        ROUTE{"Select the safe route<br/>Quote · compose · ask back · refer · decline"}:::det
+        PROMPT["Build a bounded prompt<br/>Approved passages only · cite every claim"]:::det
+        COMPOSE["Draft the response<br/>Local LLM · fixed settings · no new facts"]:::model
+        VERIFY{"Verify the draft<br/>Citations · figures · conditions · product scope"}:::det
+        CAVEATS["Attach required caveats<br/>Add document warnings in code"]:::det
+        CONTAIN{"Contain unapproved recommendations<br/>Every named product must pass this turn"}:::det
+    end
+
+    RESPONSE["Cited response<br/>Sources · assumptions · caveats · next step"]
+    HANDOFF{"Safe hand-off<br/>Explain the gap · quote published facts · share contact path"}
+    AUDIT[(Audit record<br/>Release · route · passages · versions · checks)]
+
+    class DOCS,QUESTION input
+    class REPO,CACHE,AUDIT,ORIGINALS store
+    class RESPONSE good
+    class HANDOFF stop
+
+    DOCS --> FETCH
+    FETCH -->|original file| ORIGINALS
+    FETCH -->|content hashes| DELTA
+    ORIGINALS -->|archived source| CHUNK
+    DELTA -->|new and changed only| CHUNK
+    CHUNK -->|labelled passages| EMBED
+    EMBED -->|checked vectors| PUBLISH
+    PUBLISH -->|active release| REPO
+    REPO -.->|live content hashes| DELTA
+
+    QUESTION --> RESOLVE
+    QUESTION -->|photographs| VISION
+    VISION -->|observations only| RESOLVE
+    RESOLVE -->|resolved request| INTENT
+    INTENT -->|recommendation| RETRIEVE
+    INTENT -->|factual request| CACHE
+    CACHE -->|exact match| RESPONSE
+    CACHE -->|new question| GATE
+    GATE -->|human-owned topic| HANDOFF
+    GATE -->|answerable| RETRIEVE
+    REPO -->|allowed passages| RETRIEVE
+    RETRIEVE -->|best evidence| LEXICAL
+    LEXICAL -->|recommendation| SUFFICIENT
+    LEXICAL -->|factual request| ROUTE
+
+    SUFFICIENT -->|supported products| PROMPT
+    SUFFICIENT -->|insufficient evidence| HANDOFF
+    ROUTE -->|quote or ask back| CAVEATS
+    ROUTE -->|compose| PROMPT
+    ROUTE -->|refer or decline| HANDOFF
+    PROMPT -->|evidence + instructions| COMPOSE
+    COMPOSE -->|draft| VERIFY
+    VERIFY -->|pass| CAVEATS
+    VERIFY -->|fail closed| HANDOFF
+    CAVEATS --> CONTAIN
+    CONTAIN -->|approved products only| RESPONSE
+    CONTAIN -->|unapproved product| HANDOFF
+    RESPONSE --> AUDIT
+    HANDOFF --> AUDIT
+
+    subgraph LEGEND["What the colours and shapes mean"]
+        direction TB
+        LINPUT["Input"]:::input
+        LPROCESS["System rule / process"]:::det
+        LMODEL["AI model"]:::model
+        LSTORE[(Stored data)]
+        LDECISION{"Decision / gate"}:::det
+        LSUCCESS["Response"]:::good
+        LEXCEPTION{"Safe hand-off"}:::stop
+        LINPUT ~~~ LPROCESS ~~~ LMODEL ~~~ LSTORE ~~~ LDECISION ~~~ LSUCCESS ~~~ LEXCEPTION
+    end
+
+    class LSTORE store
+    AUDIT ~~~ LEGEND
+
+    linkStyle default stroke:#64748b,stroke-width:1.5px
