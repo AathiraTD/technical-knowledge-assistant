@@ -212,9 +212,9 @@ Four things to say out loud from this diagram:
 - **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose). Product-scope correctness is verified by check 7. A confident retrieval and citation are not enough.
 - **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
 
-## 3. Multimodal roadmap — not built
+## 3. Multimodal perception — built and gated
 
-Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. The prototype detects a photograph, says it cannot see it, and hands over (DECISIONS 16). This is what reading them would look like, and the whole of it is roadmap.
+Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. **Vision perception is built and testable** (assistant/vision.py); it is disabled by default via the `ASSISTANT_VISION_DEMO=1` capability flag because latency on CPU (191.9s per image) is prohibitive for a demonstration. When enabled, the architecture below is fully functional. Production roadmap items (fine-tuning on failure library, hosted inference, browser-based UI) remain.
 
 Three properties make it consistent with what is already built rather than a parallel system:
 
@@ -306,7 +306,7 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Identity and audience** | Roadmap | Resolves the caller to an audience set — public, trade or staff; anonymous gets public only |
 | **Serving layer** | Roadmap | Generation queue with a visible wait, per-session rate limiting, extract-only degradation under load |
 | **Channel adapters** | Roadmap | Website widget, CRM, training platform — calling the engine as a library |
-| **Vision perception** | Roadmap | Reads uploaded photographs into structured observations — value, confidence, source image, region, and an explicit list of what cannot be determined. Fills slots on the existing router; never names a product. See DECISIONS 16.1 |
+| **Vision perception** | Built, gated | Reads uploaded photographs into structured observations — value, confidence, source image, region, and an explicit list of what cannot be determined. Fills slots on the existing router; never names a product. Enabled with `ASSISTANT_VISION_DEMO=1`; disabled by default due to CPU latency (191.9s per image). Production roadmap: fine-tuning on failure library, hosted inference, browser VLM. See DECISIONS 16.1 |
 
 ## Appendix: live site inventory (the record's decision 0, confirmed 15 September 2026)
 
