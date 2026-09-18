@@ -24,8 +24,9 @@ from . import ollama
 from .model import Retrieved
 from .repository import IndexMismatch, RetrievalRequest
 from .indexing.index import CHUNKING_VERSION
+from . import paths
 
-CONFIG = Path(__file__).resolve().parents[1] / "config"
+CONFIG = paths.CONFIG_DIR
 
 # Below this, nothing retrieved is close enough to answer from. The value is
 # provisional until the threshold sweep in the evaluation harness sets it;

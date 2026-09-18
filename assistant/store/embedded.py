@@ -51,8 +51,9 @@ from ..repository import (
     RetrievalRequest,
     product_matches,
 )
+from .. import paths
 
-SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sqlite.sql"
+SCHEMA = paths.DB_DIR / "schema.sqlite.sql"
 
 # How much similarity an authority rank is worth. Authority has to be able to
 # act — no two cosine scores are ever exactly equal, so ranking on similarity

@@ -22,8 +22,9 @@ from enum import Enum
 from pathlib import Path
 
 from .model import Retrieved
+from . import paths
 
-CONFIG = Path(__file__).resolve().parents[1] / "config"
+CONFIG = paths.CONFIG_DIR
 
 
 class Path_(str, Enum):

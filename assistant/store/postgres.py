@@ -58,8 +58,9 @@ from ..model import (
     Snapshot,
     TraceSpan,
 )
+from .. import paths
 
-SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.postgres.sql"
+SCHEMA = paths.DB_DIR / "schema.postgres.sql"
 
 # How long a publisher waits for the one that is already publishing. Long
 # enough that a genuinely slow large delta is not cut off, short enough that a
