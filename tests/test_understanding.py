@@ -137,6 +137,63 @@ def test_selection_and_verification_stay_separated(detector, question, intent):
     assert reading.intent is getattr(u.Intent, intent), question
 
 
+@pytest.mark.parametrize("question, topic", [
+    # Two properties joined by "or" are things asked about one product, not
+    # two products weighed against each other. Reading this as a comparison
+    # left the request with no product, so the answer's own mention of Ultra
+    # was refused as an unapproved recommendation.
+    ("For Lime Green Ultra, tell me the preparation required, application "
+     "thickness, mixing water and curing or application conditions.", "ultra"),
+    ("Is Ultra applied in one coat or two?", "ultra"),
+    ("Can Ultra go on brick or stone?", "ultra"),
+    # A product beside the "or" is an alternative being weighed: no target.
+    ("Should I use Solo or Duro on brick?", ""),
+    ("Can I use Ultra or something else on brick?", ""),
+    ("Is Ultra better than Duro on brick?", ""),
+])
+def test_or_between_properties_is_not_a_product_comparison(detector, question, topic):
+    assert u.topic_product(question, REGISTRY) == topic, question
+    reading = u.deterministic(question, detector, registry=REGISTRY)
+    resolved = u.resolve(reading, question, detector, REGISTRY)
+    assert resolved.product == topic, question
+
+
+COMPARISON = ("Compare Lime Green Ultra and Solo for suitable backgrounds and "
+              "application thickness.")
+
+
+@pytest.mark.parametrize("question, intent", [
+    # Acceptance case T14: what each sheet publishes about each, not a choice.
+    (COMPARISON, "VERIFY"),
+    ("What is the difference between Ultra and Solo?", "UNKNOWN"),
+    # A choice word keeps a comparison a selection.
+    ("Compare Ultra and Solo: which plaster should I use on brick?", "SELECT"),
+    ("Compare Ultra and Solo and recommend one for brick.", "SELECT"),
+    # One product with a comparison word is still no comparison of two.
+    ("Is Ultra suitable, compared with what I have now?", "VERIFY"),
+])
+def test_an_explicit_comparison_of_named_products_is_not_a_selection(
+        detector, question, intent):
+    reading = u.deterministic(question, detector, registry=REGISTRY)
+    assert reading.intent is getattr(u.Intent, intent), question
+
+
+def test_named_products_are_every_product_the_caller_asked_about():
+    named = u.named_products(COMPARISON, REGISTRY)
+    assert {"ultra", "solo"} <= named
+    assert "duro" not in named
+    # Every registry spelling, so the guard matches whichever the answer used.
+    assert "solo onecoat lime plaster" in named
+
+
+def test_a_product_named_in_order_to_exclude_it_was_not_asked_about():
+    named = u.named_products(
+        "I'm using Lime Green Ultra. What thickness should I use? Please "
+        "don't give me figures for Solo or Duro.", REGISTRY)
+    assert "ultra" in named
+    assert not {"solo", "duro"} & named
+
+
 def test_a_symptom_reads_as_troubleshoot(detector):
     reading = u.deterministic("My render is crazing and blowing", detector)
 
