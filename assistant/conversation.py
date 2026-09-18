@@ -189,6 +189,38 @@ class NewCase:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class Denial:
+    """A reducer instruction: the person has just taken this value back.
+
+    "My wall is not brick" is not a statement that the wall is brick, and it is
+    not silence either. Without a way to say *retracted*, the detector's
+    ``{"substrate": "brick"}`` reaches `merge_facts` as an assertion and rule 1
+    reads it as a restatement -- so the denial refreshes the very fact it
+    contradicts, and the slot goes on being trusted with its source turn moved
+    forward. That is worse than ignoring the sentence: the system becomes more
+    confident about a value the person has just withdrawn.
+
+    So a denial is its own instruction, handled by the reducer rather than by
+    whichever node noticed it. What it does is narrow on purpose: it retires the
+    active fact into the slot's history and asserts nothing in its place. The
+    slot becomes unknown rather than known-to-be-something-else, because "not
+    brick" says nothing about what the wall *is*, and the requirement gate then
+    asks -- which is what an advisor would do.
+
+    The history is kept for the same reason a supersession keeps it: an answer
+    given while brick was believed still has to be explicable.
+    """
+
+    slot: str
+    # The value being withdrawn, as the detector read it. A denial of something
+    # the slot does not currently hold is not applied at all -- "it is not
+    # brick" about a wall recorded as stone is consistent with what is already
+    # believed, and unsettling stone on the strength of it would throw away a
+    # fact the person never questioned.
+    value: str = ""
+
+
 def merge_facts(old: dict[str, FactHistory],
                 new: dict | NewCase) -> dict[str, FactHistory]:
     """Fold this turn's facts into the conversation's. The three rules, in code.
@@ -225,6 +257,25 @@ def merge_facts(old: dict[str, FactHistory],
     for slot, incoming in list((new or {}).items())[:MAX_FACTS_PER_TURN]:
         # Either shape. A restored history keeps its own past; a bare fact
         # starts one.
+        if isinstance(incoming, Denial):
+            history = out.get(slot)
+            if history is None:
+                # Nothing to take back. A denial asserts nothing, so a slot that
+                # was never filled stays empty rather than becoming a fact
+                # about what the wall is not.
+                continue
+            prior = history.current
+            if incoming.value and prior.value != incoming.value:
+                continue
+            out[slot] = replace(
+                history,
+                current=replace(prior, status=FactStatus.SUPERSEDED),
+                superseded=history.superseded + (
+                    replace(prior, status=FactStatus.SUPERSEDED),),
+                contradicted_by=(),
+            )
+            continue
+
         restored = incoming if isinstance(incoming, FactHistory) else None
         fact = restored.current if restored is not None else incoming
         history = out.get(slot)

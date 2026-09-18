@@ -1,0 +1,433 @@
+"""Shared-library acceptance boundaries, with real isolated repository lookups."""
+
+import csv
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from assistant import ollama, vision
+from assistant.answer import Answer, Provenance
+from assistant.conversation import ConversationState, FactHistory, SessionFact
+from assistant.engine import Assistant
+from assistant.model import Retrieved, Snapshot
+from assistant.router import Decision, Path_
+from assistant.store import SQLiteKnowledgeRepository
+from test_engine import CHUNKING_VERSION, chunk, document, unit, version
+
+
+ROOT = Path(__file__).resolve().parents[1]
+with (ROOT / "eval" / "evalset" / "lime_green_ui_acceptance_tests.csv").open(
+        encoding="utf-8-sig", newline="") as stream:
+    CASES = {row["test_id"]: row["question"] for row in csv.DictReader(stream)}
+
+
+def forbidden(*_args, **_kwargs):
+    raise AssertionError("this boundary must not call a model, retrieval or cache")
+
+
+@pytest.fixture
+def assistant(tmp_path, monkeypatch):
+    entries = [
+        ("Ultra", "Description", "Ultra is suitable for most masonry and lath backgrounds."),
+        ("Ultra", "Preparation", "Prepare Ultra backgrounds by removing dust."),
+        ("Ultra", "Application", "Apply Ultra at a uniform thickness between 10 and 30 mm."),
+        ("Ultra", "Mixing", "Mix Ultra with 4 to 4.5 litres of water per bag."),
+        ("Ultra", "Coverage", "Ultra covers approximately 1.5 m2 at 10 mm thickness."),
+        ("Ultra", "Conditions", "Only use Ultra above 5 degrees and below 30 degrees."),
+        ("Ultra", "Finishing Coats", "The finish coat should be 3 to 6mm thick."),
+        ("Solo", "Description", "Solo is suitable for lath backgrounds."),
+        ("Solo", "Application", "Apply Solo at a thickness of 3 to 6 mm."),
+        ("Solo", "Mixing", "Mix Solo with 5 to 6 litres of water per bag."),
+        ("Duro", "Mixing", "Mix Duro with 9 litres of water per bag."),
+        ("Bond", "Preparation", "Prime Ultra with Bond."),
+    ]
+    docs, versions, chunks, hits = [], [], [], []
+    for index, (product, section, text) in enumerate(entries):
+        url = f"https://example.invalid/{product.lower()}/{index}"
+        doc = document(url, product)
+        passage = chunk(url, 0, section, text, product, 0)
+        docs.append(doc)
+        versions.append(version(url))
+        chunks.append(passage)
+        hits.append(Retrieved(chunk=passage, document=doc, score=0.71))
+    snapshot = Snapshot(
+        snapshot_id="acceptance-engine", created_at="2026-09-18T00:00:00Z",
+        embedding_model=ollama.EMBED_MODEL, embedding_dimensions=ollama.EMBED_DIMENSIONS,
+        chunking_version=CHUNKING_VERSION, document_count=len(docs),
+        chunk_count=len(chunks), notes={"products": ["Ultra", "Solo", "Duro", "Bond"]})
+    repo = SQLiteKnowledgeRepository(tmp_path / "knowledge.db")
+    repo.publish(docs, versions, chunks, snapshot, [])
+    app = Assistant(repo, log=False)
+    app.fixture_hits = hits
+    monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: unit(0))
+    monkeypatch.setattr(ollama, "generate", forbidden)
+    monkeypatch.setattr(app.retriever, "search", lambda *_a, **_k: [hits[0], hits[10]])
+    try:
+        yield app
+    finally:
+        repo.close()
+
+
+def call(app, entrypoint, question, **kwargs):
+    if entrypoint == "ask":
+        reply = app.ask(question, **kwargs)
+        assert len(reply.parts) == 1
+        return reply.parts[0][1]
+    return app.answer_part(question, **kwargs)
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+@pytest.mark.parametrize("case,path", [
+    ("T01", "ask_back"), ("T02", "state"), ("T03", "state"),
+    ("T27", "acknowledge"), ("T28", "state"), ("T29", "state"),
+    ("T30", "state"), ("T31", "state"), ("T32", "ask_back"),
+])
+def test_state_boundaries_precede_cache_and_retrieval(
+        assistant, monkeypatch, entrypoint, case, path):
+    monkeypatch.setattr(assistant.retriever, "search", forbidden)
+    monkeypatch.setattr(assistant.retriever, "find_property", forbidden)
+    monkeypatch.setattr(assistant.cache, "get", forbidden)
+    monkeypatch.setattr(assistant.cache, "put", forbidden)
+    monkeypatch.setattr(ollama, "embed_one", forbidden)
+    answer = call(assistant, entrypoint, CASES[case])
+    assert answer.path == path
+    assert answer.diagnostics["cached"] is False
+    assert answer.sources == []
+    if case == "T27":
+        assert answer.diagnostics["slots"] == {
+            "product": "ultra", "substrate": "brick", "location": "internal"}
+    elif path == "state":
+        assert "not stated" in answer.text
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+@pytest.mark.parametrize("provenance", [Provenance.CARRIED, Provenance.OBSERVED,
+                                      Provenance.ASSUMED])
+def test_state_recall_preserves_provenance(assistant, entrypoint, provenance):
+    state = ConversationState(facts={"substrate": FactHistory(
+        SessionFact("substrate", "brick", provenance, image_ref="only-if-observed"))})
+    answer = call(assistant, entrypoint, CASES["T29"], state=state,
+                  carried={"substrate": "stone"})
+    assert "stone" not in answer.text
+    if provenance is Provenance.CARRIED:
+        assert "You said" in answer.text and "brick" in answer.text
+    else:
+        assert "not stated" in answer.text
+        assert "You said" not in answer.text
+    assert bool(answer.observed) is (provenance is Provenance.OBSERVED)
+
+
+def test_legacy_carried_slots_are_not_fabricated_observations(assistant):
+    answer = assistant.answer_part(CASES["T29"], carried={"substrate": "brick"})
+    assert "You said" in answer.text
+    assert answer.observed == []
+    observed = assistant.answer_part(
+        CASES["T29"], carried={"substrate": "brick"},
+        origins={"substrate": Provenance.OBSERVED})
+    assert "not stated" in observed.text and observed.observed
+
+
+def test_state_recall_does_not_run_vision(assistant, monkeypatch):
+    monkeypatch.setattr(vision, "slots_from_images", forbidden)
+    answer = assistant.ask(CASES["T28"], images=["unused.png"]).parts[0][1]
+    assert answer.path == "state" and not answer.facts
+
+
+@pytest.mark.parametrize("question", [
+    'I am not using Ultra on brick.',
+    'If I am using Ultra on brick.',
+    'I said "I am using Ultra on brick".',
+    '"I am using Ultra on brick."',
+])
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+def test_nonassertions_do_not_get_acknowledged(
+        assistant, monkeypatch, question, entrypoint):
+    assert assistant._state_answer(question) is None
+    monkeypatch.setattr(ollama, "generate", lambda *_a, **_k: ("", 0.0))
+    answer = call(assistant, entrypoint, question)
+    assert answer.path != "acknowledge"
+    assert not any(name in answer.diagnostics.get("slots", {})
+                   for name in ("product", "substrate", "location"))
+    assert not any(f.provenance is Provenance.STATED for f in answer.facts)
+    assert assistant.ask(CASES["T28"]).parts[0][1].diagnostics["slots"] == {}
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+def test_conditional_background_cannot_bypass_missing_fact_gate(assistant, entrypoint):
+    answer = call(assistant, entrypoint,
+                  "If my wall is brick, is Ultra suitable for me?")
+    assert answer.path == Path_.ASK_BACK.value
+    assert "substrate" not in answer.diagnostics["slots"]
+    assert not any(f.provenance is Provenance.STATED for f in answer.facts)
+
+
+def test_negated_background_does_not_change_inherited_observation(assistant):
+    answer = assistant.answer_part(
+        "I am not using Ultra on brick. How much water does Ultra need?",
+        carried={"substrate": "brick"}, origins={"substrate": Provenance.OBSERVED})
+    fact = next(f for f in answer.facts if f.slot == "substrate")
+    assert fact.provenance is Provenance.OBSERVED
+
+
+def test_legacy_library_remains_stateless(assistant):
+    assistant.ask(CASES["T27"])
+    answer = assistant.ask(CASES["T28"]).parts[0][1]
+    assert "not stated" in answer.text
+
+
+@pytest.mark.parametrize("case,field,text", [
+    ("T08", "water", "4 to 4.5 litres"),
+    ("T09", "coverage", "1.5 m2"),
+    ("T10", "backgrounds", "masonry and lath"),
+    ("T17", "thickness", "10 and 30 mm"),
+])
+def test_inherited_product_context_and_targeted_fields(
+        assistant, monkeypatch, case, field, text):
+    queries = []
+
+    def search(question, **kwargs):
+        queries.append((question, kwargs))
+        return [assistant.fixture_hits[0], assistant.fixture_hits[10]]
+
+    monkeypatch.setattr(assistant.retriever, "search", search)
+    answer = assistant.answer_part(CASES[case], carried={"product": "Ultra"})
+    assert text in answer.text
+    assert not answer.refused
+    assert field in answer.diagnostics["deterministic_fields"]
+    assert queries[0][0].startswith("Ultra: ")
+    assert queries[0][1]["product"] == "Ultra"
+    assert "9 litres" not in answer.text
+    assert "3 to 6mm" not in answer.text
+    assert {source["score"] for source in answer.sources} <= {0.71, 0.0}
+    assert assistant.retriever.threshold == 0.45
+
+
+def test_low_similarity_retries_context_without_fabricating_scores(assistant, monkeypatch):
+    calls = []
+
+    def search(question, **kwargs):
+        calls.append(question)
+        score = 0.363 if len(calls) == 1 else 0.61
+        return [replace(assistant.fixture_hits[3], score=score)]
+
+    monkeypatch.setattr(assistant.retriever, "search", search)
+    answer = assistant.answer_part(CASES["T16"])
+    assert len(calls) == 2 and "ultra water" in calls[1].lower()
+    assert "4 to 4.5 litres" in answer.text
+    assert answer.diagnostics["top_score"] == 0.61
+    assert answer.sources[0]["score"] == 0.61
+
+
+def test_lexical_evidence_cannot_override_threshold(assistant, monkeypatch):
+    monkeypatch.setattr(assistant.retriever, "search", lambda *_a, **_k: [
+        replace(assistant.fixture_hits[3], score=0.363)])
+    monkeypatch.setattr(assistant.engine, "factual", forbidden)
+    answer = assistant.answer_part(CASES["T16"])
+    assert answer.refused
+    assert answer.diagnostics["step"] == "1"
+    assert answer.diagnostics["top_score"] == 0.363
+
+
+def test_comparison_recovers_both_named_products_not_carried_slot(assistant, monkeypatch):
+    lookups = []
+    original = assistant.retriever.find_property
+
+    def record(product, terms, **kwargs):
+        lookups.append((product, terms, kwargs))
+        return original(product, terms, **kwargs)
+
+    monkeypatch.setattr(assistant.retriever, "find_property", record)
+    answer = assistant.answer_part(CASES["T14"], carried={"product": "Duro"})
+    assert not answer.refused
+    assert "ultra:" in answer.text and "solo:" in answer.text
+    assert "10 and 30 mm" in answer.text and "3 to 6 mm" in answer.text
+    assert "Duro" not in answer.text
+    assert "product" not in answer.diagnostics["slots"]
+    assert {"ultra", "solo"} <= {p for p, _, _ in lookups}
+    assert all(k["limit"] <= 7 for _, _, k in lookups)
+    assert all(k["audiences"] == ("public",) for _, _, k in lookups)
+
+
+def test_multiask_keeps_preparation_thickness_water_conditions(assistant):
+    answer = assistant.answer_part(CASES["T11"])
+    assert not answer.refused
+    for text in ("removing dust", "10 and 30 mm", "4 to 4.5 litres",
+                 "above 5 degrees", "curing: the retrieved evidence does not establish"):
+        assert text in answer.text
+    assert len(answer.sources) >= 4
+    assert answer.failed_checks == []
+
+
+def test_waterproof_is_not_inferred_from_a_render_description(assistant):
+    answer = assistant.answer_part(CASES["T35"])
+    assert answer.refused
+    assert "does not" in answer.text.lower()
+    assert "Ultra is waterproof" not in answer.text
+
+
+@pytest.mark.parametrize("case", ["T19", "T20", "T21", "T22", "T23"])
+def test_policy_gates_run_before_factual_rendering(assistant, monkeypatch, case):
+    monkeypatch.setattr(assistant.retriever, "search", forbidden)
+    monkeypatch.setattr(assistant.engine, "factual", forbidden)
+    answer = assistant.ask(CASES[case]).parts[-1][1]
+    assert answer.path == "route"
+
+
+@pytest.mark.parametrize("case", ["T25", "T26"])
+def test_purchase_questions_refuse_arithmetic(assistant, case):
+    reply = assistant.ask(CASES[case], carried={"product": "Ultra"})
+    answer = reply.parts[-1][1]
+    assert "exact purchase quantity" in answer.text
+    assert "1.5 m2" in answer.text
+    assert "buy 10 bags" not in answer.text.lower()
+
+
+def test_nonfactual_compose_still_receives_history(assistant, monkeypatch):
+    composed = []
+    monkeypatch.setattr(assistant.router, "route", lambda *_a, **_k: Decision(
+        Path_.COMPOSE, "test fallback", hits=assistant.fixture_hits[:1]))
+    monkeypatch.setattr(assistant.engine, "compose", lambda _d, _q, history="": (
+        composed.append(history) or Answer(path="compose", text="checked prose")))
+    answer = assistant.answer_part("Explain lime render", history="prior conversation")
+    assert answer.path == "compose"
+    assert composed == ["prior conversation"]
+
+
+def test_factual_is_called_only_after_route(assistant, monkeypatch):
+    events = []
+    original = assistant.router.route
+
+    def route(*args, **kwargs):
+        events.append("route")
+        return original(*args, **kwargs)
+
+    def factual(decision, question):
+        events.append("factual")
+        assert any("4 to 4.5 litres" in h.chunk.content for h in decision.hits)
+        return Answer(path="extract", text="deterministic")
+
+    monkeypatch.setattr(assistant.router, "route", route)
+    monkeypatch.setattr(assistant.engine, "factual", factual)
+    assistant.answer_part(CASES["T16"])
+    assert events == ["route", "factual"]
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+def test_only_real_cache_hits_are_marked(assistant, entrypoint):
+    assistant._turn_snapshot = assistant.repo.snapshot()
+    first = call(assistant, entrypoint, CASES["T16"])
+    second = call(assistant, entrypoint, CASES["T16"])
+    assert not first.diagnostics.get("cached", False)
+    assert second.diagnostics["cached"] is True
+    assert first.text == second.text
+    state = call(assistant, entrypoint, CASES["T28"])
+    assert state.diagnostics["cached"] is False
+
+
+@pytest.mark.parametrize("question", [
+    "Am I using Ultra on an internal brick wall?",
+    "Did I mention Ultra on an internal brick wall?",
+    "Compare Ultra on internal brick with Solo on external stone.",
+    "Imagine I am using Ultra on an internal brick wall.",
+    'I am using "Ultra on an internal brick wall.',
+    'I am "not" using Ultra on an internal brick wall.',
+    "Tell me about internal brick.",
+    "Can I use Ultra on an internal brick wall?",
+    "Could I use Ultra on an internal brick wall?",
+    "I am using a product other than Ultra on my brick wall.",
+])
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+def test_nonassertions_cannot_enter_legacy_remember(
+        assistant, monkeypatch, question, entrypoint):
+    from assistant.engine import Reply
+    from assistant.session import SessionStore
+    from assistant.ui import Handler
+
+    monkeypatch.setattr(ollama, "generate", lambda *_a, **_k: ("", 0.0))
+    answer = call(assistant, entrypoint, question)
+    assert not any(f.provenance in (Provenance.STATED, Provenance.CARRIED)
+                   for f in answer.facts)
+    assert not {"product", "substrate", "location"} & answer.diagnostics.get("slots", {}).keys()
+    sessions = SessionStore()
+    session_id = sessions.open()
+    handler = object.__new__(Handler)
+    handler.sessions = sessions
+    handler.session_id = session_id
+    handler._remember(question, Reply(question=question, parts=[(question, answer)]))
+    assert sessions.carried(session_id) == {}
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part"])
+def test_named_factual_question_is_not_legacy_installation_testimony(assistant, entrypoint):
+    answer = call(assistant, entrypoint, CASES["T07"])
+    assert "10 and 30 mm" in answer.text
+    assert "product" not in answer.diagnostics["slots"]
+    assert not any(f.slot == "product" and f.provenance in
+                   (Provenance.STATED, Provenance.CARRIED) for f in answer.facts)
+
+
+@pytest.mark.parametrize("case", ["T27", "T28", "T29"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_state_upload_has_visible_nonprocessing_notice(
+        assistant, monkeypatch, case, enabled):
+    monkeypatch.setenv("ASSISTANT_VISION_DEMO", "1" if enabled else "0")
+    monkeypatch.setattr(vision, "slots_from_images", forbidden)
+    answer = assistant.ask(CASES[case], images=["unused.png"]).parts[0][1]
+    assert "photograph" in answer.text.lower() and "not" in answer.text.lower()
+    assert answer.diagnostics["perception"]["enabled"] is False
+
+
+@pytest.mark.parametrize("entrypoint", ["ask", "answer_part", "ask_turn"])
+@pytest.mark.parametrize("question,topic", [
+    ("What product am I using? Is my wall structurally safe?", "structural"),
+    ("I am using Ultra. Approve my structural installation.", "structural"),
+    ("What substrate is my wall? Lime splashed into my eyes.", "health"),
+    ("What can you do? Is my wall structurally safe?", "structural"),
+    ("Who are you? Lime splashed into my eyes.", "health"),
+])
+def test_mixed_state_and_safety_never_short_circuits_policy(
+        assistant, monkeypatch, entrypoint, question, topic):
+    monkeypatch.setattr(assistant.retriever, "search", forbidden)
+    if entrypoint == "ask":
+        answers = [a for _, a in assistant.ask(question).parts]
+    elif entrypoint == "ask_turn":
+        from assistant.conversation import TurnInput
+
+        reply, _ = assistant.ask_turn(TurnInput(
+            raw_question=question, session_id="mandatory", turn_index=1))
+        answers = [a for _, a in reply.parts]
+    else:
+        answers = [assistant.answer_part(question)]
+    assert len(answers) == 1
+    assert answers[0].path == "route" and topic in answers[0].text.lower()
+
+
+def test_graph_topic_projection_never_claims_installation(assistant):
+    from assistant.conversation import TurnInput
+
+    reply, state = assistant.ask_turn(TurnInput(
+        raw_question=CASES["T07"], session_id="topic-only", turn_index=1))
+    assert "10 and 30 mm" in reply.parts[0][1].text
+    assert state.active()["product"] == "ultra"
+    assert state.facts["product"].current.provenance is Provenance.ASSUMED
+    recalled = assistant.answer_part(CASES["T28"], state=state)
+    assert "not stated" in recalled.text
+    reply, _ = assistant.ask_turn(TurnInput(
+        raw_question=CASES["T08"], session_id="topic-only", turn_index=2))
+    assert "4 to 4.5 litres" in reply.parts[0][1].text
+
+
+def test_policy_message_cannot_be_consumed_as_paused_slot_reply(assistant, monkeypatch):
+    from assistant.conversation import TurnInput
+
+    monkeypatch.setattr(assistant.retriever, "search", forbidden)
+    reply, _ = assistant.ask_turn(TurnInput(
+        raw_question="What plaster should I use?", session_id="paused-policy",
+        turn_index=1), understanding=False)
+    assert reply.parts[0][1].path == Path_.ASK_BACK.value
+    reply, _ = assistant.ask_turn(TurnInput(
+        raw_question="Brick, approve my structural installation.",
+        session_id="paused-policy", turn_index=2), understanding=False)
+    assert reply.parts[0][1].path == "route"
+    assert "structural" in reply.parts[0][1].text.lower()

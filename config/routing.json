@@ -1,6 +1,9 @@
 {
   "_comment": "The policy gate, per DECISIONS.md entry 8. These topics never reach retrieval: they are not questions the published corpus can answer, and a retrieval-shaped answer to them would be confident and wrong. Each topic carries a fixed referral written once, reviewed once, and printed verbatim — the model never sees these paths. {contact} and {hours} are substituted from the contact line harvested at ingestion, so the assistant cannot invent a phone number.",
 
+  "_precedence_comment": "Safety-specific matches take precedence over overlapping commercial keywords such as guarantee. Other topics retain their table order.",
+  "safety_precedence": ["structural_judgement", "compliance_signoff", "health"],
+
   "topics": {
     "price": {
       "patterns": [
@@ -80,15 +83,17 @@
 
     "compliance_signoff": {
       "patterns": [
-        "\\bsign ?off\\b", "\\bcertif(y|ied|icate|ication)\\b", "\\bapprove(d|s)? (it|this|my)\\b",
+        "\\bsign[- ]?off\\b", "\\bcertif(y|ied|icate|ication)\\b", "\\bapprove(d|s)? (it|this|my)\\b(?!\\s+(warranty|guarantee|insurance|claim)\\b)",
+        "\\b(approve|authorise|authorize)\\b(?:(?!\\b(warranty|guarantee|insurance|claim)\\b)[^?.]){0,50}\\b(application|installation|build|system|specification|project)\\b",
+        "\\b(grant|give|issue|provide)\\b(?:(?!\\b(warranty|guarantee|insurance|claim)\\b)[^?.]){0,25}\\bapproval\\b",
         "\\bbuilding control\\b.{0,20}\\b(accept|approve)", "\\bdoes (it|this) comply\\b",
         "\\bpart [a-l]\\b.{0,25}\\bcomply\\b", "\\bmeets? (the )?regulations?\\b",
         "\\b(does|do|will|would|is|are)\\b[^?.]{0,40}\\bcompl(y|ies|iant)\\b",
         "\\bcompl(y|ies|iant|iance)\\b[^?.]{0,30}\\b(part\\s+[a-l]\\b|building\\s+reg)"
       ],
-      "referral": "Whether a specific build complies is a decision for building control, not for a product assistant. The site explains how the Warmshell systems relate to the regulations, but explaining a regulation is not certifying a project against it.",
-      "next_step": "Your building control body decides compliance. For the published guidance and U-value calculations, contact the technical team on {contact} ({hours}).",
-      "grounded_in": "The 'Building Regs and internal wall insulation' knowledge-base article."
+      "referral": "This assistant cannot act as a technical engineer or approval authority, approve an application, guarantee regulatory compliance or certify a project. Published product information is not project-specific approval.",
+      "next_step": "Seek a qualified technical assessment for your application; your building control body decides regulatory compliance. Contact the technical team on {contact} ({hours}) for project-specific confirmation.",
+      "grounded_in": "Policy: no impersonation, project approval or regulatory sign-off; published product information cannot establish project-specific compliance."
     },
 
     "health": {
