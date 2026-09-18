@@ -20,10 +20,10 @@ that runs where the database already is needs no gate at all. A browser test
 proving the header maps to a real trace asserts through this reader, against the
 same file, rather than through a route the server would have to grow.
 
-    python -m assistant.trace                      the last few turns
-    python -m assistant.trace 8fa7...              one answer, as a tree
-    python -m assistant.trace --session c41e...    one conversation
-    python -m assistant.trace 8fa7... --json       the same, for a test
+    python -m assistant.infrastructure.trace                      the last few turns
+    python -m assistant.infrastructure.trace 8fa7...              one answer, as a tree
+    python -m assistant.infrastructure.trace --session c41e...    one conversation
+    python -m assistant.infrastructure.trace 8fa7... --json       the same, for a test
 
 The correlation id the page returns in `X-Correlation-Id` is the trace id, so
 the value copied out of a browser's network tab is the value this takes.
@@ -36,9 +36,9 @@ import json
 import sys
 from collections import defaultdict
 
-from . import use_utf8
-from .model import TraceSpan
-from .store.factory import open_repository
+from .. import use_utf8
+from ..model import TraceSpan
+from ..store.factory import open_repository
 
 # Attributes worth putting on the span's own line rather than under it. These
 # are the ones a question about a wrong answer actually turns on: what the
@@ -111,7 +111,7 @@ def _identity(spans: list[TraceSpan]) -> list[str]:
     # `--session ` with nothing after it, which is an instruction to type
     # something that cannot work.
     if first.session_id:
-        header += ["", f"--- python -m assistant.trace --session "
+        header += ["", f"--- python -m assistant.infrastructure.trace --session "
                        f"{first.session_id} for the whole conversation"]
     return header + [""]
 
@@ -168,7 +168,7 @@ def recent(spans: list[TraceSpan], limit: int = 20) -> str:
 def main(argv: list[str] | None = None) -> int:
     use_utf8()
     parser = argparse.ArgumentParser(
-        prog="assistant.trace",
+        prog="assistant.infrastructure.trace",
         description="Read back how one answer was produced.")
     parser.add_argument("trace_id", nargs="?", default="",
                         help="the correlation id from X-Correlation-Id")

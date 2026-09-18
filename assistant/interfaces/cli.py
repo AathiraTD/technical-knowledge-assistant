@@ -23,7 +23,8 @@ import os
 import argparse
 import sys
 
-from .. import observability as obs, ollama, use_utf8
+from ..infrastructure import observability as obs, ollama
+from .. import use_utf8
 from ..turn.conversation import TurnInput
 from ..answering.engine import Assistant, render
 from ..repository import IndexMismatch

@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from assistant import observability as obs                         # noqa: E402
+from assistant.infrastructure import observability as obs
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
@@ -56,7 +56,7 @@ from assistant.repository import (                                 # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 
 from test_engine import build_repo, no_ollama, quoting             # noqa: E402,F401
-from assistant import ollama                                       # noqa: E402
+from assistant.infrastructure import ollama
 
 
 def now(offset_days: int = 0) -> str:

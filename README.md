@@ -142,7 +142,7 @@ python -m assistant.interfaces.ui
 ```bash
 python -m eval.run              # Structured conversation evaluation
 python -m assistant.interfaces.cli -q "..."  # Single-turn CLI
-python -m assistant.health      # Readiness check
+python -m assistant.infrastructure.health      # Readiness check
 python -m pytest tests/          # Unit/integration tests
 ```
 

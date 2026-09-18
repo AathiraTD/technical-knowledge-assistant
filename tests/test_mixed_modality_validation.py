@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.answering import vision
-from assistant import ollama
+from assistant.infrastructure import ollama
 from assistant.answering.answer import Provenance
 from assistant.turn.conversation import ConversationState, FactStatus, TurnInput
 from assistant.answering.engine import Assistant

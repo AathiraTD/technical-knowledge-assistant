@@ -25,7 +25,7 @@ from assistant.indexing.index import CHUNKING_VERSION
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import health, ollama                              # noqa: E402
+from assistant.infrastructure import health, ollama
 from assistant.model import (                                     # noqa: E402
     Chunk, Document, DocumentVersion, Snapshot,
 )

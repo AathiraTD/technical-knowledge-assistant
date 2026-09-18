@@ -48,7 +48,9 @@ from assistant.indexing.index import (
     summarise,
 )
 from assistant.model import Chunk                                  # noqa: E402
-from assistant.ollama import OllamaUnavailable                     # noqa: E402
+from assistant.infrastructure.ollama import (  # noqa: E402
+    OllamaUnavailable,
+)
 from assistant.store import EmbeddedRepository                     # noqa: E402
 
 CACHE = ROOT / "data" / "cache"

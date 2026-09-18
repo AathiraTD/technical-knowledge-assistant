@@ -110,7 +110,7 @@ from langgraph.types import interrupt                               # noqa: E402
 from ..retrieval import candidates as cand
 from ..answering import answer as ans
 from . import conversation as conv                                  # noqa: E402
-from .. import observability as obs                                  # noqa: E402
+from ..infrastructure import observability as obs
 from ..answering import understanding as und
 from ..answering.answer import Provenance
 from .conversation import (                                         # noqa: E402

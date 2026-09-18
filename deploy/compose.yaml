@@ -118,7 +118,7 @@ services:
     ports:
       - "127.0.0.1:${ASSISTANT_PORT:-8765}:8765"
     healthcheck:
-      test: ["CMD-SHELL", "python -m assistant.health || exit 1"]
+      test: ["CMD-SHELL", "python -m assistant.infrastructure.health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10

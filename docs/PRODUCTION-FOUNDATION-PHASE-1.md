@@ -58,7 +58,7 @@ Three levels of health checking:
    - Lightweight, does not verify index state (separate /ready endpoint would handle that)
 
 3. **Readiness checks** (separate)
-   - `assistant.health` module validates:
+   - `assistant.infrastructure.health` module validates:
      - Index snapshot exists and is compatible
      - Embedding model matches
      - Chunks are loaded

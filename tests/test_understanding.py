@@ -29,7 +29,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import ollama                                        # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.answering import understanding as u
 from assistant.answering.answer import (  # noqa: E402
     Provenance,

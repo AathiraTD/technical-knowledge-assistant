@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from assistant.answering import vision
-from assistant import ollama
+from assistant.infrastructure import ollama
 from assistant.answering.answer import Answer, Provenance
 from assistant.turn.conversation import ConversationState, FactHistory, SessionFact
 from assistant.answering.engine import Assistant

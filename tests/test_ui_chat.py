@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import observability as obs, ollama
+from assistant.infrastructure import observability as obs, ollama
 from assistant.interfaces import ui
 from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION

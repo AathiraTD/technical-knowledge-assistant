@@ -11,7 +11,7 @@ def test_model_and_cache_environment_are_honoured(tmp_path):
            'GENERATION_MODEL': 'custom-generation',
            'ASSISTANT_EMBEDDING_CACHE': str(tmp_path / 'cache.db')}
     code = '''import json
-from assistant import ollama
+from assistant.infrastructure import ollama
 from assistant.indexing import embedcache
 print(json.dumps([ollama.HOST, ollama.EMBED_MODEL, ollama.EMBED_DIMENSIONS,
                   ollama.GENERATION_MODEL, str(embedcache.DEFAULT_PATH)]))'''

@@ -19,7 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import ollama                           # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.indexing.index import CHUNKING_VERSION           # noqa: E402
 from assistant.model import Snapshot                   # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository  # noqa: E402

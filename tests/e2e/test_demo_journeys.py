@@ -521,7 +521,7 @@ def test_the_correlation_id_the_browser_gets_reads_a_real_trace(page):
     """Journey H. The observability chain, end to end and across processes.
 
     The browser is handed an id in a header; the operator pastes that id into
-    `python -m assistant.trace` and gets the stages of that answer back. Until
+    `python -m assistant.infrastructure.trace` and gets the stages of that answer back. Until
     this held, a reported problem could only be investigated by reproducing it.
 
     This is the journey that answers "why this answer?" from the other side --
@@ -540,7 +540,7 @@ def test_the_correlation_id_the_browser_gets_reads_a_real_trace(page):
     assert response.json()["correlation_id"] == correlation
 
     read = subprocess.run(
-        [sys.executable, "-m", "assistant.trace", correlation, "--json"],
+        [sys.executable, "-m", "assistant.infrastructure.trace", correlation, "--json"],
         cwd=ROOT, capture_output=True, text=True)
     assert read.returncode == 0, f"the trace could not be read: {read.stderr[-300:]}"
     spans = json.loads(read.stdout)

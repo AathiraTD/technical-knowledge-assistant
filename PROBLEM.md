@@ -171,7 +171,7 @@ python -m assistant.indexing.index      # builds from the shipped cache; no netw
 python -m assistant.interfaces.cli        # ask a question
 python -m assistant.interfaces.ui         # the same library behind a web page
 python -m eval.run             # situations, probes, sweep, audience filter
-python -m assistant.health     # is it actually able to answer?
+python -m assistant.infrastructure.health     # is it actually able to answer?
 
 pip install pytest coverage
 python -m pytest -q tests/     # 648 tests, no Ollama, no network, no index

@@ -50,7 +50,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
-from .. import health, metrics, observability as obs, ollama, use_utf8
+from ..infrastructure import health, metrics, observability as obs, ollama
+from .. import use_utf8
 from ..answering.answer import Provenance
 from ..audience import DEFAULT as PUBLIC_ONLY, resolve
 from ..answering.engine import Assistant
@@ -1081,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
         # here. `/health` returns OK from a process that has no index, an index
         # built by another embedding model, or no Ollama to reach -- so a
         # container could report healthy while unable to answer anything. This
-        # runs the same checks `python -m assistant.health` runs and fails the
+        # runs the same checks `python -m assistant.infrastructure.health` runs and fails the
         # probe, with 503, when any of them is false.
         if url.path == "/ready":
             self._send_ready(parse_qs(url.query).get("format", [""])[0])
@@ -1561,7 +1562,7 @@ class Handler(BaseHTTPRequestHandler):
                     "chunking_version", "generation_model", "vision", "error")
 
     def _send_ready(self, form: str = "") -> None:
-        """Readiness as JSON, or as the table `python -m assistant.health` prints.
+        """Readiness as JSON, or as the table `python -m assistant.infrastructure.health` prints.
 
         200 when every check passes and 503 when any does not, because the
         status code is the part an orchestrator reads. The body is for whoever

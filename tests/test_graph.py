@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.retrieval import candidates as cand
 from assistant.turn import graph as g
-from assistant import ollama                                        # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.answering import understanding as und
 from assistant.answering.answer import (  # noqa: E402
     Answer,

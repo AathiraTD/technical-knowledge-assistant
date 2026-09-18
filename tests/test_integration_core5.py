@@ -13,7 +13,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from assistant.turn import session
-from assistant import observability
+from assistant.infrastructure import observability
 from assistant.answering.engine import Assistant
 from assistant.retrieval.retrieve import Retriever
 from assistant.store import SQLiteKnowledgeRepository

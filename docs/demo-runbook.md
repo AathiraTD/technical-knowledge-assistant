@@ -22,8 +22,8 @@ the whole check; the rest are the demonstration itself.
 ```powershell
 .\scripts\start-demo.ps1 -CheckOnly      # verifies everything, starts nothing
 .\scripts\start-demo.ps1                 # the page at http://127.0.0.1:8765/
-python -m assistant.trace                # the last few turns, newest first
-python -m assistant.trace <id>           # how one answer was produced
+python -m assistant.infrastructure.trace                # the last few turns, newest first
+python -m assistant.infrastructure.trace <id>           # how one answer was produced
 ```
 
 `-CheckOnly` is the one to trust. It fails on the same conditions the running
@@ -72,7 +72,7 @@ that fixes it:
    script; two copies of a model tag is how a demonstration pulls one model and
    queries another.
 3. **Knowledge index** — present, or offered as a build.
-4. **Readiness** — `python -m assistant.health`, the table in §4.
+4. **Readiness** — `python -m assistant.infrastructure.health`, the table in §4.
 5. **Serving** — `python -m assistant.interfaces.ui`.
 
 A failure looks like this, and never like a traceback:
@@ -102,8 +102,8 @@ every one of those can be false while the process runs perfectly well.
 | `GET /health` | is the process running | static `OK`, always 200 |
 | `GET /ready` | could it answer a question | JSON, **200 or 503** |
 | `GET /ready?format=text` | the same, as the table | text, 200 or 503 |
-| `python -m assistant.health` | the same, at a terminal | table, exit 0 or 1 |
-| `python -m assistant.health --json` | the same, for a script | JSON |
+| `python -m assistant.infrastructure.health` | the same, at a terminal | table, exit 0 or 1 |
+| `python -m assistant.infrastructure.health --json` | the same, for a script | JSON |
 | `GET /metrics` | Prometheus exposition | `assistant_*` families |
 
 Measured output:
@@ -155,11 +155,11 @@ written against.
 Every response carries `X-Correlation-Id`, and that value is the trace id.
 
 ```powershell
-python -m assistant.trace                       # the last turns, newest first
-python -m assistant.trace 9ef580a27537          # one answer, as a tree
-python -m assistant.trace --session pyQm_...    # the whole conversation
-python -m assistant.trace 9ef580a27537 --all    # every recorded attribute
-python -m assistant.trace 9ef580a27537 --json   # for a script or a test
+python -m assistant.infrastructure.trace                       # the last turns, newest first
+python -m assistant.infrastructure.trace 9ef580a27537          # one answer, as a tree
+python -m assistant.infrastructure.trace --session pyQm_...    # the whole conversation
+python -m assistant.infrastructure.trace 9ef580a27537 --all    # every recorded attribute
+python -m assistant.infrastructure.trace 9ef580a27537 --json   # for a script or a test
 ```
 
 Measured, from the benchmark run:
@@ -170,7 +170,7 @@ session      pyQm_WgdFM1_rkKtF3rLpA
 turn         1
 source       web  2026-09-17T12:57:23+00:00
 
---- python -m assistant.trace --session pyQm_WgdFM1_rkKtF3rLpA for the whole conversation
+--- python -m assistant.infrastructure.trace --session pyQm_WgdFM1_rkKtF3rLpA for the whole conversation
 
 answer  28444ms  refused=False
   part  28416ms  path='compose'  cached=False
@@ -305,7 +305,7 @@ Two stacks exist in this repository and only one of them is current. **Use
 | User | non-root, uid 10001 | root |
 | Images | pinned `pgvector/pgvector:pg16`, `ollama/ollama:0.12.3` | `ankane/pgvector:latest` |
 | Index | `index-init` completes before the UI starts | never built |
-| Healthcheck | `python -m assistant.health` | `/health`, which was liveness-only |
+| Healthcheck | `python -m assistant.infrastructure.health` | `/health`, which was liveness-only |
 | Port | 8765 | 8000 |
 
 The stale pair is left in place rather than deleted — removing tracked files is
@@ -339,7 +339,7 @@ unproxied network no argument is needed.
 ```powershell
 cp deploy/.env.example deploy/.env     # then set POSTGRES_PASSWORD
 docker compose -f deploy/compose.yaml up -d
-docker compose -f deploy/compose.yaml exec app python -m assistant.health
+docker compose -f deploy/compose.yaml exec app python -m assistant.infrastructure.health
 ```
 
 `POSTGRES_PASSWORD` has no default, so `up` fails on the missing variable rather
@@ -369,7 +369,7 @@ faster, because the model has to be read back off disk.
 ```powershell
 ollama serve                         # in another terminal
 ollama ps                            # what is resident
-python -m assistant.health           # confirm READY before continuing
+python -m assistant.infrastructure.health           # confirm READY before continuing
 ```
 The server does **not** need restarting — it reconnects on the next question.
 
@@ -415,7 +415,7 @@ it and the button posts to the server:
 ```
 http://127.0.0.1:8765/new
 ```
-Or open a private window. `python -m assistant.trace --session <id>` shows what
+Or open a private window. `python -m assistant.infrastructure.trace --session <id>` shows what
 was being carried, which is usually the explanation.
 
 **Nothing is working and there are two minutes left.** Fall back to the CLI —
@@ -463,7 +463,7 @@ Recorded so nobody mistakes them for new:
   `data/index/knowledge.db`** — not a temporary one. It then calls **real
   Ollama**, so single tests take 87 s and 143 s. And because the engine records
   spans, **running it writes test turns into the database the demonstration
-  serves from**: they appear in `python -m assistant.trace` with `source
+  serves from**: they appear in `python -m assistant.infrastructure.trace` with `source
   unknown`, interleaved with real ones.
 
   None of that is dangerous — spans are append-only and the index is not

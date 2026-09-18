@@ -59,7 +59,7 @@ from pathlib import Path
 
 import httpx
 
-from ..ollama import HOST, KEEP_ALIVE, GENERATION_MODEL, NUM_CTX
+from ..infrastructure.ollama import HOST, KEEP_ALIVE, GENERATION_MODEL, NUM_CTX
 from .router import SlotDetector
 
 # --------------------------------------------------- what may be reported
@@ -146,7 +146,7 @@ MAX_IMAGE_BYTES = int(os.environ.get("VISION_MAX_IMAGE_BYTES", str(8 * 1024 * 10
 
 VISION_MODEL = os.environ.get("VISION_MODEL", GENERATION_MODEL)
 
-# **Must equal `assistant.ollama.generate`'s `num_ctx`.** Not "be large
+# **Must equal `assistant.infrastructure.ollama.generate`'s `num_ctx`.** Not "be large
 # enough" — equal. Two different context sizes for the same model are two
 # resident instances, and the failure that produces is described in full beside
 # the request body in `observe`.
@@ -1046,7 +1046,7 @@ def observe(
     the same endpoint the text path uses, at temperature zero with a fixed seed
     for the same reason: a reviewer re-running this should get it back.
 
-    It is a local HTTP call rather than a call into `assistant.ollama` because
+    It is a local HTTP call rather than a call into `assistant.infrastructure.ollama` because
     that module's `generate()` takes neither images nor a response schema, and
     widening it for a roadmap stage is not this module's to do.
 

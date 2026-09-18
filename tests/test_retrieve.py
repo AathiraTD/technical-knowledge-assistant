@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.indexing.index import CHUNKING_VERSION
-from assistant import ollama                                  # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
 from assistant.repository import RetrievalRequest               # noqa: E402
 from assistant.repository import IndexMismatch                # noqa: E402

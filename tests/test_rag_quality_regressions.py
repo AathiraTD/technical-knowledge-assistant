@@ -247,7 +247,7 @@ def test_a_corpus_of_only_product_pages_still_prints_product_pages():
 import pytest                                                       # noqa: E402
 
 from assistant.retrieval import candidates as cand
-from assistant import ollama                                        # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.turn.conversation import TurnInput                        # noqa: E402
 from assistant.answering.engine import (  # noqa: E402
     Assistant,

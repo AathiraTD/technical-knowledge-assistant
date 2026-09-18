@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .. import observability as obs
+from ..infrastructure import observability as obs
 from ..model import Chunk, Document
 
 

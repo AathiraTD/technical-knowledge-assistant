@@ -603,7 +603,7 @@ def test_the_vision_call_asks_for_the_same_context_as_the_text_call():
     number, so the two cannot drift apart again without this failing.
     """
     import inspect
-    from assistant import ollama
+    from assistant.infrastructure import ollama
 
     text_default = inspect.signature(ollama.generate).parameters["num_ctx"].default
 

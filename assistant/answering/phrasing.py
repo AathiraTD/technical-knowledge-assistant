@@ -50,8 +50,8 @@ import os
 import re
 from dataclasses import replace
 
-from .. import observability as obs
-from .. import ollama
+from ..infrastructure import observability as obs
+from ..infrastructure import ollama
 from .answer import (
     _CITE, _CONDITION, _NEGATED, _NUMBER, _UNCERTAIN, Answer, _normalise_number,
     products_named,

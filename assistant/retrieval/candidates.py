@@ -44,7 +44,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .. import observability as obs
+from ..infrastructure import observability as obs
 from ..answering.understanding import Intent, ResolvedRequest
 
 # How many candidates are worth assessing. Each costs a metadata lookup per

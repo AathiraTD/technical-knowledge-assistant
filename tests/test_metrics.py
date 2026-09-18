@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.interfaces import ui
-from assistant import metrics, ollama                           # noqa: E402
+from assistant.infrastructure import metrics, ollama
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )

@@ -1,6 +1,6 @@
 """Everything that must be true before `assistant` can even be imported.
 
-`python -m assistant.health` is the readiness check and it is the right one --
+`python -m assistant.infrastructure.health` is the readiness check and it is the right one --
 but it imports the application, so on a machine where `pip install` has not been
 run it does not report a missing dependency, it raises `ModuleNotFoundError`
 from inside a package the reader has never opened. That is the first thing an
@@ -10,7 +10,7 @@ than like a step was skipped.
 So this runs first and uses the standard library only. It checks the things
 whose failure would turn the readiness check itself into a traceback -- the
 interpreter version, the five pinned dependencies, the orchestration package --
-and then hands over to `assistant.health` for everything that needs the
+and then hands over to `assistant.infrastructure.health` for everything that needs the
 application loaded.
 
     python scripts/preflight.py            the checks, and what to do about them
@@ -18,7 +18,7 @@ application loaded.
 
 Exit code 0 when the application can be imported, 1 when it cannot. That is
 deliberately a lower bar than readiness: a machine with no index passes here and
-fails `assistant.health`, and those are different problems with different fixes.
+fails `assistant.infrastructure.health`, and those are different problems with different fixes.
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def check() -> dict:
         report["models"] = tags
 
     # The index is not required for `assistant` to import, so it is reported
-    # rather than failed here -- `assistant.health` is what decides readiness.
+    # rather than failed here -- `assistant.infrastructure.health` is what decides readiness.
     index = ROOT / "data" / "index" / "knowledge.db"
     report["checks"]["index_present"] = index.exists()
     if not index.exists():

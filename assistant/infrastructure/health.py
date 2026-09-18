@@ -1,6 +1,6 @@
 """Readiness check, for a container orchestrator and for a person.
 
-`python -m assistant.health` exits 0 when the system could actually answer a
+`python -m assistant.infrastructure.health` exits 0 when the system could actually answer a
 question, and non-zero with a reason when it could not.
 
 Liveness and readiness are different things and conflating them is how a
@@ -37,9 +37,10 @@ import os
 import re
 import time
 
-from . import ollama, use_utf8
-from .store.factory import open_repository
-from .indexing.index import CHUNKING_VERSION
+from . import ollama
+from .. import use_utf8
+from ..store.factory import open_repository
+from ..indexing.index import CHUNKING_VERSION
 
 # Credentials in a DSN, and nothing else. Deliberately narrow: the host, port
 # and database name are what make the message useful, and reducing the whole
@@ -130,7 +131,7 @@ def check(db: str = "", dsn: str = "") -> dict:
         # opposite of what a probe is for.
         demo = vision_demo_enabled()
         try:
-            from .answering.vision import VISION_MODEL
+            from ..answering.vision import VISION_MODEL
         except Exception as exc:                        # pragma: no cover
             report["vision"] = {"model": "", "pulled": False, "required": demo,
                                 "error": str(exc)}
@@ -256,7 +257,7 @@ def summary(report: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     use_utf8()
     parser = argparse.ArgumentParser(
-        prog="assistant.health",
+        prog="assistant.infrastructure.health",
         description="Whether this process could actually answer a question.")
     parser.add_argument("--db", default="data/index/knowledge.db")
     parser.add_argument("--dsn", default="")

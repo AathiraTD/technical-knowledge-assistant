@@ -63,7 +63,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.answering import vision
-from assistant import ollama                              # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.answering.answer import PHOTO_LINE, Provenance               # noqa: E402
 from assistant.answering.engine import Assistant                            # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402

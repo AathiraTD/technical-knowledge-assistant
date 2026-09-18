@@ -160,7 +160,7 @@ def test_the_gate_is_pure_pattern_matching_and_reaches_nothing(monkeypatch):
     the referral instant, and it is asserted here rather than assumed because
     the whole value of the gate is what it does *not* do.
     """
-    import assistant.ollama as ollama
+    import assistant.infrastructure.ollama as ollama
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("the policy gate reached the model")

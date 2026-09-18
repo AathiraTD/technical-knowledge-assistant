@@ -41,7 +41,7 @@ All of that is corrected below against the stack that actually exists.
 | Ollama image | `ollama/ollama:0.12.3`, pinned | `ollama/ollama:latest` |
 | Models | `model-init` pulls both, then exits | never pulled |
 | Index | `index-init` completes before the UI starts | never built |
-| Healthcheck | `python -m assistant.health` — readiness | `/health` — liveness only |
+| Healthcheck | `python -m assistant.infrastructure.health` — readiness | `/health` — liveness only |
 | Port | 8765, bound to 127.0.0.1 | 8000, bound to every interface |
 
 The stale pair is left in the tree rather than deleted — removing tracked files
@@ -88,7 +88,7 @@ possible. It fails closed rather than returning confident nonsense.
 
 ```bash
 docker compose -f deploy/compose.yaml up -d
-docker compose -f deploy/compose.yaml exec app python -m assistant.health
+docker compose -f deploy/compose.yaml exec app python -m assistant.infrastructure.health
 ```
 
 Startup is ordered and each step must complete before the next begins:
@@ -158,7 +158,7 @@ It defaults to PyPI, so an unproxied network needs no argument.
 | `/ready?format=text` | the same, as a table | 200 or 503 |
 | `/metrics` | Prometheus exposition | 200 |
 
-The compose healthcheck runs `python -m assistant.health`, which is the same
+The compose healthcheck runs `python -m assistant.infrastructure.health`, which is the same
 readiness check — not `/health`, which would keep a container in rotation while
 it had no index, a mismatched index, or no reachable Ollama.
 
@@ -187,7 +187,7 @@ curl -s http://127.0.0.1:8765/ready?format=text
 ```bash
 docker compose -f deploy/compose.yaml logs -f app        # structured JSON on stderr
 docker compose -f deploy/compose.yaml ps
-docker compose -f deploy/compose.yaml exec app python -m assistant.trace
+docker compose -f deploy/compose.yaml exec app python -m assistant.infrastructure.trace
 docker compose -f deploy/compose.yaml exec app python -m assistant.indexing.index    # incremental refresh
 docker compose -f deploy/compose.yaml down               # keeps volumes
 docker compose -f deploy/compose.yaml down -v            # discards them
@@ -237,7 +237,7 @@ previous release serving; it cannot corrupt a good one.
 
 **`app` never becomes healthy.** Run the readiness check directly — it names the
 failing check and its remedy:
-`docker compose -f deploy/compose.yaml exec app python -m assistant.health`
+`docker compose -f deploy/compose.yaml exec app python -m assistant.infrastructure.health`
 
 **`IndexMismatch` on start.** `EMBED_MODEL` changed since the index was built.
 Rebuild: `docker compose -f deploy/compose.yaml run --rm index-init`.

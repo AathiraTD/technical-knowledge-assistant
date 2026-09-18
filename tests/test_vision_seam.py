@@ -53,7 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.answering import vision
-from assistant import ollama                                # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.interfaces import ui
 from assistant.answering.answer import (  # noqa: E402
     Provenance,

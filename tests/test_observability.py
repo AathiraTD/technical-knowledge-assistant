@@ -25,7 +25,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import observability as obs                       # noqa: E402
+from assistant.infrastructure import observability as obs
 
 
 @pytest.fixture

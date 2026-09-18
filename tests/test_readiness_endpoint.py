@@ -32,7 +32,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import health, ollama                               # noqa: E402
+from assistant.infrastructure import health, ollama
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )

@@ -32,7 +32,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import ollama, use_utf8
+from ..infrastructure import ollama
+from .. import use_utf8
 from .embedcache import EmbeddingCache
 from .crawl import archive_source, atomic_write
 from .extract import (

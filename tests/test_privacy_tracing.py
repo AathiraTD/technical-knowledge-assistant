@@ -151,7 +151,7 @@ def test_our_own_observability_is_untouched():
     """The point is not "no telemetry". It is "our telemetry, not theirs"."""
     out = run(
         "import assistant.turn.graph;"
-        "from assistant import observability as obs;"
+        "from assistant.infrastructure import observability as obs;"
         "obs.event('probe', n=1);"
         "print('OURS=ok')", HOSTILE)
 

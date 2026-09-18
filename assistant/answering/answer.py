@@ -19,8 +19,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 
-from .. import observability as obs
-from .. import ollama
+from ..infrastructure import observability as obs
+from ..infrastructure import ollama
 from ..logging.diagnosis_capture import DiagnosisCapture
 from ..model import Retrieved
 from .router import Decision, Path_

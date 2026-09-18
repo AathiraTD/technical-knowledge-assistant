@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import ollama                                       # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.turn.conversation import TurnInput                       # noqa: E402
 from assistant.answering.engine import (  # noqa: E402
     Assistant,

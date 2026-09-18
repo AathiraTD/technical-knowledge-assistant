@@ -47,8 +47,8 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .. import observability as obs
-from .. import ollama
+from ..infrastructure import observability as obs
+from ..infrastructure import ollama
 from .answer import Answer, Provenance, SlotFact, _named_aliases, _product_aliases
 from ..turn.conversation import ConversationState, Denial, FactStatus, SessionFact
 

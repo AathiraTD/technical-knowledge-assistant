@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from assistant.turn import graph
-from assistant import observability as obs, ollama
+from assistant.infrastructure import observability as obs, ollama
 from assistant.answering import understanding as und
 from assistant.answering.answer import Answer, Provenance
 from assistant.turn.conversation import (

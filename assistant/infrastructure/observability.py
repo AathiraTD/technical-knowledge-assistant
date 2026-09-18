@@ -96,7 +96,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from .model import TraceSpan
+from ..model import TraceSpan
 
 try:
     from . import otel_export

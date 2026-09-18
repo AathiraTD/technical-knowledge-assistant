@@ -16,8 +16,8 @@ import os
 import re
 from dataclasses import dataclass, field, replace
 
-from .. import observability as obs
-from .. import ollama
+from ..infrastructure import observability as obs
+from ..infrastructure import ollama
 from . import phrasing
 from . import vision
 from .answer import (Answer, AnswerEngine, Provenance, _named_aliases,

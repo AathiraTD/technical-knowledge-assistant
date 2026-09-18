@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import ollama                                    # noqa: E402
+from assistant.infrastructure import ollama
 from assistant.audience import parse, resolve                   # noqa: E402
 from assistant.answering.engine import MAX_WORDS, Assistant, cap          # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                    # noqa: E402

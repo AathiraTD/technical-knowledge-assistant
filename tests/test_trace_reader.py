@@ -35,7 +35,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import trace as reader
+from assistant.infrastructure import trace as reader
 from assistant.model import TraceSpan
 from assistant.store.embedded import SQLiteKnowledgeRepository
 

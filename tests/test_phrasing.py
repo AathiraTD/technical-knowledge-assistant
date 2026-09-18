@@ -31,7 +31,9 @@ from assistant.answering import phrasing
 from assistant.answering.answer import (  # noqa: E402
     Answer,
 )
-from assistant.ollama import OllamaUnavailable                     # noqa: E402
+from assistant.infrastructure.ollama import (  # noqa: E402
+    OllamaUnavailable,
+)
 
 
 ON = {phrasing.PHRASING_FLAG: "1"}

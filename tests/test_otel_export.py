@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-from assistant import otel_export
+from assistant.infrastructure import otel_export
 
 
 class TestOtelExport(unittest.TestCase):
@@ -150,7 +150,7 @@ class TestJsonFormatterOtel(unittest.TestCase):
 
     def test_json_formatter_includes_otel_headers(self):
         """JSON logs include service name, version, environment."""
-        from assistant import observability
+        from assistant.infrastructure import observability
 
         formatter = observability.JSONFormatter()
         record = observability.logger.makeRecord(

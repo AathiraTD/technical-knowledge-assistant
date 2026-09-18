@@ -7,7 +7,7 @@ import pytest
 from assistant.answering.engine import Assistant
 from assistant.model import Snapshot
 from assistant.store import SQLiteKnowledgeRepository
-from assistant import ollama
+from assistant.infrastructure import ollama
 from test_engine import CHUNKING_VERSION, chunk, document, unit, version
 
 

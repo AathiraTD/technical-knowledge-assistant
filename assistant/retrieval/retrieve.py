@@ -19,8 +19,8 @@ import json
 import re
 from pathlib import Path
 
-from .. import observability as obs
-from .. import ollama
+from ..infrastructure import observability as obs
+from ..infrastructure import ollama
 from ..model import Retrieved
 from ..repository import IndexMismatch, RetrievalRequest
 from ..indexing.index import CHUNKING_VERSION
