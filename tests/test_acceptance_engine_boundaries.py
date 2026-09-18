@@ -17,7 +17,7 @@ from test_engine import CHUNKING_VERSION, chunk, document, unit, version
 
 
 ROOT = Path(__file__).resolve().parents[1]
-with (ROOT / "eval" / "evalset" / "lime_green_ui_acceptance_tests.csv").open(
+with (ROOT / "eval" / "evalset" / "Set 1" / "lime_green_ui_acceptance_tests.csv").open(
         encoding="utf-8-sig", newline="") as stream:
     CASES = {row["test_id"]: row["question"] for row in csv.DictReader(stream)}
 

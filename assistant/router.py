@@ -786,8 +786,16 @@ class Router:
 
         A symptom or a photograph counts as the same signal. Nobody describes
         crazing or attaches a picture about a product range in the abstract.
+
+        An explicit comparison — "compare Ultra and Solo" — is a question about
+        the products themselves, not about their suitability for a specific
+        wall. Substrate is not load-bearing in a comparison.
         """
         if not self._PRODUCT_CHOICE.search(question):
+            return False
+        # Comparison questions don't need a substrate: the user is asking about
+        # the products themselves, not selecting one for their wall.
+        if self._COMPARISON.search(question):
             return False
         # Asking what thickness to apply a product at is not asking which
         # product to use. "Should I use" is the one phrase in
@@ -813,6 +821,12 @@ class Router:
             or "symptom" in slots
             or "photograph" in slots
         )
+
+    # Comparison patterns: user is explicitly comparing products, not selecting
+    # one for their wall. Substrate is not load-bearing when comparing.
+    _COMPARISON = re.compile(
+        r"\b(?:compare|comparison|versus|vs|difference|different|differ|"
+        r"rather than|better than|instead of)\b", re.I)
 
     _LOCATION_SENSITIVE = ("coverage", "thickness", "coats", "drying", "finish",
                            "painting", "temperature")
