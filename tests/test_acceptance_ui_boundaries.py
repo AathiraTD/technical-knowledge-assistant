@@ -34,7 +34,7 @@ PERCEPTION = {
 
 
 def acceptance_question(test_id):
-    path = Path(__file__).resolve().parents[1] / "eval" / "evalset"
+    path = Path(__file__).resolve().parents[1] / "eval" / "evalset" / "Set 1"
     with (path / "lime_green_ui_acceptance_tests.csv").open(encoding="utf-8-sig") as stream:
         return next(row["question"] for row in csv.DictReader(stream)
                     if row["test_id"] == test_id)
