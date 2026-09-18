@@ -24,7 +24,7 @@ import argparse
 import sys
 
 from . import observability as obs, ollama, use_utf8
-from .conversation import TurnInput
+from .turn.conversation import TurnInput
 from .answering.engine import Assistant, render
 from .repository import IndexMismatch
 from .store import EmbeddedRepository

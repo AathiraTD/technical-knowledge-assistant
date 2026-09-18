@@ -63,7 +63,7 @@ from assistant.model import (                                      # noqa: E402
 )
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 from assistant.store.factory import open_repository                # noqa: E402
-from assistant.session import SessionStore                         # noqa: E402
+from assistant.turn.session import SessionStore                         # noqa: E402
 from assistant.ui import SESSION_COOKIE, Handler                   # noqa: E402
 
 DIMS = 1024

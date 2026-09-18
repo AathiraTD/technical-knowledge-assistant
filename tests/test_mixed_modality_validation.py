@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from assistant.answering import vision
 from assistant import ollama
 from assistant.answering.answer import Provenance
-from assistant.conversation import ConversationState, FactStatus, TurnInput
+from assistant.turn.conversation import ConversationState, FactStatus, TurnInput
 from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant.model import Caveat, Chunk, Document, DocumentVersion, Snapshot

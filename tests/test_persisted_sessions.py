@@ -21,8 +21,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from assistant.session import Session, SessionStore, CARRIED_SLOTS, MAX_TURNS, TURN_TEXT_CAP
-from assistant.session_storage import PersistedSessionStore, open_persisted_session_store
+from assistant.turn.session import (
+    Session,
+    SessionStore,
+    CARRIED_SLOTS,
+    MAX_TURNS,
+    TURN_TEXT_CAP,
+)
+from assistant.turn.session_storage import (
+    PersistedSessionStore,
+    open_persisted_session_store,
+)
 
 
 @pytest.fixture

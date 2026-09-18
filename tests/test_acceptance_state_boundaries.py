@@ -5,11 +5,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from assistant import graph, observability as obs, ollama
+from assistant.turn import graph
+from assistant import observability as obs, ollama
 from assistant.answering import understanding as und
 from assistant.answering.answer import Answer, Provenance
-from assistant.conversation import (
-    ConversationState, FactStatus, SessionFact, merge_facts)
+from assistant.turn.conversation import (
+    ConversationState,
+    FactStatus,
+    SessionFact,
+    merge_facts,
+)
 from assistant.answering.router import PolicyGate, SlotDetector
 
 

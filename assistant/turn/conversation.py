@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
-from .answering.answer import Provenance
+from ..answering.answer import Provenance
 
 # How much a single turn may add. A conversation is a handful of facts about one
 # building; anything past this is either an attack or a bug, and both are better

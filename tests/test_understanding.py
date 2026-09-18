@@ -34,8 +34,11 @@ from assistant.answering import understanding as u
 from assistant.answering.answer import (  # noqa: E402
     Provenance,
 )
-from assistant.conversation import (                                # noqa: E402
-    ConversationState, FactStatus, SessionFact, merge_facts,
+from assistant.turn.conversation import (
+    ConversationState,
+    FactStatus,
+    SessionFact,
+    merge_facts,
 )
 from assistant.answering.router import (  # noqa: E402
     SlotDetector,

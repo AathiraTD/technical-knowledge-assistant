@@ -30,7 +30,7 @@ from assistant.model import (
 )
 from assistant.store import SQLiteKnowledgeRepository
 from assistant.store.factory import open_repository
-from assistant.session import SessionStore
+from assistant.turn.session import SessionStore
 from assistant.ui import SESSION_COOKIE, Handler
 
 DIMS = 1024

@@ -27,9 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant.answering.answer import (  # noqa: E402
     Provenance,
 )
-from assistant.conversation import (                               # noqa: E402
-    MAX_FACTS_PER_TURN, OBSERVABLE_SLOTS, ConversationState, FactHistory,
-    FactStatus, SessionFact, TurnInput, merge_facts,
+from assistant.turn.conversation import (
+    MAX_FACTS_PER_TURN,
+    OBSERVABLE_SLOTS,
+    ConversationState,
+    FactHistory,
+    FactStatus,
+    SessionFact,
+    TurnInput,
+    merge_facts,
 )
 
 

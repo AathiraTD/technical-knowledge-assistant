@@ -55,8 +55,8 @@ def open_persisted_session_store(db="data/index/knowledge.db", dsn=None):
     Returns a PersistedSessionStore if a connection can be established,
     otherwise a regular (in-memory) SessionStore.
     """
-    from ..session import SessionStore
-    from ..session_storage import PersistedSessionStore
+    from ..turn.session import SessionStore
+    from ..turn.session_storage import PersistedSessionStore
 
     connection_string = os.environ.get("ASSISTANT_POSTGRES_DSN", "") if dsn is None else dsn
 

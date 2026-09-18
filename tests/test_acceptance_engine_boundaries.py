@@ -9,7 +9,7 @@ import pytest
 from assistant.answering import vision
 from assistant import ollama
 from assistant.answering.answer import Answer, Provenance
-from assistant.conversation import ConversationState, FactHistory, SessionFact
+from assistant.turn.conversation import ConversationState, FactHistory, SessionFact
 from assistant.answering.engine import Assistant
 from assistant.model import Retrieved, Snapshot
 from assistant.answering.router import Decision, Path_
@@ -342,7 +342,7 @@ def test_only_real_cache_hits_are_marked(assistant, entrypoint):
 def test_nonassertions_cannot_enter_legacy_remember(
         assistant, monkeypatch, question, entrypoint):
     from assistant.answering.engine import Reply
-    from assistant.session import SessionStore
+    from assistant.turn.session import SessionStore
     from assistant.ui import Handler
 
     monkeypatch.setattr(ollama, "generate", lambda *_a, **_k: ("", 0.0))
@@ -393,7 +393,7 @@ def test_mixed_state_and_safety_never_short_circuits_policy(
     if entrypoint == "ask":
         answers = [a for _, a in assistant.ask(question).parts]
     elif entrypoint == "ask_turn":
-        from assistant.conversation import TurnInput
+        from assistant.turn.conversation import TurnInput
 
         reply, _ = assistant.ask_turn(TurnInput(
             raw_question=question, session_id="mandatory", turn_index=1))
@@ -405,7 +405,7 @@ def test_mixed_state_and_safety_never_short_circuits_policy(
 
 
 def test_graph_topic_projection_never_claims_installation(assistant):
-    from assistant.conversation import TurnInput
+    from assistant.turn.conversation import TurnInput
 
     reply, state = assistant.ask_turn(TurnInput(
         raw_question=CASES["T07"], session_id="topic-only", turn_index=1))
@@ -420,7 +420,7 @@ def test_graph_topic_projection_never_claims_installation(assistant):
 
 
 def test_policy_message_cannot_be_consumed_as_paused_slot_reply(assistant, monkeypatch):
-    from assistant.conversation import TurnInput
+    from assistant.turn.conversation import TurnInput
 
     monkeypatch.setattr(assistant.retriever, "search", forbidden)
     reply, _ = assistant.ask_turn(TurnInput(

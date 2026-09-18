@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from assistant.session import SessionStore
+from assistant.turn.session import SessionStore
 
 
 class TestBuildContext:
@@ -75,7 +75,7 @@ class TestBuildContext:
 
     def test_turns_capped_at_max_turns(self):
         """Turns history is capped, so context uses most recent."""
-        from assistant.session import MAX_TURNS
+        from assistant.turn.session import MAX_TURNS
 
         sessions = SessionStore()
         session_id = sessions.open()

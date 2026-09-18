@@ -41,9 +41,7 @@ from assistant import ollama                                # noqa: E402
 from assistant.answering.answer import (  # noqa: E402
     Provenance,
 )
-from assistant.conversation import (                                # noqa: E402
-    ConversationState, FactStatus, TurnInput,
-)
+from assistant.turn.conversation import ConversationState, FactStatus, TurnInput
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )

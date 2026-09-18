@@ -248,7 +248,7 @@ import pytest                                                       # noqa: E402
 
 from assistant.retrieval import candidates as cand
 from assistant import ollama                                        # noqa: E402
-from assistant.conversation import TurnInput                        # noqa: E402
+from assistant.turn.conversation import TurnInput                        # noqa: E402
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )

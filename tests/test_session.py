@@ -24,9 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.session import (                                      # noqa: E402
-    CARRIED_SLOTS, MAX_TURNS, TURN_TEXT_CAP, SessionStore,
-)
+from assistant.turn.session import CARRIED_SLOTS, MAX_TURNS, TURN_TEXT_CAP, SessionStore
 
 
 class FakeClock:

@@ -31,7 +31,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import ollama                                       # noqa: E402
-from assistant.conversation import TurnInput                       # noqa: E402
+from assistant.turn.conversation import TurnInput                       # noqa: E402
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
@@ -220,7 +220,7 @@ def test_a_caller_with_no_way_to_resume_gets_the_question_rendered_instead(assis
     It must produce the same *answer*; only the machinery differs. A caller that
     cannot resume should not get a different hand-off from one that can.
     """
-    from assistant.graph import Services, build
+    from assistant.turn.graph import Services, build
 
     services = Services(retriever=assistant.retriever, router=assistant.router,
                         engine=assistant, repo=assistant.repo,

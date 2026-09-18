@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.answering import vision
 from assistant import ollama                                 # noqa: E402
-from assistant.conversation import ConversationState, TurnInput      # noqa: E402
+from assistant.turn.conversation import ConversationState, TurnInput      # noqa: E402
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )

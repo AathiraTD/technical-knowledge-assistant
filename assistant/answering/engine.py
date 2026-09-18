@@ -176,7 +176,7 @@ class Assistant:
         exists for: `build()` used to make a fresh `InMemorySaver` on every
         call, so `thread_id` addressed a store that was empty by construction.
         """
-        from ..graph import checkpointer_for
+        from ..turn.graph import checkpointer_for
 
         # `ASSISTANT_CHECKPOINT_DSN`, not `ASSISTANT_POSTGRES_DSN`: where the
         # knowledge lives and where a half-finished conversation lives are
@@ -428,7 +428,7 @@ class Assistant:
         origin says otherwise. A supplied ConversationState is authoritative,
         retaining conflicts and observation provenance rather than flattening it.
         """
-        from ..conversation import ConversationState, FactHistory, SessionFact
+        from ..turn.conversation import ConversationState, FactHistory, SessionFact
         from .understanding import state_only_answer
 
         if state is None:
@@ -467,7 +467,7 @@ class Assistant:
         registry in particular, because check 5 trusts it and a product
         withdrawn since start-up must stop being recommendable.
         """
-        from ..graph import Services, build
+        from ..turn.graph import Services, build
 
         if self._services is None:
             self._services = Services(
@@ -593,7 +593,7 @@ class Assistant:
         A read-only view for a surface that wants to show what is remembered.
         The checkpoint is authoritative; this is a projection of it.
         """
-        from ..conversation import ConversationState
+        from ..turn.conversation import ConversationState
 
         try:
             saved = self.checkpointer.get({"configurable": {"thread_id": thread}})
@@ -608,7 +608,7 @@ class Assistant:
 
     @staticmethod
     def _conversation_facts(values):
-        from ..conversation import FactHistory, SessionFact
+        from ..turn.conversation import FactHistory, SessionFact
 
         facts = dict(values.get("facts") or {})
         topic = values.get("active_product")
@@ -643,7 +643,7 @@ class Assistant:
         and a stale list would let a withdrawn product through. And the **span
         tree is collected and persisted** once the root span closes.
         """
-        from ..conversation import ConversationState
+        from ..turn.conversation import ConversationState
 
         state = state or ConversationState()
         reply = Reply(question=turn.raw_question, audiences=turn.audiences)

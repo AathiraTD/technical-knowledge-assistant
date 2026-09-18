@@ -56,7 +56,7 @@ from .audience import DEFAULT as PUBLIC_ONLY, resolve
 from .answering.engine import Assistant
 from .repository import IndexMismatch
 from .answering.router import Path_
-from .session import SessionStore
+from .turn.session import SessionStore
 from .store.factory import open_repository, open_persisted_session_store
 
 # Named for what it is and scoped to this server. HttpOnly because no script on
@@ -1470,7 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
         separation is the whole of `tests/test_context_isolation.py`, and it is
         why `_build_context` is read here and nowhere earlier.
         """
-        from .conversation import TurnInput
+        from .turn.conversation import TurnInput
 
         turn = TurnInput(
             raw_question=question,

@@ -26,7 +26,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.retrieval import candidates as cand
-from assistant import graph as g                                    # noqa: E402
+from assistant.turn import graph as g
 from assistant import ollama                                        # noqa: E402
 from assistant.answering import understanding as und
 from assistant.answering.answer import (  # noqa: E402
@@ -34,8 +34,11 @@ from assistant.answering.answer import (  # noqa: E402
     Provenance,
     SlotFact,
 )
-from assistant.conversation import (                                # noqa: E402
-    ConversationState, FactStatus, SessionFact, TurnInput,
+from assistant.turn.conversation import (
+    ConversationState,
+    FactStatus,
+    SessionFact,
+    TurnInput,
 )
 from assistant.answering.engine import (  # noqa: E402
     Assistant,

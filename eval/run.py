@@ -67,10 +67,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant.answering.answer import Provenance                  # noqa: E402
-from assistant.conversation import TurnInput             # noqa: E402
+from assistant.turn.conversation import TurnInput             # noqa: E402
 from assistant.answering.engine import Assistant, render          # noqa: E402
 from assistant.answering.router import Path_                      # noqa: E402
-from assistant.session import SessionStore              # noqa: E402
+from assistant.turn.session import SessionStore              # noqa: E402
 from assistant.store.factory import open_repository     # noqa: E402
 
 HERE = Path(__file__).resolve().parent

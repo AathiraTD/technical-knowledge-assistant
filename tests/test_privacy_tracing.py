@@ -93,11 +93,11 @@ def test_importing_the_package_closes_it():
 
 
 def test_importing_the_graph_closes_it():
-    assert not traced("import assistant.graph;" + ASK, HOSTILE)
+    assert not traced("import assistant.turn.graph;" + ASK, HOSTILE)
 
 
 @pytest.mark.parametrize("module", ["assistant.ui", "assistant.cli",
-                                    "assistant.answering.engine", "assistant.graph"])
+                                    "assistant.answering.engine", "assistant.turn.graph"])
 def test_importing_any_surface_closes_it(module):
     """Whichever entry point a deployment happens to load first."""
     assert not traced(f"import {module};" + ASK, HOSTILE)
@@ -105,7 +105,7 @@ def test_importing_any_surface_closes_it(module):
 
 def test_the_whole_application_together_closes_it():
     assert not traced(
-        "import assistant.ui, assistant.cli, assistant.answering.engine, assistant.graph;"
+        "import assistant.ui, assistant.cli, assistant.answering.engine, assistant.turn.graph;"
         + ASK, HOSTILE)
 
 
@@ -124,7 +124,7 @@ def test_no_single_switch_can_reopen_it(variable):
     env = {variable: "true",
            "LANGSMITH_API_KEY": "ls__fake_key_for_the_test"}
 
-    assert not traced("import assistant.graph;" + ASK, env)
+    assert not traced("import assistant.turn.graph;" + ASK, env)
 
 
 def test_the_guard_survives_something_rewriting_the_environment_afterwards():
@@ -135,7 +135,7 @@ def test_the_guard_survives_something_rewriting_the_environment_afterwards():
     fallback too, which outranks the environment — so re-setting a variable
     after import does not reopen it.
     """
-    code = ("import assistant.graph;"
+    code = ("import assistant.turn.graph;"
             "import os;"
             "os.environ['LANGCHAIN_TRACING_V2'] = 'true';"
             "os.environ['LANGSMITH_TRACING'] = 'true';"
@@ -150,7 +150,7 @@ def test_the_guard_survives_something_rewriting_the_environment_afterwards():
 def test_our_own_observability_is_untouched():
     """The point is not "no telemetry". It is "our telemetry, not theirs"."""
     out = run(
-        "import assistant.graph;"
+        "import assistant.turn.graph;"
         "from assistant import observability as obs;"
         "obs.event('probe', n=1);"
         "print('OURS=ok')", HOSTILE)
@@ -161,7 +161,7 @@ def test_our_own_observability_is_untouched():
 def test_no_langsmith_client_is_constructed_at_import():
     """A configured client is a socket waiting for a reason to be used."""
     out = run(
-        "import assistant.graph;"
+        "import assistant.turn.graph;"
         "from langsmith._internal import _context as c;"
         "print('CLIENT=' + str(c._GLOBAL_CLIENT is not None));"
         + ASK, HOSTILE)
@@ -175,7 +175,7 @@ def test_the_module_reports_its_own_state_truthfully():
     The earlier version of this check inspected environment variables, which is
     how a hole that lived in a different one of the four inputs went unnoticed.
     """
-    out = run("import assistant.graph as g;"
+    out = run("import assistant.turn.graph as g;"
               "print('SELFREPORT=' + str(g.tracing_disabled()));" + ASK, HOSTILE)
 
     assert "SELFREPORT=True" in out

@@ -14,7 +14,7 @@ import pytest
 
 from assistant.answering.engine import Assistant
 from assistant.answering.router import SlotDetector
-from assistant.session import SessionStore
+from assistant.turn.session import SessionStore
 
 
 class TestSlotDetectorAnswerToAskback:
