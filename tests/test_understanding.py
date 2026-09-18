@@ -104,6 +104,39 @@ def test_a_product_choice_is_ambiguous_enough_to_be_worth_the_call(detector):
     assert u.ambiguous(reading, "What product should I use on my wall?")
 
 
+def test_an_excluded_product_does_not_turn_a_lookup_into_a_selection(detector):
+    """Naming a product in order to rule it out is not choosing it.
+
+    The question names three products, so reading the raw sentence found no
+    single target and fell through to SELECT -- which sent a question about one
+    stated product to the selection gate and had it ask for a substrate rather
+    than print two figures the Ultra datasheet publishes.
+    """
+    question = ("I'm using Lime Green Ultra. What thickness and mixing water "
+                "should I use? Please don't give me figures for Solo or Duro.")
+    reading = u.deterministic(question, detector, registry=REGISTRY)
+
+    assert reading.intent is u.Intent.VERIFY
+
+
+@pytest.mark.parametrize("question, intent", [
+    # Still a selection: no product is named as the subject.
+    ("Which plaster should I use?", "SELECT"),
+    ("What product should I use on my wall?", "SELECT"),
+    # Still a selection: comparing alternatives names neither as the subject,
+    # so two products in the sentence must not read as one chosen product.
+    ("Which is best for a brick wall, Solo or Duro?", "SELECT"),
+    ("Should I use Solo or Duro on brick?", "SELECT"),
+    ("Which plaster should I use, Solo or Duro?", "SELECT"),
+    # A named product the question is actually about.
+    ("Would Lime Green Ultra be suitable internally?", "VERIFY"),
+    ("Is Ultra suitable for my wall?", "VERIFY"),
+])
+def test_selection_and_verification_stay_separated(detector, question, intent):
+    reading = u.deterministic(question, detector, registry=REGISTRY)
+    assert reading.intent is getattr(u.Intent, intent), question
+
+
 def test_a_symptom_reads_as_troubleshoot(detector):
     reading = u.deterministic("My render is crazing and blowing", detector)
 

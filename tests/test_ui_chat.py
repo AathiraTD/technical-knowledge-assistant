@@ -186,11 +186,27 @@ def test_sources_disclosure_in_answer(server):
 
 
 def test_diagnostics_disclosure_in_answer(server):
-    """Answer includes collapsible diagnostics (Why this answer?)."""
-    status, body = get(server, "/", q="How much water does Solo need per bag")
+    """The routing view is the operator's, behind `v=1`, not a customer's."""
+    status, body = get(server, "/", q="How much water does Solo need per bag", v="1")
 
     assert status == 200
     assert "Why this answer?" in body, "diagnostics disclosure should be present"
+
+
+def test_no_diagnostics_disclosure_for_a_normal_visitor(server):
+    """The demo page answers the question without explaining its own routing."""
+    status, body = get(server, "/", q="How much water does Solo need per bag")
+
+    assert status == 200
+    # Asserted against the rendered markup rather than the whole document: the
+    # caption and the class name both still occur inside the page's own script,
+    # which builds the panel when an operator asks for it. What matters is that
+    # this response rendered no panel, and that the script's gate is shut.
+    assert 'class="diagnostics-disclosure"' not in body
+    assert 'class="diagnostics-list"' not in body
+    assert "renderDiagnostics" in body, "the operator's renderer still ships"
+    assert "DIAGNOSTICS_VISIBLE" in body
+    assert "get('v') === '1'" in body, "the client gate reads the same switch"
 
 
 def test_refusal_shows_landing_info(server):
