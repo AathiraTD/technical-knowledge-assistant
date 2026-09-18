@@ -297,6 +297,7 @@ class Assistant:
         # argument and arrives after the route and the passages are decided.
         history = context
         question = cap(question)
+        question = self._normalize_question(question)
         reply = Reply(question=question, audiences=audiences)
 
         observed: dict[str, str] = {}
@@ -605,6 +606,38 @@ class Assistant:
         return ConversationState(facts=self._conversation_facts(values),
                                  observations=tuple(values.get("observations") or ()),
                                  turn_index=values.get("turn_index", 0))
+
+    @staticmethod
+    def _normalize_question(question: str) -> str:
+        """Rewrite 'For [product], tell me...' into '[product]: ...'
+
+        Removes ambiguity about whether this is a recommendation request or a
+        property lookup. The declarative format signals a factual lookup, not advice.
+        """
+        import re
+
+        match = re.search(
+            r"for\s+((?:lime\s+)?green\s+\w+)\s*[,:]?\s+tell\s+me\s+(.+?)(?:\?|$)",
+            question,
+            re.IGNORECASE
+        )
+        if match:
+            product = match.group(1)
+            properties = match.group(2).strip()
+            # Remove leading "the "
+            properties = re.sub(r"^the\s+", "", properties, flags=re.IGNORECASE)
+            # Clean up filler words, preserving spaces
+            properties = re.sub(r"\s*\brequired\b\s*", " ", properties, flags=re.IGNORECASE)
+            properties = re.sub(r"\s*\bapplication\b\s*", " ", properties, flags=re.IGNORECASE)
+            properties = re.sub(r"\s+or\s+.*?conditions", "", properties, flags=re.IGNORECASE)
+            properties = re.sub(r"\s*\band\s+conditions\b", "", properties, flags=re.IGNORECASE)
+            # Normalize spaces and commas
+            properties = re.sub(r"\s+", " ", properties).strip()
+            properties = re.sub(r"\s*,\s*", ", ", properties)
+            properties = properties.strip(", ")
+            return f"{product}: {properties}"
+
+        return question
 
     @staticmethod
     def _conversation_facts(values):
