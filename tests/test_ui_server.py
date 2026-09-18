@@ -53,7 +53,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import observability as obs, ollama                 # noqa: E402
-from assistant import ui                                           # noqa: E402
+from assistant.interfaces import ui
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
@@ -64,7 +64,10 @@ from assistant.model import (                                      # noqa: E402
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 from assistant.store.factory import open_repository                # noqa: E402
 from assistant.turn.session import SessionStore                         # noqa: E402
-from assistant.ui import SESSION_COOKIE, Handler                   # noqa: E402
+from assistant.interfaces.ui import (  # noqa: E402
+    SESSION_COOKIE,
+    Handler,
+)
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"
@@ -654,7 +657,7 @@ def test_an_index_rebuilt_with_another_model_stops_the_page_answering(
 
 
 def test_main_binds_serves_the_page_and_stops_cleanly(db, bound, capsys):
-    """`python -m assistant.ui` is the whole demonstration, start to finish."""
+    """`python -m assistant.interfaces.ui` is the whole demonstration, start to finish."""
     with serving(["--db", db, "--port", "0", "--no-browser"], bound) as (base, code):
         status, body = get(base, "/", q="How much water does Solo need per bag")
         assert status == 200, body

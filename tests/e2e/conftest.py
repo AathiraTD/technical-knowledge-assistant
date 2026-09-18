@@ -79,7 +79,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def server(tmp_path_factory) -> str:
-    """A real `python -m assistant.ui`, on its own port, polled until ready.
+    """A real `python -m assistant.interfaces.ui`, on its own port, polled until ready.
 
     A subprocess rather than a thread, because the thing under test includes
     `main` -- the audience the server was started with, the store it opened, the
@@ -101,7 +101,7 @@ def server(tmp_path_factory) -> str:
     log = tmp_path_factory.mktemp("server") / "ui.log"
     handle = log.open("wb")
     process = subprocess.Popen(
-        [sys.executable, "-m", "assistant.ui", "--port", str(port),
+        [sys.executable, "-m", "assistant.interfaces.ui", "--port", str(port),
          "--no-browser", "--host", "127.0.0.1"],
         cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"

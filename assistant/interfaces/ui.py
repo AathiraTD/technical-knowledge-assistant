@@ -1,6 +1,6 @@
 """A web page over the same library, served from the standard library.
 
-`python -m assistant.ui`, then open the address it prints.
+`python -m assistant.interfaces.ui`, then open the address it prints.
 
 No Streamlit and no Flask. Streamlit pulls pyarrow, which publishes no Windows
 ARM64 wheel and falls back to a source build needing MSVC -- a clean-clone
@@ -50,14 +50,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
-from . import health, metrics, observability as obs, ollama, use_utf8
-from .answering.answer import Provenance
-from .audience import DEFAULT as PUBLIC_ONLY, resolve
-from .answering.engine import Assistant
-from .repository import IndexMismatch
-from .answering.router import Path_
-from .turn.session import SessionStore
-from .store.factory import open_repository, open_persisted_session_store
+from .. import health, metrics, observability as obs, ollama, use_utf8
+from ..answering.answer import Provenance
+from ..audience import DEFAULT as PUBLIC_ONLY, resolve
+from ..answering.engine import Assistant
+from ..repository import IndexMismatch
+from ..answering.router import Path_
+from ..turn.session import SessionStore
+from ..store.factory import open_repository, open_persisted_session_store
 
 # Named for what it is and scoped to this server. HttpOnly because no script on
 # the page has any use for it, SameSite=Lax because a session that follows a
@@ -1470,7 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
         separation is the whole of `tests/test_context_isolation.py`, and it is
         why `_build_context` is read here and nowhere earlier.
         """
-        from .turn.conversation import TurnInput
+        from ..turn.conversation import TurnInput
 
         turn = TurnInput(
             raw_question=question,
@@ -1613,7 +1613,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(argv: list[str] | None = None) -> int:
     use_utf8()
-    parser = argparse.ArgumentParser(prog="assistant.ui")
+    parser = argparse.ArgumentParser(prog="assistant.interfaces.ui")
     parser.add_argument("-p", "--port", type=int, default=8765)
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind address; 0.0.0.0 inside a container")

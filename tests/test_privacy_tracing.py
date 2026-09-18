@@ -96,7 +96,7 @@ def test_importing_the_graph_closes_it():
     assert not traced("import assistant.turn.graph;" + ASK, HOSTILE)
 
 
-@pytest.mark.parametrize("module", ["assistant.ui", "assistant.cli",
+@pytest.mark.parametrize("module", ["assistant.interfaces.ui", "assistant.interfaces.cli",
                                     "assistant.answering.engine", "assistant.turn.graph"])
 def test_importing_any_surface_closes_it(module):
     """Whichever entry point a deployment happens to load first."""
@@ -105,7 +105,7 @@ def test_importing_any_surface_closes_it(module):
 
 def test_the_whole_application_together_closes_it():
     assert not traced(
-        "import assistant.ui, assistant.cli, assistant.answering.engine, assistant.turn.graph;"
+        "import assistant.interfaces.ui, assistant.interfaces.cli, assistant.answering.engine, assistant.turn.graph;"
         + ASK, HOSTILE)
 
 

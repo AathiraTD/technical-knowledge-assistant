@@ -128,7 +128,7 @@ Opens http://127.0.0.1:8765 in your browser.
 
 ```bash
 pip install -r requirements.txt
-python -m assistant.ui
+python -m assistant.interfaces.ui
 ```
 
 ### Enable vision (optional, slow on CPU)
@@ -141,7 +141,7 @@ python -m assistant.ui
 
 ```bash
 python -m eval.run              # Structured conversation evaluation
-python -m assistant.cli -q "..."  # Single-turn CLI
+python -m assistant.interfaces.cli -q "..."  # Single-turn CLI
 python -m assistant.health      # Readiness check
 python -m pytest tests/          # Unit/integration tests
 ```

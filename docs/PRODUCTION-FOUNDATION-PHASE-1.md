@@ -203,7 +203,7 @@ Schema additions for observability (already implemented):
 
 1. Start stack: `docker compose up -d`
 2. Wait for health: `docker compose ps` (all healthy)
-3. Ask a question: `docker compose exec app python -m assistant.cli "How much water does Solo need?"`
+3. Ask a question: `docker compose exec app python -m assistant.interfaces.cli "How much water does Solo need?"`
 4. Verify answer contains expected facts
 5. Repeat question, verify cache hit (< 2s)
 6. Stop stack: `docker compose down`

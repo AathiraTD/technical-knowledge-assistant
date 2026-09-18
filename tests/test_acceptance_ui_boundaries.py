@@ -13,7 +13,7 @@ from urllib.request import urlopen
 import pytest
 from bs4 import BeautifulSoup
 
-from assistant import ui
+from assistant.interfaces import ui
 from assistant.answering.answer import Answer
 from assistant.answering.engine import Reply
 

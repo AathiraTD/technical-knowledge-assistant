@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assistant.answering import vision
 from assistant import ollama                                # noqa: E402
-from assistant import ui                                            # noqa: E402
+from assistant.interfaces import ui
 from assistant.answering.answer import (  # noqa: E402
     Provenance,
     SlotFact,
@@ -67,7 +67,11 @@ from assistant.answering.router import (  # noqa: E402
     Path_,
 )
 from assistant.store.factory import open_repository                 # noqa: E402
-from assistant.ui import Handler, MAX_IMAGES_PER_SESSION, sniff     # noqa: E402
+from assistant.interfaces.ui import (  # noqa: E402
+    Handler,
+    MAX_IMAGES_PER_SESSION,
+    sniff,
+)
 
 from test_engine import build_repo, quoting, unit                   # noqa: E402
 
@@ -412,7 +416,7 @@ def test_a_photographed_answer_is_not_served_to_a_caller_without_one(
 
 def test_the_cli_passes_repeated_image_flags_through(tmp_path, monkeypatch):
     """`--image` is repeatable and reaches `ask` as a list, in order."""
-    from assistant import cli
+    from assistant.interfaces import cli
 
     build_repo(tmp_path, two_documents=True).close()
     monkeypatch.setattr(ollama, "embed_one", lambda *_a, **_k: unit(0))

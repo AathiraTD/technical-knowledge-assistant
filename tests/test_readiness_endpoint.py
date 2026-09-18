@@ -42,7 +42,9 @@ from assistant.model import (                                      # noqa: E402
 )
 from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
 from assistant.store.factory import open_repository                # noqa: E402
-from assistant.ui import Handler                                   # noqa: E402
+from assistant.interfaces.ui import (  # noqa: E402
+    Handler,
+)
 
 URL = "https://example.invalid/solo"
 DIMS = 1024

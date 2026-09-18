@@ -343,7 +343,7 @@ def test_nonassertions_cannot_enter_legacy_remember(
         assistant, monkeypatch, question, entrypoint):
     from assistant.answering.engine import Reply
     from assistant.turn.session import SessionStore
-    from assistant.ui import Handler
+    from assistant.interfaces.ui import Handler
 
     monkeypatch.setattr(ollama, "generate", lambda *_a, **_k: ("", 0.0))
     answer = call(assistant, entrypoint, question)

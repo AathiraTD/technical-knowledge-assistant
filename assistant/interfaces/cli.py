@@ -1,6 +1,6 @@
 """The canonical interface.
 
-`python -m assistant.cli` for a session, or `-q` for one question. The web page
+`python -m assistant.interfaces.cli` for a session, or `-q` for one question. The web page
 is a view over this same library and adds no behaviour of its own, which is why
 this is the interface the evaluation harness drives.
 
@@ -23,12 +23,12 @@ import os
 import argparse
 import sys
 
-from . import observability as obs, ollama, use_utf8
-from .turn.conversation import TurnInput
-from .answering.engine import Assistant, render
-from .repository import IndexMismatch
-from .store import EmbeddedRepository
-from .store.factory import open_repository
+from .. import observability as obs, ollama, use_utf8
+from ..turn.conversation import TurnInput
+from ..answering.engine import Assistant, render
+from ..repository import IndexMismatch
+from ..store import EmbeddedRepository
+from ..store.factory import open_repository
 
 BANNER = """Lime Green technical assistant
 Answers only from Lime Green's published material, cites every source, and
@@ -48,7 +48,7 @@ def _open(args) -> EmbeddedRepository:
 def main(argv: list[str] | None = None) -> int:
     use_utf8()
     parser = argparse.ArgumentParser(
-        prog="assistant.cli", description="Ask the Lime Green technical assistant.")
+        prog="assistant.interfaces.cli", description="Ask the Lime Green technical assistant.")
     parser.add_argument("-q", "--question", help="ask one question and exit")
     parser.add_argument("-a", "--audience", default="public",
                         help="comma-separated: public, trade, staff")

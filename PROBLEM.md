@@ -168,8 +168,8 @@ pip install -r requirements.txt
 ollama pull qwen3.5:4b
 ollama pull qwen3-embedding:0.6b
 python -m assistant.indexing.index      # builds from the shipped cache; no network
-python -m assistant.cli        # ask a question
-python -m assistant.ui         # the same library behind a web page
+python -m assistant.interfaces.cli        # ask a question
+python -m assistant.interfaces.ui         # the same library behind a web page
 python -m eval.run             # situations, probes, sweep, audience filter
 python -m assistant.health     # is it actually able to answer?
 

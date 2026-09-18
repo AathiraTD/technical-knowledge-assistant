@@ -73,7 +73,7 @@ that fixes it:
    queries another.
 3. **Knowledge index** — present, or offered as a build.
 4. **Readiness** — `python -m assistant.health`, the table in §4.
-5. **Serving** — `python -m assistant.ui`.
+5. **Serving** — `python -m assistant.interfaces.ui`.
 
 A failure looks like this, and never like a traceback:
 
@@ -421,7 +421,7 @@ was being carried, which is usually the explanation.
 **Nothing is working and there are two minutes left.** Fall back to the CLI —
 it uses the same library and needs no server:
 ```powershell
-python -m assistant.cli -q "How much water does Solo Onecoat need per bag?" -v
+python -m assistant.interfaces.cli -q "How much water does Solo Onecoat need per bag?" -v
 ```
 and to the recorded transcript, `eval/results/transcript.txt`.
 

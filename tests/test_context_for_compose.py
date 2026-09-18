@@ -231,7 +231,7 @@ class TestHistoryCarriesQuestionsNotAnswers:
 
     def _handler(self):
         """A Handler bound to a real SessionStore, without opening a socket."""
-        from assistant import ui
+        from assistant.interfaces import ui
 
         handler = ui.Handler.__new__(ui.Handler)
         handler.sessions = SessionStore()

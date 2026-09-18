@@ -22,7 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant import observability as obs, ollama
-from assistant import ui
+from assistant.interfaces import ui
 from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant.model import (
@@ -31,7 +31,7 @@ from assistant.model import (
 from assistant.store import SQLiteKnowledgeRepository
 from assistant.store.factory import open_repository
 from assistant.turn.session import SessionStore
-from assistant.ui import SESSION_COOKIE, Handler
+from assistant.interfaces.ui import SESSION_COOKIE, Handler
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"

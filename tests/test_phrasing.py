@@ -315,7 +315,7 @@ def test_a_polished_answer_renders_through_the_page_unchanged_in_structure(
     """
     from bs4 import BeautifulSoup
 
-    from assistant import ui
+    from assistant.interfaces import ui
     from assistant.answering.engine import Reply
 
     monkeypatch.setenv(phrasing.PHRASING_FLAG, "1")

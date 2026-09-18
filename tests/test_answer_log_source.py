@@ -81,8 +81,8 @@ def test_every_surface_names_itself():
     table.
     """
     surfaces = {
-        "assistant/cli.py": 'source="cli"',
-        "assistant/ui.py": 'source="web"',
+        "assistant/interfaces/cli.py": 'source="cli"',
+        "assistant/interfaces/ui.py": 'source="web"',
         "eval/run.py": 'source="evaluation"',
     }
     for path, expected in surfaces.items():

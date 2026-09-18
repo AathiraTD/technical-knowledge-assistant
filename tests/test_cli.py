@@ -23,7 +23,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant import cli, observability as obs, ollama           # noqa: E402
+from assistant.interfaces import cli
+from assistant import observability as obs, ollama           # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
 from assistant.model import (                                     # noqa: E402
     Caveat, Chunk, Document, DocumentVersion, Snapshot,
@@ -116,7 +117,7 @@ def session(monkeypatch, *lines: str) -> None:
     """Type these lines at the prompt, then end the input as a closed pipe does.
 
     Ending with EOF rather than a sentinel is deliberate: `python -m
-    assistant.cli < questions.txt` is how the session is scripted, and it must
+    assistant.interfaces.cli < questions.txt` is how the session is scripted, and it must
     exit rather than spin on an exhausted stdin.
     """
     queue = list(lines)
