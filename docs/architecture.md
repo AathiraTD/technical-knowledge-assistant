@@ -171,7 +171,7 @@ flowchart TD
     DEFER["Cited hand-off<br/>the deferral sentence quoted and cited"]
     REFUSE["Refuse"]
     MODEL["Local LLM [Ollama]<br/>context-only prompt, passages delimited as data · temperature 0 · fixed seed · fixed model tag<br/>five passages, at most three per document · answer capped at about 200 tokens<br/>[prompt]: never blend two versions; never interchangeable without a passage; never judge or promise an outcome; no evaluation of other brands"]
-    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage"]
+    CHECKS["Post-generation checks, in order<br/>1 every sentence cited, with word overlap to its passage<br/>2 numbers verbatim in the cited passage (units normalised for comparison only)<br/>3 numbers stay with their product<br/>4 qualifiers and caveats travel with their figure inside the printed passage; document-level caveats are appended separately<br/>5 real names only: products, colours, documents, merchants — name lists built at ingestion<br/>6 the asked-for property or substrate term, or a synonym, appears in a cited passage<br/>7 the answer is about the product that was asked about, not a different product"]
     HANDOFF["Hand-off renderer — for refusal, diagnosis, cited hand-off and ask-back<br/>on refusal, names what was looked for: 'not stated in the indexed material'; on ask-back, names the detail needed;<br/>what is published first, with its source; if the photograph slot is set: 'cannot see photographs' and the two details to send;<br/>then the contact line and hours from the manifest<br/>(a richer staff-only refusal view — nearest candidates with scores and passage text — is roadmap, not built)"]
     OUT["Composite reply<br/>parts labelled: answered · from the datasheet · not published · where to go<br/>Answer with [n] markers · Sources: document name (URL)<br/>per-query diagnostics: path taken, chunk ids, sources, scores, layer that fired"]
 
@@ -209,7 +209,7 @@ Four things to say out loud from this diagram:
 
 - **The route is decided by code, before the model sees anything, in a stated order.** Below threshold, then a published deferral (which beats a computed quantity — "how much Solo for MgO board" gets the sheet's "contact us", not a bag count), then symptoms, then the relevance gate, then uncued load-bearing slots, then calculation words, then one document with a factual ask, otherwise compose. Slots are detected before retrieval, but the retrieval-shape steps are evaluated first because a below-threshold or deferring result must not be overridden by a slot-driven branch — and a photograph question that retrieves nothing still gets "cannot see photographs", because the hand-off renderer keys that line on the slot, not the path. Instructions inside a question or a passage change nothing.
 - **The model runs on one path only — Compose — and never originates a fact.** Five paths as the record defines them (route, extract, compose, cited hand-off, refuse); diagnosis is a composite of quoted causes plus hand-off, and calculation is extract over the coverage and pack-size passages with the sum refused. Temperature zero and a fixed seed keep the run repeatable.
-- **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose) or the part refuses with "not stated in the indexed material". A confident retrieval is not enough.
+- **The near-miss is caught by the relevance gate, on both printing paths.** The property or substrate asked for, or a synonym, must appear in the passage (router step 4 on Extract; check 6 on Compose). Product-scope correctness is verified by check 7. A confident retrieval and citation are not enough.
 - **Any failed check goes to Refuse, and a refusal still carries value** — it names what was looked for, prints what is published with its source, appends the document's own caveats, then the contact line from the crawled contact page, never a named individual.
 
 ## 3. Multimodal roadmap — not built
@@ -219,7 +219,7 @@ Photographs arrive in eight of the fifteen external situation archetypes, and th
 Three properties make it consistent with what is already built rather than a parallel system:
 
 - **The vision model never names a product.** Perception, interpretation and recommendation stay separate stages. Collapsing them — "I see rising damp, therefore use Product X" — fuses an uncertain visual inference to a commercial recommendation.
-- **Every observation is auditable.** Value, confidence, source image and the region within it. A bounding box is to a visual claim what a cited passage is to a textual one, which is the same discipline the six checks enforce today.
+- **Every observation is auditable.** Value, confidence, source image and the region within it. A bounding box is to a visual claim what a cited passage is to a textual one, which is the same discipline the seven post-generation checks enforce today.
 - **It feeds the existing router.** Profile values fill slots; below the confidence floor a slot stays uncued and the load-bearing-slot rule already handles it. No new answer path, no new guardrail surface.
 
 Source: [`diagrams/multimodal-roadmap.mmd`](diagrams/multimodal-roadmap.mmd)
@@ -250,7 +250,7 @@ flowchart TD
         direction TB
         SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
         RETR["Retrieval over the knowledge store<br/>on the structured profile, not on the raw question"]
-        ENGINE["Deterministic router → extract or compose<br/>six checks before anything prints"]
+        ENGINE["Deterministic router → extract or compose<br/>seven checks before anything prints"]
         SLOTS2 --> RETR --> ENGINE
     end
 
@@ -299,7 +299,7 @@ Built = in the submission. Roadmap = drawn and argued, not built. The reason eac
 | **Knowledge store** | Built | `documents`, `document_versions`, `chunks`, `document_caveats`, `excluded_documents`, `crawl_runs`, `index_snapshots`. Exactly one active version per document, enforced by a partial unique index rather than by application code. Two adapters behind `KnowledgeRepository`: SQLite for the assessment path (stdlib, ships, offline), PostgreSQL + pgvector for deployment — same tables, same column names, same version semantics, and both implement the same delta contract: `apply_delta`, `active_content_hashes`, `versions` and `crawl_runs` |
 | **Authored configuration** | Built | Routing table; slot, calculation, symptom and property vocabularies with synonyms; deferral phrases; authority and audience rules per source; exclusion rules |
 | **Answer cache** | Built, exact-key | Finished answers keyed on the normalised question, the audience set, the snapshot id, the generation model and the chunking version. Refusals cached too. The template-keyed form decision 14 designs is roadmap; this is the weaker exact-match form, identical on safety and poorer on hit rate |
-| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → six checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
+| **Answer engine** | Built | Split by topic → policy gate per part → slot detection → audience-filtered retrieval → deterministic router → model on Compose only → seven checks → document caveats appended by code → hand-off with value. Depends on `KnowledgeRepository`, never on a database driver |
 | **CLI** | Built | Question and audience set in; answer, sources, refusal and diagnostics out. Canonical: the transcript and the harness run through it |
 | **Web UI** | Built | A thin standard-library HTTP page over the same library, for the demonstration |
 | **Evaluation harness** | Built | Nine transcript situations — including the two multi-source ones decision 7.3 scores grounded reasoning on — plus the probe suite, threshold sweep, pass/fail, self-describing header, and one synthetic staff-tagged fixture that must be invisible in public mode |

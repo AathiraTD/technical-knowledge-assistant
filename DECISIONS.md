@@ -91,7 +91,7 @@ pgvector rather than a dedicated vector database, because the metadata filtering
 
 **Alternatives.** LangChain; LlamaIndex; a framework for ingestion only with hand-rolled retrieval.
 
-**Why this one.** Every guardrail in this design sits exactly where a framework abstracts. The per-document cap lives inside the retriever. Caveat adjacency lives inside the splitter. The six post-generation checks live between generation and printing, which is not a seam most chains expose. A framework would have to be opened and explained anyway, so it buys convenience and costs the thing being assessed. The constraint from the problem statement is explicit: simple, cheap and explainable — nothing the technical team cannot inspect. At 94 documents, the loaders, splitters and store adapters are replaced by five functions.
+**Why this one.** Every guardrail in this design sits exactly where a framework abstracts. The per-document cap lives inside the retriever. Caveat adjacency lives inside the splitter. The seven post-generation checks live between generation and printing, which is not a seam most chains expose. A framework would have to be opened and explained anyway, so it buys convenience and costs the thing being assessed. The constraint from the problem statement is explicit: simple, cheap and explainable — nothing the technical team cannot inspect. At 94 documents, the loaders, splitters and store adapters are replaced by five functions.
 
 **Prove it.** The dependency list is Ollama, an HTTP client, one HTML extractor, PyMuPDF and numpy. The pipeline is five stages, each one function, each independently runnable.
 
@@ -179,7 +179,7 @@ What it must not do is reason *from its own knowledge*. An inference like "Ultra
 
 This is the real reason thinking variants are gated out at G5, stronger than the latency argument: a chain of thought is an invitation to reason past the evidence, and here that is a defect rather than a feature.
 
-**Capability criteria**, weighted by what each failure costs. Note the consequence peculiar to this architecture: the six checks are deterministic and run before printing, so a weaker model does not produce wrong answers here — it produces refusals. Capability shows up as **coverage**, and the weights follow the checks.
+**Capability criteria**, weighted by what each failure costs. Note the consequence peculiar to this architecture: the seven checks are deterministic and run before printing, so a weaker model does not produce wrong answers here — it produces refusals. Capability shows up as **coverage**, and the weights follow the checks.
 
 | # | Criterion | Weight | How it is measured |
 |---|---|---|---|
@@ -240,7 +240,7 @@ Two gate rows are unverified and must be checked when the model is pulled, not a
 | **Licence** — not stated on the library page. Qwen 3 is Apache 2.0, so 3.5 probably is, but "probably" is not a licence | Fall back to `qwen3:4b-instruct`, which is confirmed Apache 2.0 |
 | **Thinking default** — no instruct-only variant is published and the default is undocumented. `qwen3.8` has it on by default and disableable per request, so 3.5 likely does too | Disable it per request; if it cannot be disabled, fall back |
 
-`qwen3:4b-instruct` is the fallback precisely because it passes all five gates cleanly and has no reasoning path to switch off — the safe option if either check goes the wrong way. All three are under 3.5 GB, so pull them together and let the harness print the rubric as a table. The model carrying more answerable questions through the six checks wins, and swapping is one configuration value recorded in the index header.
+`qwen3:4b-instruct` is the fallback precisely because it passes all five gates cleanly and has no reasoning path to switch off — the safe option if either check goes the wrong way. All three are under 3.5 GB, so pull them together and let the harness print the rubric as a table. The model carrying more answerable questions through the seven checks wins, and swapping is one configuration value recorded in the index header.
 
 **Where it breaks.** A four-billion-parameter model is weakest exactly where this design leans on it — suitability and compatibility claims in prose — which is why the guardrails carry that risk rather than the model, and why Extract does not use it at all. `qwen3.5:4b` also carries a vision encoder the text path never touches, which is roughly a gigabyte of download and memory bought for the roadmap rather than for the submission: a deliberate trade, not an oversight. If both candidates score poorly on C2 or C3, the design absorbs it by refusing more often, and the honest thing on slide 3 is the over-refusal number, not a claim about the model.
 
@@ -409,7 +409,7 @@ Collapsing those stages is the failure mode. "I see rising damp, therefore use P
 
 together with a required `cannot_determine_from_image` list — existing plaster composition, moisture source, wall construction depth, substrate suction, structural movement. Forcing the model to enumerate what it *cannot* tell is the visual equivalent of refusing: it is the same discipline as declaring that something is not stated in the indexed material.
 
-**Why this fits what is already built.** The region is to a visual claim what a cited passage is to a textual one — it makes the claim auditable, so a technical advisor can see exactly which pixels produced the observation. That is the same property the six checks enforce on text: nothing prints that cannot be traced. And a confidence below the floor simply leaves the slot uncued, which the load-bearing-slot rule already handles by asking back. The vision path therefore adds **no new answer route**; it fills slots on the router that exists.
+**Why this fits what is already built.** The region is to a visual claim what a cited passage is to a textual one — it makes the claim auditable, so a technical advisor can see exactly which pixels produced the observation. That is the same property the seven checks enforce on text: nothing prints that cannot be traced. And a confidence below the floor simply leaves the slot uncued, which the load-bearing-slot rule already handles by asking back. The vision path therefore adds **no new answer route**; it fills slots on the router that exists.
 
 **The guided visual survey.** One photograph rarely carries the recommendation-critical facts — a rendered wall hides its own substrate — so the assistant asks for more: a wider shot, an exposed section where the render has fallen away, the ground line and drainage. That turns image upload into a remote visual survey rather than a chatbot with an attachment, and it is the honest interaction, because it is what an advisor does on the phone today. It depends on carrying the situation across turns, which is already on the roadmap for the same reason.
 
@@ -542,7 +542,7 @@ badly, one requirement at a time. The 47-line runner is only 47 lines because it
 does not yet do durable checkpointing, resume, or time travel.
 
 **What was not given up.** No domain logic moved into the graph. The repository,
-retrieval, the policy gate, the six post-generation checks, the calculations and
+retrieval, the policy gate, the seven post-generation checks, the calculations and
 the audience filter are called by nodes and unchanged. `assistant/graph.py`
 contains ordering and nothing else, which is what keeps decision 4's real claim —
 that the technical team can inspect every guardrail — true.
@@ -596,7 +596,7 @@ would be worse than one that refuses to start.
   reads as unknown rather than as permission. Building that matrix remains
   partnership work. The older statement of this weakness follows.
 - **Compatibility is enforced by citation, not by a rules gate.** Nothing deterministic decides which products are eligible for a substrate before retrieval runs; the assistant can only say what a cited passage says, which prevents invention but does not actively exclude an incompatible product. The proper mechanism is an eligibility stage — substrate and exposure in, candidate products out, retrieval restricted to those — and it needs the product-to-substrate compatibility matrix, which the data inventory records as existing nowhere on the site, scattered across datasheets and advisors' heads. Building that matrix is partnership work; the eligibility gate follows it.
-- **Qualitative synthesis is the weakest point.** The six checks bound numbers, names, attribution and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
+- **Qualitative synthesis is the weakest point.** The seven checks bound numbers, names, attribution, product scope and the asked-for term; they reduce, not eliminate, an invented "this is fine on cob".
 - **Single turn, and blind to photographs.** Real enquiries run six turns and eight of fifteen external situations attach a photograph; the prototype answers turn one, declares it cannot see images and hands them to a person (decision 16), and an uncued substrate becomes an ask-back the user answers by asking again.
 - **The audience set is asserted, not authenticated.** The filter is real and enforced in code at retrieval; the identity behind the claim is missing.
 - **No queue and no rate limit.** Concurrent *serving* is now built and tested — the web page runs on a threading server, the SQLite adapter is opened for cross-thread use and serialised behind one lock, each answer pins a consistent read, and an audience-scoped answer cache sits in front. What is still only drawn is the part that matters under real load: a generation queue with a visible wait, per-session rate limiting, and extract-only degradation. Generation remains one at a time per Ollama instance, so concurrency raises throughput for cached and non-compose answers and not for the compose path.
