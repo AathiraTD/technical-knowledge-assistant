@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, replace
 
 from . import observability as obs
 from . import ollama
+from . import phrasing
 from . import vision
 from .answer import (Answer, AnswerEngine, Provenance, _named_aliases,
                      _product_aliases, _requested_fields)
@@ -479,6 +480,48 @@ class Assistant:
         self._services.registry = self.engine.names.get("products", [])
         return self._graph
 
+    def _polish(self, answer, question: str, final: dict):
+        """A more direct wording of a finished answer, or the answer itself.
+
+        Placed here, after the graph has returned and before the reply is
+        assembled, because that is the one point at which an answer is both
+        *final* -- every route has run, `verify` has passed, caveats are
+        attached -- and not yet anybody's. Putting it inside a node would have
+        made it a step the router could reach, and the whole claim of
+        `assistant/phrasing.py` is that it is not one.
+
+        The verifier handed over is the project's own `run_checks`, closed over
+        the inputs this turn was judged on, so the rewrite is measured against
+        the same checks as the original rather than against a second opinion.
+        `asked_terms` is not reconstructed: `phrasing` compares the rewrite's
+        failures with the original's, so an input this closure gets slightly
+        wrong costs a rejected rewrite and never a wrong acceptance.
+        """
+        if not phrasing.enabled():
+            return answer
+        from .answer import products_named, run_checks
+
+        hits = final.get("hits") or []
+        resolved = final.get("resolved")
+        registry = self.engine.names.get("products", [])
+        scope = getattr(resolved, "product", "") or ""
+        asked_products = tuple(products_named(question, registry))
+        terms = list(getattr(resolved, "requested_properties", ()) or ())
+
+        def verify(text: str) -> list[str]:
+            return run_checks(text, hits, self.engine.names, terms,
+                              product=scope, asked_products=asked_products,
+                              question=question)
+
+        return phrasing.polish_verified_answer(
+            question, answer, registry=registry,
+            # No evidence to verify against means no verifier to reuse, so the
+            # deterministic preservation checks stand alone rather than a
+            # vacuous `run_checks` being handed a passage list of nothing --
+            # which would fail every sentence on check 1 and reject every
+            # rewrite for the wrong reason.
+            verify=verify if hits else None)
+
     @staticmethod
     def _paused_on(app, thread: str) -> bool:
         """Is this conversation stopped inside a node, waiting for a reply?
@@ -701,6 +744,8 @@ class Assistant:
                     # was read -- a page can distinguish "looked and saw
                     # nothing" from "was sent nothing".
                     perception = final.get("perception") or {}
+                    produced = [(part, self._polish(answer, part, final))
+                                for part, answer in produced]
                     for part, answer in produced:
                         answer.diagnostics["correlation_id"] = cid
                         answer.diagnostics["trace_id"] = obs.trace_id()
