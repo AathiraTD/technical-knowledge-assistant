@@ -2302,8 +2302,33 @@ class AnswerEngine:
 
     def _finish(self, decision: Decision, text: str, hits: list[Retrieved],
                 question: str = "") -> Answer:
+        # Which passages the text cites, and which the reader is shown, are the
+        # same question asked twice — so it is answered once, here, and used for
+        # the caveats *and* for the source list. Listing everything retrieved
+        # was the older behaviour, and it printed eight documents under an
+        # answer that cited one: that reads as broken numbering rather than as
+        # generous provenance.
+        #
+        # Filtering the list forces the renumbering. A marker is a *position* in
+        # whatever list survives, so dropping an uncited passage shifts every
+        # marker after it: an answer citing [1] and [4] of five must print [1]
+        # and [2] over its two-entry list, or the second citation silently names
+        # the wrong document — a worse defect than the one being fixed.
+        #
+        # A marker no passage backs cannot be reconciled with either list, so
+        # nothing is filtered and the text is left exactly as it came. The
+        # checks refuse a generated answer citing a passage it was never given,
+        # which should put this out of reach from Compose; if it is reached, a
+        # visible fault beats a renumbering that hides it behind a citation that
+        # merely looks right.
         markers = {int(m) for m in _CITE.findall(text)}
-        cited = [h for i, h in enumerate(hits, 1) if i in markers] if markers else hits
+        backed = sorted(m for m in markers if 1 <= m <= len(hits))
+        if markers and len(backed) == len(markers):
+            cited = [hits[m - 1] for m in backed]
+            renumbered = {old: new for new, old in enumerate(backed, 1)}
+            text = _CITE.sub(lambda m: f"[{renumbered[int(m.group(1))]}]", text)
+        else:
+            cited = hits
         caveats = _caveat_lines(decision, self.repo, question, cited_hits=cited)
         facts = self._facts(decision, question)
         if decision.photograph:
@@ -2334,7 +2359,7 @@ class AnswerEngine:
         return Answer(
             text=text,
             path=decision.path.value,
-            sources=_source_rows(hits),
+            sources=_source_rows(cited),
             caveats=caveats,
             assumptions=[f.sentence for f in facts
                          if f.provenance is Provenance.ASSUMED],
