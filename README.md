@@ -2,7 +2,7 @@
 
 A technical knowledge assistant that answers product questions using only approved sources. It retrieves passages from Lime Green datasheets and guides, verifies citation accuracy and product scope, checks evidence sufficiency, and refuses or hands off when the published material is insufficient.
 
-The system separates concerns: LLMs provide language understanding, retrieval provides evidence, deterministic code provides control. Local mode changes infrastructure, not safety semantics.
+The system separates responsibilities: LLMs provide language intelligence, retrieval provides evidence, and deterministic software provides control. Local mode changes infrastructure, not safety semantics.
 
 ---
 
@@ -12,9 +12,9 @@ Technical product recommendations require more than semantic search. A useful an
 
 - **Grounded in approved sources** — retrieved from indexed, versioned corpus, not from model knowledge
 - **Product-scoped** — not just cited correctly, but about the product the question asked
-- **Evidence-sufficient** — candidate assessment and numeric binding verified before printing
-- **Numerically consistent** — figures are verbatim, not paraphrased; units normalised for comparison only
-- **Properly cited** — every factual sentence traceable to a passage, with word overlap verified
+- **Evidence-sufficient** — evidence support and numeric claims verified before printing
+- **Numerically consistent** — numeric claims are checked against published evidence; units may be normalised for comparison
+- **Properly cited** — factual product claims must be grounded in cited passages and pass post-generation support checks
 - **Safe to refuse** — fail-closed when evidence is insufficient rather than inventing
 
 ---
@@ -22,19 +22,19 @@ Technical product recommendations require more than semantic search. A useful an
 ## Architecture
 
 ```
-user question + conversation state
+user question + trusted conversation state
         ↓
-deterministic policy gate (price, safety, health, compliance)
+deterministic policy + request resolution
         ↓
-structured understanding (substrate, location, exposure, symptom, property)
+structured understanding
         ↓
-approved-source retrieval (active versions, audience-filtered, authority-ranked)
+approved-source retrieval
         ↓
-evidence-sufficiency gate + candidate assessment
+evidence binding + sufficiency assessment
         ↓
-extract (verbatim) | compose (LLM over passages) | refuse | hand-off
+extract | compose | refuse | hand-off
         ↓
-seven verification checks (citation, numbers, product, qualifiers, names, property, scope)
+post-generation verification
         ↓
 cited answer + trace
 ```
@@ -47,11 +47,11 @@ cited answer + trace
 
 - **Approved-source boundary** — no web crawl, no speculative knowledge
 - **Conversation state separated from transcript** — trusted slots (substrate, location, exposure) are tracked; prior assistant answers do not re-enter as evidence
-- **Product-aware retrieval** — when product is known, generic (FAQ, article, system guide) documents are deprioritised if product-specific evidence covers the property
+- **Product-aware evidence scoping** — when product-specific evidence already covers the requested property, generic non-product passages can be excluded from the composition evidence set without changing retrieval itself
 - **Deterministic routing** — policy rules, calculation rules, and refusal rules are code, not prompts
-- **Seven post-generation checks** — citation presence, numeric verbatim match, product attribution, qualifier/caveat adjacency, real names only, property presence in evidence, product-scope correctness
+- **Post-generation verification** — citation support, numeric grounding, product attribution, qualifier/caveat adjacency, real names only, property presence in evidence, and product-scope correctness are checked after generation and before printing
 - **Vision observations typed and vocabulary-gated** — substrate and symptom may be filled; location/exposure are not inferred from photos; observations carry confidence and are user-correctable
-- **Fail-closed architecture** — weak evidence triggers refusal (with published material printed) rather than weaker verification
+- **Fail-closed architecture** — weak or insufficient evidence triggers a fail-closed response rather than weakening verification
 
 See [Reliability and design evolution](docs/RELIABILITY_AND_DESIGN_EVOLUTION.md) for how these were validated through measured failures.
 
@@ -59,7 +59,7 @@ See [Reliability and design evolution](docs/RELIABILITY_AND_DESIGN_EVOLUTION.md)
 
 ## Local runtime
 
-The interview build intentionally uses SQLite, local embeddings, Ollama and in-memory conversation state. The corpus is small and the exercise prioritises a self-contained local system. This keeps the system runable from a clean clone without external dependencies.
+The local build intentionally uses SQLite, local embeddings, Ollama and in-memory conversation state. The corpus is small, so the local runtime prioritises a self-contained system without requiring external databases or hosted AI services.
 
 **What is local:**
 - Knowledge store: SQLite
@@ -71,20 +71,20 @@ The interview build intentionally uses SQLite, local embeddings, Ollama and in-m
 - Authentication: none (audience asserted, not verified)
 - Tracing: hosted LangSmith disabled in code
 
-**What is NOT local:**
+**Not required in local mode:**
 - No PostgreSQL requirement
 - No pgvector requirement
 - No rate limiting or request queue
 - No durable checkpointing
 - No message broker
 
-Selecting a different backend does not change the answer engine's logic, citations, checks, or fail-closed behaviour — only where bytes are stored.
+Infrastructure backends are isolated from the answer-safety contract: changing persistence or serving infrastructure should not change evidence-sufficiency, citation, product-scope or fail-closed semantics.
 
 ---
 
 ## Production direction
 
-These are explicitly seams, not part of the submitted demo:
+These capabilities represent deployment-oriented seams rather than requirements of the local runtime:
 
 | Capability | Status |
 |---|---|
@@ -122,7 +122,7 @@ ollama pull qwen3-embedding:0.6b
 .\scripts\start-demo.ps1
 ```
 
-Opens http://localhost:5000 in your browser.
+Opens http://127.0.0.1:8765 in your browser.
 
 ### Start demo (manual)
 
@@ -134,8 +134,7 @@ python -m assistant.ui
 ### Enable vision (optional, slow on CPU)
 
 ```powershell
-$env:ASSISTANT_VISION_DEMO="1"
-.\scripts\start-demo.ps1
+.\scripts\start-demo.ps1 -VisionDemo
 ```
 
 ### Evaluate
@@ -170,24 +169,20 @@ db/              schema (SQLite + PostgreSQL)
 - **[Architecture](docs/architecture.md)** — System design, component reference, decision rationale
 - **[Reliability and design evolution](docs/RELIABILITY_AND_DESIGN_EVOLUTION.md)** — How measured failures drove design fixes and validation
 - **[Architecture decisions](DECISIONS.md)** — Why each choice was made, alternatives considered, where it breaks
-- **[Runtime profiles](docs/architecture.md#runtime-profiles-local-demo-vs-production)** — Local vs production infrastructure, honest status of each capability
-- **[Demo script](docs/DEMO-SCRIPT.md)** — Interview demo sequence with test questions and expected behaviour
+- **[Demo script](docs/DEMO-SCRIPT.md)** — Walkthrough sequence with test questions and expected behaviour
 - **[Knowledge pipeline](docs/knowledge-pipeline.md)** — Indexing, versioning, publication, delta updates
 
 ---
 
 ## Known limitations
 
-- **Local CPU inference latency** — 20–40+ seconds per uncached question (Ollama prompt cache significantly speeds repeats)
+- **Local CPU inference latency** — 20–40+ seconds per uncached question; Ollama prompt cache significantly speeds repeats
 - **Conversation state not durable** — in-memory only; lost on process restart
-- **Vision perception latency** — 150–200+ seconds per image on local CPU; timeouts possible under load
-- **Checkpointing dependency blocked** — PostgreSQL checkpoint backend cannot install due to version conflict
-- **Single Ollama instance** — generation serialised; no parallelism without additional infrastructure
-- **Embedding model not formally selected** — `qwen3-embedding:0.6b` is development default; formal benchmark deferred
-- **Limited property retrieval hardening** — some targeted property queries may still need stronger evidence scoping
-- **No production authentication** — audience is asserted CLI/HTTP parameter, not issued by identity system
+- **Optional vision is slow** — local CPU inference can take 150+ seconds per image
+- **Single Ollama instance** — generation serialised; no parallelism on local machine
+- **Production capabilities not implemented** — no authentication, rate limiting, durable checkpointing or scalable inference
 
-See [Limitations](docs/architecture.md#remaining-known-limitations) in architecture docs for non-infrastructure constraints.
+See [Reliability and design evolution](docs/RELIABILITY_AND_DESIGN_EVOLUTION.md) and [Architecture decisions](DECISIONS.md) for detailed trade-offs and design rationale.
 
 ---
 
@@ -199,10 +194,6 @@ The system does not treat prompt engineering as the primary safety mechanism. In
 - **Policy is deterministic code**, not prompt instructions
 - **Routing is explicit and ordered**, with clear precedence
 - **Verification happens after generation**, not inside the prompt
-- **Fail-closed** means refusal with published material, not weaker checks
+- **Fail-closed** means returning a safe limitation or refusal rather than weakening verification
 
-A generated answer is not treated as trusted merely because the LLM produced it. Seven distinct checks verify citation, numeric accuracy, product scope, qualifier adjacency, real names, property presence, and product consistency before anything is printed.
-
----
-
-Built for the AEC Solution Architect KTP exercise, Birmingham City University with Lime Green Products.
+The model is not treated as the source of truth. Language generation is allowed flexibility; product identity, evidence sufficiency, numeric support, citations and refusal boundaries remain governed by structured state and deterministic verification.
