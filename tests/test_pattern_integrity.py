@@ -9,7 +9,7 @@ through a tool that unescapes once, and the file still parses as valid JSON,
 still renders as `\\b` in most terminals, still reviews clean in a diff — and
 the pattern it belongs to now matches nothing, because it is looking for
 `\\x08`. The policy gate that was supposed to keep price questions away from
-retrieval silently stops firing. The same slip in `assistant/router.py` turned
+retrieval silently stops firing. The same slip in `assistant/answering/router.py` turned
 the new ask-back guard's `any)\\b` into `any)\\x08`.
 
 Nothing else in the suite catches it. A pattern that matches nothing throws no

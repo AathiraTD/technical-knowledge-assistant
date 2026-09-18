@@ -121,7 +121,7 @@ Measured on the build machine, 17 September 2026 — image-level checks:
   ok    deploy/compose.yaml is valid
   ok    image built as lime-green-assistant:verify
   ok    runs as uid 10001
-  ok    application  /app/assistant/health.py
+  ok    application  /app/assistant/infrastructure/health.py
   ok    authored configuration  /app/config/routing.json
   ok    deployment schema  /app/db/schema.postgres.sql
   ok    repository contract  /app/tests/test_repository_contract.py
@@ -162,7 +162,7 @@ The compose healthcheck runs `python -m assistant.infrastructure.health`, which 
 readiness check — not `/health`, which would keep a container in rotation while
 it had no index, a mismatched index, or no reachable Ollama.
 
-Real metric families, from `assistant/metrics.py`:
+Real metric families, from `assistant/infrastructure/metrics.py`:
 
 ```
 assistant_answers_total          assistant_outcomes_total
@@ -246,7 +246,7 @@ Rebuild: `docker compose -f deploy/compose.yaml run --rm index-init`.
 excluded by `.dockerignore`. See the comment at the top of that file.
 
 **SQLite cross-thread errors.** Only reachable when a threaded server opens the
-store without `thread_safe=True`; `assistant/ui.py` passes it. In the container
+store without `thread_safe=True`; `assistant/interfaces/ui.py` passes it. In the container
 the store is PostgreSQL and this does not arise.
 
 ## References

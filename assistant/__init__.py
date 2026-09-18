@@ -20,7 +20,7 @@ __version__ = "0.1.0"
 # single environment variable set, it exports whole runs -- including the
 # conversation state this system is otherwise careful never to send anywhere.
 # That is incompatible with the privacy posture in CLAUDE.md ("avoid logging
-# complete customer conversations") and `assistant/observability.py` is the only
+# complete customer conversations") and `assistant/infrastructure/observability.py` is the only
 # telemetry this project sanctions.
 #
 # Assignment, not `setdefault`. The earlier version used `setdefault` so as not
@@ -31,7 +31,7 @@ __version__ = "0.1.0"
 #
 # Only environment variables are touched here, and deliberately: it costs
 # nothing and imports nothing, so a CLI start does not pay for loading
-# `langsmith`. `assistant/graph.py` closes the higher-precedence global
+# `langsmith`. `assistant/turn/graph.py` closes the higher-precedence global
 # fallback as well, once that library is being loaded anyway.
 _TRACING_VARS = (
     "LANGSMITH_TRACING", "LANGCHAIN_TRACING",

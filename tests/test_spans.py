@@ -1,6 +1,6 @@
 """The span stack: parenting, isolation, privacy, and never failing an answer.
 
-`assistant/observability.py` could already say *what* happened. What it could
+`assistant/infrastructure/observability.py` could already say *what* happened. What it could
 not say was *inside what, and for how long* — durations existed only where
 somebody had remembered to wrap a block, and nothing tied the dozen lines a
 two-topic question emits into a tree. `span()` adds that, in OpenTelemetry's

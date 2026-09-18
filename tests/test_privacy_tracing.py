@@ -4,7 +4,7 @@
 hosted tracing service. With credentials present and one environment variable
 set, it exports whole runs to a third party, and a "run" here contains the
 customer's question, the retrieved passages and the conversation state. CLAUDE.md
-says not to log complete customer conversations; `assistant/observability.py` is
+says not to log complete customer conversations; `assistant/infrastructure/observability.py` is
 the only telemetry this project sanctions. So the dependency is acceptable only
 while this file passes.
 
@@ -131,7 +131,7 @@ def test_the_guard_survives_something_rewriting_the_environment_afterwards():
     """The env is only the weakest of four inputs, so it is not the only guard.
 
     `langsmith` consults a context variable, an open run tree, a process-global
-    fallback and then the environment. `assistant/graph.py` closes the global
+    fallback and then the environment. `assistant/turn/graph.py` closes the global
     fallback too, which outranks the environment — so re-setting a variable
     after import does not reopen it.
     """

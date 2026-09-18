@@ -11,7 +11,7 @@ The rest is what an in-process dictionary reachable by an anonymous caller has
 to prove: that it is bounded, that it forgets, that two callers cannot see each
 other, and that an id the caller invented names nothing.
 
-`assistant/session.py` holds no repository and no model, so nothing here needs a
+`assistant/turn/session.py` holds no repository and no model, so nothing here needs a
 server. The end-to-end proof that an ask-back can actually be answered lives in
 `tests/test_ui_server.py`, where it runs against a real one.
 """

@@ -23,7 +23,7 @@ trace.
 
 This is also the only surface with more than one turn. The CLI is stateless by
 design and the harness must stay reproducible, so conversation state lives here
-and in `assistant/session.py`: a cookie names the session, the session holds the
+and in `assistant/turn/session.py`: a cookie names the session, the session holds the
 facts earlier turns established about the caller's building, and those are
 handed to `ask(carried=...)`. The engine merges them under whatever the current
 question says, so a correction always wins. The session holds slots and never an
@@ -80,7 +80,7 @@ SESSION_COOKIE = "tka_session"
 # attack surface -- a C decoder fed hostile bytes -- that the validation is for.
 
 # The whole request body, headers of the parts included. A photograph from a
-# phone is a few megabytes and `assistant/vision.py` refuses anything over eight
+# phone is a few megabytes and `assistant/answering/vision.py` refuses anything over eight
 # on its own; this is the cap that applies *before* a byte is read, which is the
 # only cap that helps against a body that never ends.
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
@@ -136,7 +136,7 @@ def sniff(data: bytes) -> str:
 class UploadBudget:
     """How many photographs each session has sent, bounded and thread-safe.
 
-    Deliberately not in `assistant/session.py`. That module carries what the
+    Deliberately not in `assistant/turn/session.py`. That module carries what the
     person told us about their building and is argued at length for carrying
     nothing else; a rate limit is a property of this HTTP surface, expires on a
     restart, and means nothing to the CLI. Putting it there would widen a store
@@ -1035,7 +1035,7 @@ class Handler(BaseHTTPRequestHandler):
     # never widen it, so `?a=staff` against a public instance stays public.
     audiences: tuple[str, ...] = PUBLIC_ONLY
     # Conversation state, shared by every request thread. Slots only; see
-    # assistant/session.py for what is carried and what is deliberately not.
+    # assistant/turn/session.py for what is carried and what is deliberately not.
     sessions: SessionStore = SessionStore()
     # How many photographs each session has sent. Separate from the session
     # store on purpose -- see UploadBudget.
@@ -1088,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_ready(parse_qs(url.query).get("format", [""])[0])
             return
         # One line, delegating immediately. The renderer lives in
-        # assistant/metrics.py rather than here because a later slice rewrites
+        # assistant/infrastructure/metrics.py rather than here because a later slice rewrites
         # this page wholesale and a Prometheus exposition format entangled with
         # the HTML would be rewritten with it. Nothing about the endpoint --
         # its window, its labels, its privacy posture -- is decided in this file.
@@ -1349,7 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
         # Everything about the half-finished turn that was not in the `pending`
         # string was lost, because a string is all there was.
         #
-        # `assistant/graph.py` pauses the turn instead of describing it. The
+        # `assistant/turn/graph.py` pauses the turn instead of describing it. The
         # conversation is parked in the checkpoint under this session id, and
         # the next message resumes it from the node it stopped in, through
         # retrieval and the evidence gate, to the question originally asked.
@@ -1554,7 +1554,7 @@ class Handler(BaseHTTPRequestHandler):
     # Keys `/ready` will publish over HTTP, and the omission is the point.
     # `store_target` is a filesystem path or a DSN host, and this endpoint is
     # unauthenticated: an orchestrator needs to know *whether* the store is
-    # reachable, never where it is. `assistant/trace.py` declines to be an
+    # reachable, never where it is. `assistant/infrastructure/trace.py` declines to be an
     # endpoint at all for the same reason, and readiness only qualifies because
     # what remains here is operational state -- counts, tags, booleans.
     READY_FIELDS = ("ready", "checks", "snapshot", "documents", "chunks",
@@ -1631,7 +1631,7 @@ def main(argv: list[str] | None = None) -> int:
     # address and the JSON lines on separate streams.
     obs.configure(sys.stderr)
 
-    # Threaded server, one shared store: see assistant/store/locking.py.
+    # Threaded server, one shared store: see assistant/knowledge/store/locking.py.
     repo = open_repository(args.db, thread_safe=True)
     try:
         assistant = Assistant(repo, source="web")

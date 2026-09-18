@@ -2,7 +2,7 @@
 
 The single-turn harness has covered routing, refusal and the six checks since
 the beginning. What it has never covered is the part of the system that only
-exists across turns — `assistant/session.py`'s three carried slots, the five it
+exists across turns — `assistant/turn/session.py`'s three carried slots, the five it
 deliberately drops, the ask-back it holds in `pending`, and the provenance that
 distinguishes a fact the caller stated now from one they stated two turns ago
 from one a photograph supplied. All of that is built, and until this file none

@@ -16,19 +16,19 @@ def open_repository(db="data/index/knowledge.db", dsn=None, *,
     Unset is the local/interview default, and it is a default rather than a
     fallback: nothing here probes for a database and quietly gives up. The
     local path needs no PostgreSQL, no pgvector and no server running, and
-    `assistant/health.py` only checks a database when this same variable
+    `assistant/infrastructure/health.py` only checks a database when this same variable
     selects one.
 
     Conversation state is a separate decision on a separate variable
-    (`ASSISTANT_CHECKPOINT_DSN`, read in `assistant/engine.py`), so selecting
+    (`ASSISTANT_CHECKPOINT_DSN`, read in `assistant/answering/engine.py`), so selecting
     PostgreSQL for the knowledge store does not imply a durable checkpointer —
     which matters, because the PostgreSQL checkpointer is dependency-blocked
-    and raises. See `assistant/graph.py:checkpointer_for`.
+    and raises. See `assistant/turn/graph.py:checkpointer_for`.
 
     `thread_safe` is for callers that serve more than one request at a time.
     It is off by default because the cost is real — every call serialises — and
     a CLI or an indexer has nothing to serialise. The threaded web server turns
-    it on; see assistant/store/locking.py for why a lock rather than a pool.
+    it on; see assistant/knowledge/store/locking.py for why a lock rather than a pool.
     """
     connection = os.environ.get("ASSISTANT_POSTGRES_DSN", "") if dsn is None else dsn
     if connection:

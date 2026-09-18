@@ -12,7 +12,7 @@ threaded server against a temporary store, because the class attribute carrying
 the store path is exactly the kind of thing a library-level test cannot check.
 
 The last test is a privacy one and is not incidental. This endpoint is
-unauthenticated -- `assistant/trace.py` declines to be an endpoint at all for
+unauthenticated -- `assistant/infrastructure/trace.py` declines to be an endpoint at all for
 that reason -- and readiness only qualifies because what it publishes is
 operational state. A filesystem path or a database host is not, so `/ready`
 must not print one even though `health.check()` collects it.

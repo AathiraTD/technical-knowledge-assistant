@@ -104,7 +104,7 @@ numbered passage below.
 # ------------------------------------------------------------- what is known
 
 # The three facts about the caller's building that an answer may be shaped by,
-# and the same three `assistant/session.py` carries between turns. The order is
+# and the same three `assistant/turn/session.py` carries between turns. The order is
 # the order they are printed in.
 STATABLE_SLOTS = ("substrate", "location", "exposure")
 
@@ -119,7 +119,7 @@ class Provenance(Enum):
 
     ``STATED``   the caller's own words, in the question being answered.
     ``CARRIED``  the caller's own words, in an earlier turn of the same
-                 conversation — `assistant/session.py` holds exactly these three
+                 conversation — `assistant/turn/session.py` holds exactly these three
                  slots forward. Still stated, just not in this sentence, so it
                  is printed as something they told us rather than as a guess.
     ``OBSERVED`` read off a photograph attached to this turn. Not stated, not
@@ -130,7 +130,7 @@ class Provenance(Enum):
                  uncued, so both are answered.
 
     ``OBSERVED`` used to be argued *against* here, and the argument was right
-    while it held: `assistant/vision.py` resolved observations to a `carried`
+    while it held: `assistant/answering/vision.py` resolved observations to a `carried`
     dict, nothing handed one to `Assistant.ask`, and a member nothing can
     produce is a claim the renderer could never make honestly. That reasoning
     is now obsolete rather than merely inconvenient. `Assistant.ask` takes
@@ -2248,7 +2248,7 @@ class AnswerEngine:
         without the question is only the distinction between the two, and "as
         you said" is the weaker, still-honest reading of both.
 
-        `assistant/engine.py` passes the question on the compose path today. The
+        `assistant/answering/engine.py` passes the question on the compose path today. The
         other paths would each report a carried slot as carried the moment it
         passes the question there too; that file belongs to the integration
         owner, so the parameter is optional and the fallback is the safe one.

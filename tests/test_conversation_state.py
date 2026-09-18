@@ -1,6 +1,6 @@
 """The merge rules: who wins, what is kept, and what stays unsettled.
 
-`assistant/conversation.py` has one interesting function and everything else is
+`assistant/turn/conversation.py` has one interesting function and everything else is
 containers. `merge_facts` decides what a conversation believes after a turn, and
 each of its three rules exists because the alternative is a specific, nameable
 harm:

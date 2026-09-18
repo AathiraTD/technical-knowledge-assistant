@@ -19,7 +19,7 @@ metric that exists for the instrumentation.
 
 ## Why this is its own module and not a method on the page
 
-`assistant/ui.py` is scheduled to be rewritten wholesale by a later slice. A
+`assistant/interfaces/ui.py` is scheduled to be rewritten wholesale by a later slice. A
 `/metrics` renderer living inside it would be rewritten with it, or — worse —
 survive as the one part of the old page nobody dared touch. The page's whole
 involvement is therefore two lines in `do_GET` that call `render()` and hand

@@ -504,7 +504,7 @@ def test_a_value_the_question_states_is_reported_as_stated_not_assumed():
 def test_a_value_the_question_never_stated_is_reported_as_carried_not_stated():
     """A slot held from an earlier turn was stated - just not in this sentence.
 
-    `assistant/session.py` carries exactly these three forward, so the honest
+    `assistant/turn/session.py` carries exactly these three forward, so the honest
     sentence is "as you told me earlier", not "as you said" (which would claim
     words this question does not contain) and not "assumed" (which would deny
     they ever said it). Each of the three is checked on its own, because a rule
@@ -547,7 +547,7 @@ def test_an_uncued_location_is_the_one_thing_actually_assumed():
 def test_without_the_question_a_slot_is_reported_as_stated_never_as_assumed():
     """The conservative fallback, and why it is the safe one.
 
-    `assistant/engine.py` passes the question on the compose path only, and it
+    `assistant/answering/engine.py` passes the question on the compose path only, and it
     belongs to the integration owner. With no question there is no way to tell a
     value stated now from one stated last turn - but both were stated, because
     nothing in this engine invents a slot value. "As you said" is the weaker

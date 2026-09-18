@@ -1,6 +1,6 @@
 """Who wins which field: the precedence rule, as a rule.
 
-`assistant/understanding.py` combines two readings of the same sentence — what
+`assistant/answering/understanding.py` combines two readings of the same sentence — what
 the vocabularies detected and what a local model proposed — and the question
 "may the model change this?" has to have one answer per field that somebody can
 read off a page.

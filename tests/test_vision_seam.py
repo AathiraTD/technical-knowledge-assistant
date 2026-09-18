@@ -1,6 +1,6 @@
 """The join between a photograph and the router, and the provenance it needs.
 
-`assistant/vision.py` has its own suite and is not re-tested here; what is
+`assistant/answering/vision.py` has its own suite and is not re-tested here; what is
 tested is everything that happens *at the seam*, which is where the risk
 actually lives. A perception module that is correct in isolation still produces
 a system that lies if the value it resolves is printed as something the caller

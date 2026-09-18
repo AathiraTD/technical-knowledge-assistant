@@ -144,7 +144,7 @@ def test_a_second_turn_inherits_the_wall_and_the_product_from_the_first(page):
     Two turns, and the second says neither what the wall is nor which product it
     means. If the substrate and the product do not survive the turn boundary,
     the follow-up is answered about a different building -- which is the failure
-    the hand-rolled orchestration actually had, and the reason `assistant/graph.py`
+    the hand-rolled orchestration actually had, and the reason `assistant/turn/graph.py`
     exists.
 
     Asserted on `session_slots`, not on prose. The conversation state is what
@@ -316,7 +316,7 @@ def test_the_answer_to_an_ask_back_resumes_the_question_it_interrupted(page):
     Asking back is easy. Resuming is where the hand-rolled orchestration failed
     -- the parked question was a string, the reply was guessed at, and "Can I use
     Ultra on the same wall?" was read as an answer to it rather than as a new
-    question. `interrupt()` and `Command(resume=...)` in `assistant/graph.py`
+    question. `interrupt()` and `Command(resume=...)` in `assistant/turn/graph.py`
     replaced that with a real pause in a checkpoint.
 
     So what this asserts is that "brick" is treated as an answer to the parked

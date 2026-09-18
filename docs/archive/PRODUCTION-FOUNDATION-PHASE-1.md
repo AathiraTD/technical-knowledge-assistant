@@ -221,7 +221,7 @@ docs/deployment.md          — Deployment guide and troubleshooting
 docs/PRODUCTION-FOUNDATION-PHASE-1.md — This document
 scripts/verify-docker-deployment.sh   — Bash verification script
 scripts/verify-docker-deployment.ps1  — PowerShell verification script
-assistant/ui.py             — Added /health endpoint
+assistant/interfaces/ui.py             — Added /health endpoint
 tests/test_ui_server.py     — Added health endpoint test
 ```
 

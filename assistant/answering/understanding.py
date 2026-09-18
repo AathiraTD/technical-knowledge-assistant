@@ -68,7 +68,7 @@ MANDATORY_TOPICS = frozenset({"structural_judgement", "compliance_signoff", "hea
 class Intent(Enum):
     """What the person wants done, as distinct from how the answer is printed.
 
-    `Path_` in `assistant/router.py` is the *output* shape — extract, compose,
+    `Path_` in `assistant/answering/router.py` is the *output* shape — extract, compose,
     refuse. This is the *request* shape, and the two are deliberately different
     vocabularies: several intents print through Compose, and one intent can
     print through three different paths depending on what the evidence turns out
@@ -613,7 +613,7 @@ def ambiguous(reading: TurnUnderstanding, question: str) -> bool:
     The cost of the narrower rule is a selection phrased so unusually that
     `_SELECT_SHAPE` misses it: it reads as `UNKNOWN`, takes the ordinary
     pipeline, and is answered rather than recommended. That is a coverage loss
-    and not a safety one -- the recommendation guard in `assistant/graph.py`
+    and not a safety one -- the recommendation guard in `assistant/turn/graph.py`
     catches an unapproved recommendation whatever the intent label says.
     """
     if reading.policy_topic:
@@ -785,7 +785,7 @@ def normalise_product(name: str) -> str:
 
     Lower case with the maker's name removed, which is the form retrieval
     matches chunks on. Exposed rather than kept private because the alternative
-    was measured: `assistant/candidates.py` compared full registry names against
+    was measured: `assistant/retrieval/candidates.py` compared full registry names against
     this form, so an answer saying "Lime Green Ultra" did not match an approved
     "ultra" and was refused as an unapproved recommendation. Two normalisations
     of the same thing is one too many.
@@ -883,7 +883,7 @@ def scenario_only(question: str) -> bool:
     means every later turn is answered for a brick wall the person never said
     they had, and `Provenance.STATED` makes the answer print it back as "brick,
     as you said" -- attributing an invention to the customer, which is the same
-    shape of failure the case boundaries in `assistant/conversation.py` exist to
+    shape of failure the case boundaries in `assistant/turn/conversation.py` exist to
     prevent.
 
     **The two errors are not symmetric and this errs the safe way.** Treating a
@@ -947,7 +947,7 @@ def denials_in(question: str, detected: dict, detector) -> dict[str, str]:
 
     What this returns is the value being withdrawn, not a new value: "not brick"
     says nothing about what the wall *is*. `Denial` in
-    `assistant/conversation.py` turns that into a state change, so the
+    `assistant/turn/conversation.py` turns that into a state change, so the
     supersession rule stays in the one place that owns it.
     """
     denied: dict[str, str] = {}
@@ -971,7 +971,7 @@ def resolve(reading: TurnUnderstanding, question: str, detector, registry,
     """Validate this turn's reading, then merge what the conversation knows.
 
     Merge order is the same one the router has always used and the same one
-    `assistant/conversation.py` enforces: **this turn over history**. A value
+    `assistant/turn/conversation.py` enforces: **this turn over history**. A value
     stated now beats a value remembered, because a person correcting themselves
     must not be answered from the thing they just corrected.
 

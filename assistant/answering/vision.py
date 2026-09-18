@@ -1084,7 +1084,7 @@ def observe(
         "think": False,
         "keep_alive": KEEP_ALIVE,
         "format": observation_schema(slots),
-        # The same context size `assistant/ollama.py` asks for, and it has to
+        # The same context size `assistant/infrastructure/ollama.py` asks for, and it has to
         # be the same rather than merely large enough.
         #
         # Omitting it let Ollama size this instance at the model default, 4096,

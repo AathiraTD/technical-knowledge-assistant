@@ -233,7 +233,7 @@ service that exports whole runs — which here would mean the customer's
 question, the retrieved passages and the conversation state.
 
 It is closed **in code, by assignment rather than `setdefault`**, at two levels:
-`assistant/__init__.py` before anything imports it, and `assistant/graph.py` at
+`assistant/__init__.py` before anything imports it, and `assistant/turn/graph.py` at
 the process-global level. `setdefault` was the first version and left a measured
 hole — a parent environment carrying `LANGCHAIN_TRACING_V2=true` re-enabled
 export, because not overriding is exactly what `setdefault` does.

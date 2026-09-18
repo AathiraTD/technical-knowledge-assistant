@@ -1,6 +1,6 @@
 """The transcript reaches the model and nothing else. A regression suite.
 
-`assistant/engine.py` used to open `ask()` with
+`assistant/answering/engine.py` used to open `ask()` with
 
     if context:
         question = context + "\\n\\n" + question

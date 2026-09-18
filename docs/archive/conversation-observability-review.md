@@ -21,7 +21,7 @@ that, then the definitions.
 
 ### 1.1 The conversational layer is built, and its exclusions are load-bearing
 
-[`assistant/session.py`](../assistant/session.py) is a bounded, idle-expiring,
+[`assistant/turn/session.py`](../assistant/turn/session.py) is a bounded, idle-expiring,
 thread-safe session store: cookie-named with 128 bits of `secrets` randomness,
 least-recently-used eviction, an id honoured only if this store minted it. It
 carries exactly three slots — `substrate`, `location`, `exposure` — and
@@ -49,7 +49,7 @@ engine level rather than as UI message retention.
 
 ### 1.2 One finished component is wired to nothing
 
-[`assistant/vision.py`](../assistant/vision.py) is 679 lines with 671 lines of
+[`assistant/answering/vision.py`](../assistant/answering/vision.py) is 679 lines with 671 lines of
 tests. It constrains the model to a JSON schema whose `attribute` field is an
 enum of four slots, gates every observed value against
 `config/vocabularies.json` so a model answering `"substrate": "Lime Green Solo"`
@@ -69,7 +69,7 @@ problem, not a build.
 
 ### 1.3 Provenance exists, and has one honest hole
 
-[`assistant/answer.py`](../assistant/answer.py) defines a `Provenance` enum —
+[`assistant/answering/answer.py`](../assistant/answering/answer.py) defines a `Provenance` enum —
 `STATED`, `CARRIED`, `ASSUMED` — and a `SlotFact` pairing a slot value with
 where it came from, each rendering a different sentence. The distinction is
 real and was added to fix an observed defect: an answer reporting "external
@@ -79,7 +79,7 @@ The enum's docstring already names the gap:
 
 > Decision 16.1 wants `explicit / visually_observed / inferred / unknown` when a
 > photograph can fill a slot. That is one more member here and one more row in
-> `_PHRASE` — `assistant/vision.py` resolves observations to a `carried` dict
+> `_PHRASE` — `assistant/answering/vision.py` resolves observations to a `carried` dict
 > and nothing yet hands one to `Assistant.ask`, so an `OBSERVED` member would be
 > a state nothing in this repository can produce and a claim the renderer could
 > never make honestly.
@@ -89,7 +89,7 @@ wired. See §4.
 
 ### 1.4 Observability emits but does not trace
 
-[`assistant/observability.py`](../assistant/observability.py) has JSON-line
+[`assistant/infrastructure/observability.py`](../assistant/infrastructure/observability.py) has JSON-line
 events, a correlation-ID `ContextVar` (correct for the `ThreadingHTTPServer`),
 a `timed()` context manager, question fingerprinting instead of question text,
 and a library logger that never configures itself. The privacy posture is
@@ -103,7 +103,7 @@ timings, no scores, no slot provenance and no session.
 
 ### 1.5 The UI has the data and the wrong default view
 
-[`assistant/ui.py`](../assistant/ui.py) already renders prior turns, a `Sources`
+[`assistant/interfaces/ui.py`](../assistant/interfaces/ui.py) already renders prior turns, a `Sources`
 list and per-answer diagnostics, and manages the session cookie correctly
 (`HttpOnly`, `SameSite=Lax`, `Path=/`). It opens on the diagnostics view. The
 work is presentation and an upload control, not new plumbing.
@@ -455,19 +455,19 @@ the `OBSERVED` docstring avoided: a state nothing can produce.
 
 | File | Change | Slice |
 |---|---|---|
-| `assistant/observability.py` | span stack, `span()`, id promotion in `JSONFormatter` | B |
-| `assistant/repository.py` | `record_spans` / `traces` on the boundary | B |
+| `assistant/infrastructure/observability.py` | span stack, `span()`, id promotion in `JSONFormatter` | B |
+| `assistant/knowledge/repository.py` | `record_spans` / `traces` on the boundary | B |
 | `db/schema.sqlite.sql`, `db/schema.postgres.sql` | `turn_traces` | B |
-| `assistant/store/embedded.py`, `store/postgres.py` | implement both | B |
-| `assistant/engine.py` | spans at existing call sites; `carried` origins | A + B |
-| `assistant/answer.py` | `OBSERVED`, `_PHRASE` row, `_facts`, `_finish` grouping | A |
-| `assistant/vision.py` | **no change** — it is already correct | — |
-| `assistant/session.py` | **no change** — §3.4 | — |
-| `assistant/cli.py` | `--image`, observed grouping in the renderer | A |
-| `assistant/ui.py` | upload, observed grouping, then the chat rework | A, C |
+| `assistant/knowledge/store/embedded.py`, `store/postgres.py` | implement both | B |
+| `assistant/answering/engine.py` | spans at existing call sites; `carried` origins | A + B |
+| `assistant/answering/answer.py` | `OBSERVED`, `_PHRASE` row, `_facts`, `_finish` grouping | A |
+| `assistant/answering/vision.py` | **no change** — it is already correct | — |
+| `assistant/turn/session.py` | **no change** — §3.4 | — |
+| `assistant/interfaces/cli.py` | `--image`, observed grouping in the renderer | A |
+| `assistant/interfaces/ui.py` | upload, observed grouping, then the chat rework | A, C |
 | `tests/` | contract rows for `turn_traces`; seam and provenance tests | A, B |
 
-`assistant/vision.py` and `assistant/session.py` carrying no change is the
+`assistant/answering/vision.py` and `assistant/turn/session.py` carrying no change is the
 review's main structural finding.
 
 ---
@@ -563,12 +563,12 @@ At two thousand rows a day, two hundred thousand is about three months — the c
 binds only when something is wrong.
 
 **Who prunes, and when.** On write, inside `record_spans`, following
-[`assistant/session.py:120,178-190`](../assistant/session.py): the session store
+[`assistant/turn/session.py:120,178-190`](../assistant/turn/session.py): the session store
 sweeps expired entries from `open()` rather than from a timer, and its docstring
 argues the case — a structure with no scheduler of its own prunes where it is
 touched. The same argument holds here with one addition, that the span write
 already opens its own connection outside the read snapshot the way `log_answer`
-does ([`assistant/store/embedded.py:700-734`](../assistant/store/embedded.py)),
+does ([`assistant/knowledge/store/embedded.py:700-734`](../assistant/knowledge/store/embedded.py)),
 so there is a transaction to hang the delete on without disturbing a reader.
 
 It should be amortised rather than run on every write: a stride — the delete
@@ -622,7 +622,7 @@ column on `turn_traces`.
 CLI, and the mixing problem disappears — is already refuted by what the audit
 table contains. The harness builds an ordinary assistant with logging left on
 ([`eval/run.py:379`](../eval/run.py), against the `log: bool = True` default at
-[`assistant/engine.py:101`](../assistant/engine.py)), so **evaluation answers
+[`assistant/answering/engine.py:101`](../assistant/answering/engine.py)), so **evaluation answers
 have been writing into `answer_log` all along, indistinguishably**. The
 consequence is measurable: of 196 logged answers, 75 are refusals — a 38 per
 cent refusal rate, over a question set deliberately loaded with the unanswerable
@@ -677,7 +677,7 @@ No `CHECK` constraint on the values. The repository uses check constraints where
 they protect a real invariant, and this is not one: an unrecognised source must
 be recorded, not rejected, because a rejected insert would be an observability
 write failing an answer — the failure
-[`assistant/engine.py:326-331`](../assistant/engine.py) already goes out of its
+[`assistant/answering/engine.py:326-331`](../assistant/answering/engine.py) already goes out of its
 way to prevent for `log_answer`. The `unknown` default is the value that makes
 an unset source visible in a query rather than quietly filed under a real
 surface.
@@ -690,10 +690,10 @@ becomes partial so the empty rows do not sit in it.
 **Why not a synthetic id.** It would be a claim the engine cannot support. The
 CLI's interactive loop holds no session: it never constructs a `SessionStore`,
 and every iteration calls `assistant.ask(question, audiences=audiences)` with no
-`carried` argument at all ([`assistant/cli.py:90-103,108`](../assistant/cli.py)).
+`carried` argument at all ([`assistant/interfaces/cli.py:90-103,108`](../assistant/interfaces/cli.py)).
 Consecutive CLI questions are *unrelated by construction* — no slot carries, no
 `pending` re-asks — which is the deliberate split recorded at
-[`assistant/engine.py:122-126`](../assistant/engine.py): the CLI stays
+[`assistant/answering/engine.py:122-126`](../assistant/answering/engine.py): the CLI stays
 single-turn and stateless while the web page is neither. A synthetic
 per-invocation id would group those unrelated turns under one conversation, so
 "replay one conversation" would return a list of questions sharing nothing but a

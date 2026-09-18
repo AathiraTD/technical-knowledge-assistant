@@ -229,7 +229,7 @@ class Assistant:
         You answered: [A1]. Then the user asked: [Q2]..."
 
         `images` are photographs attached to *this* turn — file paths or raw
-        bytes, whatever `assistant/vision.py` reads. They are perceived here
+        bytes, whatever `assistant/answering/vision.py` reads. They are perceived here
         rather than by the caller because perception is part of answering one
         question, and because two surfaces each calling `slots_from_images`
         would be two places for the merge order to drift apart.
@@ -330,7 +330,7 @@ class Assistant:
                         #
                         # `vision_model_call` and `resolve`, the two children
                         # the review's tree hangs under this span, are not
-                        # emitted: they live inside `assistant/vision.py`, which
+                        # emitted: they live inside `assistant/answering/vision.py`, which
                         # this slice does not own and which the review found
                         # already correct. The span is honest about the stage it
                         # can see and silent about the two it cannot.
@@ -378,7 +378,7 @@ class Assistant:
         """The per-topic answering path, under a name the graph may call.
 
         `_answer_part` stays private and unchanged; this is the seam. Naming it
-        rather than letting `assistant/graph.py` reach for the underscore keeps
+        rather than letting `assistant/turn/graph.py` reach for the underscore keeps
         the boundary visible: the graph orders the turn and calls this, and
         everything this does -- the policy gate, retrieval, the router, the six
         checks -- is the code that was already there.
@@ -488,7 +488,7 @@ class Assistant:
         *final* -- every route has run, `verify` has passed, caveats are
         attached -- and not yet anybody's. Putting it inside a node would have
         made it a step the router could reach, and the whole claim of
-        `assistant/phrasing.py` is that it is not one.
+        `assistant/answering/phrasing.py` is that it is not one.
 
         The verifier handed over is the project's own `run_checks`, closed over
         the inputs this turn was judged on, so the rewrite is measured against

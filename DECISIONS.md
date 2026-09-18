@@ -543,7 +543,7 @@ does not yet do durable checkpointing, resume, or time travel.
 
 **What was not given up.** No domain logic moved into the graph. The repository,
 retrieval, the policy gate, the seven post-generation checks, the calculations and
-the audience filter are called by nodes and unchanged. `assistant/graph.py`
+the audience filter are called by nodes and unchanged. `assistant/turn/graph.py`
 contains ordering and nothing else, which is what keeps decision 4's real claim —
 that the technical team can inspect every guardrail — true.
 
@@ -560,7 +560,7 @@ through the HTTP-shaped entry point. Both spike scripts are retained under
 service that exports whole runs, and a run here contains the customer's
 question, the retrieved passages and the conversation state. It is switched off
 in `assistant/__init__.py` before anything imports it, by assignment rather than
-`setdefault`, and again at the process-global level in `assistant/graph.py`.
+`setdefault`, and again at the process-global level in `assistant/turn/graph.py`.
 
 That distinction was measured rather than assumed. The first version used
 `os.environ.setdefault`, which by definition does not override, and a parent
@@ -587,7 +587,7 @@ would be worse than one that refuses to start.
 
 - **The Postgres adapter passes the contract; it has not been operated.** It now runs the same repository contract, the same ingestion lifecycle, the publication lock and the concurrent-reader tests against a real PostgreSQL 16 with pgvector, in CI and in a container, so parity of testing is no longer the gap it once was. What is missing is use: the submission runs on SQLite, the transcript evidences only that adapter, and no Postgres instance has answered a question outside a test. Contract-verified is not production-proven.
 - **Compatibility is enforced by evidence, and now by a gate over it.**
-  `assistant/candidates.py` assesses each candidate product against the
+  `assistant/retrieval/candidates.py` assesses each candidate product against the
   corpus per required property before any recommendation is made, and a
   product whose substrate suitability is not independently established
   cannot be recommended. What is still absent is the *matrix*: no

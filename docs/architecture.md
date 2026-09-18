@@ -214,7 +214,7 @@ Four things to say out loud from this diagram:
 
 ## 3. Multimodal perception — built and gated
 
-Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. **Vision perception is built and testable** (assistant/vision.py); it is disabled by default via the `ASSISTANT_VISION_DEMO=1` capability flag because latency on CPU (191.9s per image) is prohibitive for a demonstration. When enabled, the architecture below is fully functional. Production roadmap items (fine-tuning on failure library, hosted inference, browser-based UI) remain.
+Photographs arrive in eight of the fifteen external situation archetypes, and the partnership names multimodal guardrails as an activity. **Vision perception is built and testable** (assistant/answering/vision.py); it is disabled by default via the `ASSISTANT_VISION_DEMO=1` capability flag because latency on CPU (191.9s per image) is prohibitive for a demonstration. When enabled, the architecture below is fully functional. Production roadmap items (fine-tuning on failure library, hosted inference, browser-based UI) remain.
 
 Three properties make it consistent with what is already built rather than a parallel system:
 

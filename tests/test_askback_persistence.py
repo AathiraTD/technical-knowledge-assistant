@@ -7,7 +7,7 @@ session layer exists so the reply can be answered in place — the person types
 
 That worked exactly once. The value they typed was detected from their reply,
 merged into a **local** dict to re-ask the pending question, and then dropped:
-`assistant/ui.py`'s `_remember` re-read the session store for the
+`assistant/interfaces/ui.py`'s `_remember` re-read the session store for the
 auto-answered branch, and the store had never been told. So turn two was right
 and turn three asked for the substrate again, and again, and the feature
 defeated itself in the least visible way available — by working the first time.

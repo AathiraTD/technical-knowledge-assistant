@@ -1,7 +1,7 @@
 """Presentation polish for an answer that has already been verified.
 
 A supported statement is not necessarily a relevant answer. The checks in
-`assistant/answer.py` establish that every sentence is cited, every figure is
+`assistant/answering/answer.py` establish that every sentence is cited, every figure is
 published, every name is real and every caveat travels with its figure — and
 none of that asks whether the reply opens by answering the question. It often
 does not. "The wall can be made of masonry or wooden laths…" is a true,

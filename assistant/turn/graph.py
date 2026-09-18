@@ -1,14 +1,14 @@
 """The turn as a state machine: nodes around the functions that already exist.
 
 Every node in this file is a thin adapter. `understand_turn` calls
-`assistant/understanding.py`; `retrieve_candidates` calls the existing
-`Retriever`; `assess_evidence` calls `assistant/candidates.py`; the printing
+`assistant/answering/understanding.py`; `retrieve_candidates` calls the existing
+`Retriever`; `assess_evidence` calls `assistant/retrieval/candidates.py`; the printing
 nodes call the existing `AnswerEngine`. **No domain truth lives here.** The
 repository, retrieval, the six checks, the policy gate, the calculations and the
 audience filter are unchanged and are called, not absorbed — which is the
 condition under which adopting an orchestration library is safe at all.
 
-What the graph adds is the thing `assistant/session.py` plus `assistant/ui.py`
+What the graph adds is the thing `assistant/turn/session.py` plus `assistant/interfaces/ui.py`
 were doing informally and getting wrong: an explicit order, a single place where
 conversation state is merged, and a pause that can be resumed. The bugs that
 motivated it are all state-machine bugs — transcript contaminating routing,
@@ -24,7 +24,7 @@ for a hosted tracing service. A single environment variable would otherwise
 export whole conversations to a third party, which this system's privacy posture
 forbids. The variables are set here, before the import, rather than documented
 in a runbook — a posture that depends on nobody setting an env var is not a
-posture. `assistant/observability.py` remains the only telemetry path.
+posture. `assistant/infrastructure/observability.py` remains the only telemetry path.
 
 *Serialisation is explicit.* The checkpointer refuses to deserialise unknown
 types in a future version, and defaulting to permissive would mean a checkpoint
@@ -222,7 +222,7 @@ class ResetTrace(list):
     a trace to find out, and the honest answer for one answer is one turn.
 
     The conversation-level view is not lost; it is the sequence of per-turn
-    traces in the span tree, where `assistant/observability.py` already keeps it
+    traces in the span tree, where `assistant/infrastructure/observability.py` already keeps it
     with timings attached.
     """
 
@@ -896,7 +896,7 @@ def build(services: Services):
 # ----------------------------------------------------------------- helpers
 
 def _state_of(state: TurnState) -> ConversationState:
-    """The conversation, as `assistant/understanding.py` wants to read it."""
+    """The conversation, as `assistant/answering/understanding.py` wants to read it."""
     return ConversationState(facts=dict(state.get("facts") or {}),
                              turn_index=state.get("turn_index", 0))
 

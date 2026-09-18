@@ -1,6 +1,6 @@
 """Conversation state as typed, provenance-bearing facts.
 
-`assistant/session.py` carries four slots as bare strings. That was enough while
+`assistant/turn/session.py` carries four slots as bare strings. That was enough while
 the only question was "what is this wall made of", and it stopped being enough
 the moment three things became true at once: a photograph can now propose a
 value, a later turn can correct an earlier one, and a recommendation has to be
@@ -27,7 +27,7 @@ the observation is retained alongside it. A conflicting slot then reads as
 missing to the requirement gate, so the system asks rather than picks a winner.
 
 **An inherited fact never overwrites a current one.** Merge order is history
-under the present, which is what `assistant/router.py` already does with
+under the present, which is what `assistant/answering/router.py` already does with
 `carried` and what makes self-correction work at all.
 
 **What this module deliberately does not do.** It never parses an assistant
@@ -37,7 +37,7 @@ answer. Nothing here reads generated prose, and no constructor takes one: a
 assistant output is not a source of truth, and the way to keep it from becoming
 one is to give it nowhere to enter.
 
-`Provenance` is imported from `assistant/answer.py` rather than redefined. It
+`Provenance` is imported from `assistant/answering/answer.py` rather than redefined. It
 already carries exactly the four states this needs, with matching semantics —
 ``STATED`` is the current user, ``CARRIED`` is the same person in an earlier
 turn, ``OBSERVED`` is a photograph, ``ASSUMED`` is the system choosing — and the
@@ -101,7 +101,7 @@ class SessionFact:
     source_turn: int = 0
     status: FactStatus = FactStatus.ACTIVE
     # Only ever set for ``OBSERVED`` facts, and never compared against a
-    # threshold outside `assistant/vision.py`. Decision 16.1: a vision model
+    # threshold outside `assistant/answering/vision.py`. Decision 16.1: a vision model
     # reporting 0.91 is not right 91% of the time, so this travels for the
     # audit trail and the band decision is made where the calibration argument
     # lives.
@@ -465,7 +465,7 @@ class TurnInput:
     """One message, exactly as it arrived. Never merged with anything.
 
     The separation this type exists to enforce is the one
-    `assistant/engine.py` used to break: `question = context + "\\n\\n" + question`
+    `assistant/answering/engine.py` used to break: `question = context + "\\n\\n" + question`
     put an earlier answer's prose in front of the policy gate, the slot
     detector and the embedder, so a previous mention of "cost" routed an
     unrelated question to the price referral and a previous mention of plaster
@@ -579,7 +579,7 @@ class ConversationState:
     def active(self) -> dict[str, str]:
         """Slots a later turn may inherit, as bare strings.
 
-        The shape `assistant/session.py` has always returned and every existing
+        The shape `assistant/turn/session.py` has always returned and every existing
         caller expects, so adding provenance and cases underneath costs no call
         site. Two exclusions: a conflicting slot, because the requirement gate
         must see it as unsettled and a caller reading only strings cannot be

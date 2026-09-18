@@ -11,7 +11,7 @@ serialised per Ollama instance no matter how many threads ask.
     python scripts/benchmark.py --levels 1,3,5 --json results.json
 
 **Timings come from the spans, not from a stopwatch around the request.**
-`assistant/observability.py` already records a span per stage and the store
+`assistant/infrastructure/observability.py` already records a span per stage and the store
 already persists them, so retrieval and generation are read back through
 `KnowledgeRepository.traces()` keyed on the correlation id the page returns in
 `X-Correlation-Id`. Wrapping a timer around the HTTP call would measure the

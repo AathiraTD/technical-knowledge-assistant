@@ -315,7 +315,7 @@ class Conversation:
     **Why the driver lives here rather than in the engine.** `Assistant.ask` is
     deliberately single-turn and stateless: it takes `carried` and returns an
     answer, and it neither decides what is worth remembering nor stores it.
-    `assistant/session.py` owns the memory and `assistant/ui.py` owns the
+    `assistant/turn/session.py` owns the memory and `assistant/interfaces/ui.py` owns the
     orchestration between the two — so the multi-turn behaviour this harness
     evaluates is not reachable through any one component.
 
@@ -395,7 +395,7 @@ class Conversation:
         """Fold the turn back in, minus anything only a photograph knew.
 
         The exclusion reads the answer's *facts* rather than its slots, for the
-        reason `assistant/ui.py` gives at the same join: a slot the photograph
+        reason `assistant/interfaces/ui.py` gives at the same join: a slot the photograph
         supplied and the question also stated comes back as ``STATED`` and is
         kept, because the person did say it. Filtering on the slot name alone
         would silently drop a substrate somebody typed.
@@ -566,7 +566,7 @@ class GoldContext:
     untouched.
 
     **The registry and the recommendation predicate.** `no_unapproved_recommend-
-    ation` deliberately re-asks the question `assistant/graph.py`'s verify node
+    ation` deliberately re-asks the question `assistant/turn/graph.py`'s verify node
     asks, from outside, on the printed text. It shares `recommends_a_product`
     with the code under test, which is a real limit and is stated rather than
     hidden: a bug in that predicate would be invisible to both. What it does

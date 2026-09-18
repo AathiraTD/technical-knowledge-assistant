@@ -58,7 +58,7 @@ The system carried both through the same history mechanism and supplied both to 
 
 Separate the concerns:
 
-1. **Trusted slots remain in LangGraph checkpoint state** (`assistant/session.py`), visible to routing, candidate assessment, and evidence binding. These values are authoritative for the system's reasoning.
+1. **Trusted slots remain in LangGraph checkpoint state** (`assistant/turn/session.py`), visible to routing, candidate assessment, and evidence binding. These values are authoritative for the system's reasoning.
 2. **Transcript history carries only user questions**, not generated answers. The history block is formatted so it cannot be cited (no citation markers) and explicitly states "never take a fact from it."
 3. **Model sees both**: the trusted slots are printed as stated assumptions, and the question history is printed as working context for pronoun/reference resolution.
 
@@ -101,7 +101,7 @@ Introduce deterministic property-evidence binding **before** the model runs:
 4. **Promote bound passages** for composition: reorder the evidence set so passages supporting the actually-requested property appear first
 5. **Supplement, not replace**: other passages remain available (needed for cross-product comparisons), but the bound ones get priority
 
-Implemented in `assistant/router.py:evidence_binding()` and integrated into the composition path.
+Implemented in `assistant/answering/router.py:evidence_binding()` and integrated into the composition path.
 
 ### Validation
 
@@ -244,7 +244,7 @@ Specifically:
 
 The **coverage condition** is what makes this safe: filtering only occurs when the product's own evidence answers the question. If no single product's evidence covers the property, no filtering happens and all sources are included.
 
-Implemented in `assistant/engine.py:_filter_compose_evidence()`.
+Implemented in `assistant/answering/engine.py:_filter_compose_evidence()`.
 
 ### Measurement
 
@@ -335,7 +335,7 @@ No single source of truth existed. The application never made unified decisions 
 
 ### Fix
 
-Introduce a single `NUM_CTX` variable (`assistant/ollama.py`):
+Introduce a single `NUM_CTX` variable (`assistant/infrastructure/ollama.py`):
 
 ```python
 NUM_CTX = int(os.getenv('OLLAMA_NUM_CTX', '8192'))
@@ -476,12 +476,12 @@ From the failures and fixes above:
 
 ## References
 
-- `assistant/answer.py` — Citation checks and post-generation verification
-- `assistant/router.py` — Evidence binding, routing, and property verification  
-- `assistant/engine.py` — Composition path and membership filtering
-- `assistant/vision.py` — Vision contract, provenance, and vocabulary filtering
+- `assistant/answering/answer.py` — Citation checks and post-generation verification
+- `assistant/answering/router.py` — Evidence binding, routing, and property verification  
+- `assistant/answering/engine.py` — Composition path and membership filtering
+- `assistant/answering/vision.py` — Vision contract, provenance, and vocabulary filtering
 - `assistant/cache.py` — Cache key construction with audience isolation
-- `assistant/session.py` — Trusted conversation state and slots
+- `assistant/turn/session.py` — Trusted conversation state and slots
 - `tests/test_evidence_binding.py` — Property-evidence binding validation
 - `tests/test_checks.py` — Post-generation check coverage
 - `tests/test_cache.py` — Cache isolation and audience separation

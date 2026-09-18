@@ -1,6 +1,6 @@
 """Where model output stops being trusted.
 
-`assistant/understanding.py` is the one place a model is asked to read the
+`assistant/answering/understanding.py` is the one place a model is asked to read the
 person's question rather than to compose from passages, so it is the one place a
 new class of failure can enter: a fluent, well-formed, entirely invented
 structure. Constrained decoding guarantees the shape and nothing else — a schema

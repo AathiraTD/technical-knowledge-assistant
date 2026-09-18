@@ -106,7 +106,7 @@ class PostgresKnowledgeRepository:
         # rather than the module constants read at the point of use, so a test
         # can prove the sweep prunes without writing two hundred batches and
         # waiting a fortnight to reach it. The values are shared with the SQLite
-        # adapter through assistant/repository.py: a retention window that
+        # adapter through assistant/knowledge/repository.py: a retention window that
         # differed between the two would make "one system, two adapters" false
         # about the one thing an operator would notice.
         self.trace_retention_days = TRACE_RETENTION_DAYS

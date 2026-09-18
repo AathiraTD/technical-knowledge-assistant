@@ -62,9 +62,9 @@ against the shipped crawl directly. It still needs the local embedding service.
 
 ### Index release
 
-`assistant/index.py` implements indexing. `chunk_sections()` merges short
+`assistant/indexing/index.py` implements indexing. `chunk_sections()` merges short
 sections and splits long ones at structural boundaries, keeping complete bullets
-and their conditions together. `assistant/extract.py` handles HTML/PDF extraction.
+and their conditions together. `assistant/indexing/extract.py` handles HTML/PDF extraction.
 Approved staff text uses the same chunking and caveat tagging.
 
 The indexer validates saved source hashes, archives sources before extraction,
@@ -86,7 +86,7 @@ source has an immutable path, only an exact byte hash matches.
 
 ### Stores and serving boundary
 
-`assistant/store/embedded.py` contains SQLite storage; `assistant/store/postgres.py`
+`assistant/knowledge/store/embedded.py` contains SQLite storage; `assistant/knowledge/store/postgres.py`
 contains PostgreSQL and pgvector queries. Schemas live in `db/`. Set
 `ASSISTANT_POSTGRES_DSN` to select PostgreSQL for indexing, CLI, UI and readiness;
 unset it to use SQLite. Historical vector dimensions may differ. PostgreSQL uses

@@ -6,7 +6,7 @@ which products are eligible for a substrate before retrieval runs."* This module
 is that gate, built the only way the data allows.
 
 **There is no compatibility matrix, and this module does not invent one.**
-`assistant/compatibility.py` can load `config/compatibility_matrix.json`; that
+`assistant/retrieval/compatibility.py` can load `config/compatibility_matrix.json`; that
 file does not exist, because the product-to-substrate matrix exists nowhere on
 the site and lives in datasheets and advisors' heads. Writing one from model
 knowledge would be fabricating safety data in a liability-sensitive domain and

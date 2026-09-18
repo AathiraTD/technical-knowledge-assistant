@@ -5,7 +5,7 @@ which decides the adopt/defer question on its own:
 
   Q1  Can graph nodes be plain Python functions over a plain typed state, with
       no LangChain type anywhere in the domain signature?
-  Q2  Does the checkpointer actually replace `assistant/session.py` -- per-thread
+  Q2  Does the checkpointer actually replace `assistant/turn/session.py` -- per-thread
       multi-turn state, reducer-controlled merge, provenance preserved?
   Q3  Does `interrupt()` model the ask-back loop (stop, ask, resume with the
       user's answer, continue the ORIGINAL question) better than `pending`?

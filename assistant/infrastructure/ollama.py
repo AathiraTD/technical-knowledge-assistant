@@ -41,7 +41,7 @@ GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "qwen3.5:4b")
 # alike. One variable, deliberately: Ollama keys a resident instance on the
 # context size, so two different sizes for one model are two instances, and a
 # request for the second size against the first blocks indefinitely rather
-# than erring or resizing. `assistant/vision.py` reads this same constant --
+# than erring or resizing. `assistant/answering/vision.py` reads this same constant --
 # it used to carry its own `VISION_NUM_CTX` environment variable beside a
 # comment saying the two must be *equal*, which meant the hang was one
 # `export` away from returning.
@@ -222,9 +222,9 @@ def generate(
 
     `schema` constrains the reply to a JSON schema through Ollama's `format`
     field, so a structured stage gets structured output instead of prose that
-    has to be parsed back. `assistant/vision.py` already posts `format` to this
+    has to be parsed back. `assistant/answering/vision.py` already posts `format` to this
     same endpoint with its own client; this brings the second such caller --
-    `assistant/understanding.py` -- through the one place that already knows
+    `assistant/answering/understanding.py` -- through the one place that already knows
     about timeouts, keep-alive, seeds and the unavailability error.
 
     Constrained decoding guarantees the *shape* and nothing else. A schema can

@@ -33,7 +33,7 @@ class Path_(str, Enum):
     ``SELECT`` is a printing path like the others and not a second pipeline. It
     exists because a recommendation has a shape the other paths do not: the
     model is allowed to choose between products and explain the runner-up, but
-    only from a set `assistant/candidates.py` has already approved on published
+    only from a set `assistant/retrieval/candidates.py` has already approved on published
     evidence, and the answer is checked afterwards for having stayed inside it.
 
     Being a member here rather than a flag on Compose is what keeps the
@@ -62,7 +62,7 @@ class Decision:
     topic: str = ""
     slots: dict = field(default_factory=dict)
     # Where a slot value came from, for the slots whose origin is not the
-    # default. Sparse and written by `assistant/engine.py` after this decision
+    # default. Sparse and written by `assistant/answering/engine.py` after this decision
     # is made, never by the routing code below: nothing in the router reads it,
     # nothing in the router should, and a routing decision that depended on
     # whether a substrate was typed or photographed would be a second answer

@@ -86,7 +86,7 @@ def server(tmp_path_factory) -> str:
     session store it installed. A thread sharing this process's imports would
     prove a handler class works and leave the wiring untested.
 
-    **Its output goes to a file, never to a pipe.** `assistant/ui.py` turns
+    **Its output goes to a file, never to a pipe.** `assistant/interfaces/ui.py` turns
     structured logging on by default and writes a JSON line per event to stderr,
     which is several lines per answer. A `subprocess.PIPE` nobody drains holds
     about 64KB before the writing process blocks on it forever, so the server

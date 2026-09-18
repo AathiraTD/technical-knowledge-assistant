@@ -1,6 +1,6 @@
 """The turn as a state machine, end to end, with no network.
 
-`assistant/graph.py` is orchestration and nothing else, so these tests are about
+`assistant/turn/graph.py` is orchestration and nothing else, so these tests are about
 **order and state** rather than about answers: which node ran, what the
 conversation believed afterwards, and which edges exist at all.
 
