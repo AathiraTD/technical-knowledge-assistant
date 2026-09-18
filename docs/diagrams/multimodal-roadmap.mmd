@@ -1,53 +1,55 @@
 flowchart TD
-    classDef roadmap fill:#fffdf5,stroke:#fcd34d,color:#92400e,stroke-width:2px
-    classDef built fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
-    classDef gate fill:#fff8fa,stroke:#fda4af,color:#9f1239,stroke-width:2px
-    classDef human fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    classDef input fill:#fff7ed,stroke:#fb923c,color:#7c2d12,stroke-width:2px
+    classDef vision fill:#f5f3ff,stroke:#a78bfa,color:#4c1d95,stroke-width:2px
     classDef data fill:#ecfeff,stroke:#22d3ee,color:#155e75,stroke-width:2px
-    classDef person fill:#fff7ed,stroke:#fb923c,color:#7c2d12,stroke-width:2px
+    classDef built fill:#f0fdf4,stroke:#4ade80,color:#166534,stroke-width:2px
+    classDef decision fill:#fefce8,stroke:#facc15,color:#713f12,stroke-width:2px
+    classDef human fill:#fef2f2,stroke:#f87171,color:#7f1d1d,stroke-width:2px
+    classDef output fill:#eef2ff,stroke:#818cf8,color:#312e81,stroke-width:2px
+    classDef feedback fill:#fdf4ff,stroke:#e879f9,color:#86198f,stroke-width:2px
 
-    USER(("Customer or trade<br/>photographs · question · whatever detail they already know"))
+    USER(["Customer or trade<br/>Photo(s) · question · known details"])
 
-    subgraph PERCEPTION["ROADMAP — perception: what can actually be seen"]
+    subgraph PERCEPTION["1 · Vision-assisted context — roadmap"]
         direction TB
-        VLM["Vision model<br/>qwen3.5:4b or qwen3-vl:4b, fine-tuned on the failure library<br/>reads pixels; never names a product"]
-        OBS["Structured observations<br/>each carries: value · confidence · source image · region<br/>plus an explicit cannot_determine_from_image list"]
-        PROFILE["Building profile<br/>substrate · masonry type · existing finish · moisture evidence<br/>cracking · deterioration · interior or exterior<br/>every attribute with its own confidence"]
+        VLM["Vision model<br/>Qwen3-VL / Gemma or equivalent<br/><i>Reads pixels; never selects a product</i>"]
+        OBS["Structured observations<br/>value · confidence · image · region<br/>plus: cannot determine from image"]
+        PROFILE["Building context profile<br/>substrate · masonry · existing finish<br/>moisture · cracking · deterioration<br/>interior / exterior"]
         VLM --> OBS --> PROFILE
     end
 
-    GATE{"Confidence gate<br/>are the load-bearing facts known?<br/>substrate and interior / exterior decide the product"}
-    ELICIT["Guided visual survey<br/>ask for one specific thing, not 'send more photos':<br/>an exposed section where the render has fallen away ·<br/>the ground line and drainage · a wider elevation ·<br/>or the two details no photograph can show"]
+    GATE{"Are the load-bearing facts known?<br/><i>Substrate + interior / exterior</i>"}
 
-    subgraph BUILTPIPE["BUILT — the existing pipeline, unchanged"]
+    ELICIT["Guided visual survey<br/>Request one specific photo or detail:<br/>exposed substrate · ground line / drainage<br/>wider elevation · non-visible facts"]
+
+    subgraph ADVICE["2 · Evidence-based advice — built pipeline"]
         direction TB
-        SLOTS2["Slot detection<br/>profile values fill substrate, location, exposure and symptom;<br/>below the confidence floor a slot stays uncued"]
-        RETR["Retrieval over the knowledge store<br/>on the structured profile, not on the raw question"]
-        ENGINE["Deterministic router → extract or compose<br/>six checks before anything prints"]
-        SLOTS2 --> RETR --> ENGINE
+        SLOTS["Slot detection<br/>Use confident profile values;<br/>keep uncertain facts uncued"]
+        RETR["Domain retrieval<br/>Product documents · technical sheets<br/>application rules · contraindications<br/>heritage guidance"]
+        ENGINE["Recommendation engine<br/>Deterministic routing → extract or compose<br/>Citation and safety checks before output"]
+        SLOTS --> RETR --> ENGINE
     end
 
-    HUMAN["Hand-off to the technical team<br/>photographs attached, observations listed with confidences<br/>diagnosis stays a human judgement, with or without vision"]
-    LIB[("Labelled failure library<br/>built by logging these photographs<br/>against what the advisor answered")]
+    HUMAN["Technical-team hand-off<br/>Attach photos and confidence-tagged observations<br/><i>Defect diagnosis remains a human judgement</i>"]
+    OUT["Customer reply<br/>Recommendation + numbered citations<br/>assumptions and confidence<br/>unknowns + next best question"]
+    LIB[("Labelled failure library<br/>Photos paired with advisor outcomes")]
 
-    OUT["Reply<br/>recommendation with numbered citations ·<br/>stated assumptions and their confidence ·<br/>what could not be determined from the images ·<br/>the next photograph or detail needed"]
-
-    USER -->|"photographs"| VLM
+    USER --> VLM
     PROFILE --> GATE
-    GATE -->|"insufficient evidence"| ELICIT
-    ELICIT -.->|"one more photograph, or an answer"| USER
-    GATE -->|"load-bearing facts known"| SLOTS2
-    GATE -->|"defect or cause asked"| HUMAN
+    GATE -->|"Enough evidence"| SLOTS
+    GATE -->|"Need more evidence"| ELICIT
+    ELICIT -.->|"One targeted photo or answer"| USER
+    GATE -->|"Defect / cause assessment"| HUMAN
     ENGINE --> OUT
-    HUMAN -.->|"the advisor's answer, logged"| LIB
-    LIB -.->|"fine-tuning, once enough pairs exist"| VLM
+    HUMAN --> OUT
+    HUMAN -.->|"Advisor outcome"| LIB
+    LIB -.->|"Fine-tuning when sufficient pairs exist"| VLM
 
-    class USER person
-    class VLM,OBS,PROFILE,ELICIT roadmap
-    class SLOTS2,RETR,ENGINE,OUT built
-    class GATE gate
+    class USER input
+    class VLM,OBS,PROFILE vision
+    class GATE decision
+    class ELICIT data
+    class SLOTS,RETR,ENGINE built
     class HUMAN human
-    class LIB data
-
-    style PERCEPTION fill:#fffbeb,stroke:#d97706,stroke-width:3px,stroke-dasharray:6 4
-    style BUILTPIPE fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
+    class OUT output
+    class LIB feedback
