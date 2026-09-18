@@ -37,7 +37,7 @@ from assistant.turn.conversation import ConversationState, TurnInput      # noqa
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
-from assistant.store.factory import open_repository                  # noqa: E402
+from assistant.knowledge.store.factory import open_repository                  # noqa: E402
 
 IMAGES = ROOT / "eval" / "fixtures" / "images"
 

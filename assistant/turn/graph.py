@@ -233,6 +233,39 @@ def _append(a: list, b) -> list:
     return list(a or []) + list(b or [])
 
 
+def _normalize_question(question: str) -> str:
+    """Rewrite 'For [product], tell me...' into '[product]: ...'
+
+    Removes ambiguity about whether this is a recommendation request or a
+    property lookup. The declarative format signals a factual lookup, not advice.
+    Aggressively simplifies the property list to match the clean format that works.
+    """
+    import re
+
+    match = re.search(
+        r"for\s+((?:lime\s+)?green\s+\w+)\s*[,:]?\s+tell\s+me\s+(.+?)(?:\?|$)",
+        question,
+        re.IGNORECASE
+    )
+    if match:
+        product = match.group(1)
+        properties = match.group(2).strip()
+        # Remove leading "the "
+        properties = re.sub(r"^the\s+", "", properties, flags=re.IGNORECASE)
+        # Clean up filler words, preserving spaces
+        properties = re.sub(r"\s*\brequired\b\s*", " ", properties, flags=re.IGNORECASE)
+        properties = re.sub(r"\s*\bapplication\b\s*", " ", properties, flags=re.IGNORECASE)
+        properties = re.sub(r"\s+or\s+.*?conditions", "", properties, flags=re.IGNORECASE)
+        properties = re.sub(r"\s*\band\s+conditions\b", "", properties, flags=re.IGNORECASE)
+        # Normalize spaces and commas
+        properties = re.sub(r"\s+", " ", properties).strip()
+        properties = re.sub(r"\s*,\s*", ", ", properties)
+        properties = properties.strip(", ")
+        return f"{product}: {properties}"
+
+    return question
+
+
 class TurnState(TypedDict, total=False):
     """One turn's working set.
 
@@ -310,7 +343,7 @@ def build(services: Services):
     """Compile the graph. Nodes close over `services`; none imports a store."""
 
     def understand_turn(state: TurnState) -> dict:
-        question = state["raw_question"]
+        question = _normalize_question(state["raw_question"])
         boundary = und.state_only_answer(
             question, services.router.slots, services.registry,
             _state_of(state), state.get("turn_index", 0),

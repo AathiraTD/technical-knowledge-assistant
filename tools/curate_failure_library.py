@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from assistant import observability as obs
+from assistant.infrastructure import observability as obs
 
 
 def load_cases(input_dir: Path) -> list[dict]:

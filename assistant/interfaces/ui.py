@@ -262,8 +262,17 @@ PAGE = """<!doctype html>
   .source-list.open {{ display:block; }}
   .source-item {{
     margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #ddd;
+    scroll-margin-top:60px;
   }}
   .source-item:last-child {{ border-bottom:none; margin-bottom:0; padding-bottom:0; }}
+  .source-item.highlight {{
+    background:rgba(var(--accent-rgb), 0.1); border-radius:4px; padding:8px;
+    animation:fadeHighlight 2s ease-out;
+  }}
+  @keyframes fadeHighlight {{
+    0% {{ background:rgba(var(--accent-rgb), 0.15); }}
+    100% {{ background:transparent; }}
+  }}
   .source-name {{ font-weight:500; color:var(--ink); }}
   .source-date {{ color:var(--muted); font-size:12px; }}
   .source-link {{ color:var(--accent); word-break:break-all; font-size:12px;
@@ -733,6 +742,7 @@ function renderAnswer(answer, uploadNotes, container, index = 0) {{
     answer.sources.forEach(src => {{
       const item = document.createElement('div');
       item.className = 'source-item';
+      item.id = 'source-' + src.marker;
       item.innerHTML = '<div class="source-name">' + escapeHtml(src.name) +
         (src.section ? ' -- ' + escapeHtml(src.section) : '') +
         (src.date ? ' (' + escapeHtml(src.date) + ')' : '') + '</div>' +
@@ -813,7 +823,8 @@ function renderDiagnostics(diag, failedChecks) {{
 }}
 
 function renderTextWithCitations(text) {{
-  return escapeHtml(text).replace(/\\[(\\d+)\\]/g, '<span class="citation">[$1]</span>');
+  return escapeHtml(text).replace(/\\[(\\d+)\\]/g,
+    '<span class="citation" onclick="scrollToSource($1)" data-marker="$1">[$1]</span>');
 }}
 
 function toggleSources(btn, list) {{
@@ -835,6 +846,16 @@ function escapeHtml(text) {{
     "'": '&#39;'
   }};
   return text.replace(/[&<>"']/g, m => map[m]);
+}}
+
+function scrollToSource(marker) {{
+  // When a citation [n] is clicked, scroll to and highlight source #n
+  const element = document.getElementById('source-' + marker);
+  if (element) {{
+    element.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+    element.classList.add('highlight');
+    setTimeout(() => element.classList.remove('highlight'), 2000);
+  }}
 }}
 
 document.getElementById('file-input').addEventListener('change', showAttached);
@@ -959,8 +980,10 @@ def _render_answer_html(answer, index: int, reference: str,
     text = answer.text or answer.body
     # Escape HTML, then restore citation markers with spans
     text_html = _esc(text)
-    # Replace [n] citations with citation spans (simple loop since we expect few)
-    text_html = re.sub(r"\[(\d+)\]", r'<span class="citation">[\1]</span>', text_html)
+    # Replace [n] citations with citation spans that link to sources via marker
+    text_html = re.sub(r"\[(\d+)\]",
+                       r'<span class="citation" onclick="scrollToSource(\1)" '
+                       r'data-marker="\1">[\1]</span>', text_html)
     blocks.append(f'<p class="answer-text">{text_html}</p>')
 
     # Sources disclosure section
@@ -969,7 +992,8 @@ def _render_answer_html(answer, index: int, reference: str,
         blocks.append('<button class="disclosure-btn" onclick="this.nextElementSibling.classList.toggle(\'open\'); this.classList.toggle(\'open\');">Sources</button>')
         blocks.append('<div class="source-list">')
         for src in answer.sources:
-            blocks.append('<div class="source-item">')
+            marker = src.get("marker", "")
+            blocks.append(f'<div class="source-item" id="source-{marker}">')
             blocks.append(f'<div class="source-name">{_esc(src["name"])}')
             if src.get("section"):
                 blocks.append(f' -- {_esc(src["section"])}')
@@ -1404,7 +1428,8 @@ class Handler(BaseHTTPRequestHandler):
                 "parts": [
                     {"question": q, "path": a.path, "refused": a.refused,
                      "text": a.text, "body": a.body, "sources": a.sources,
-                     "caveats": a.caveats, "diagnostics": a.diagnostics,
+                     "caveats": a.caveats,
+                     "diagnostics": (a.diagnostics if verbose else {}),
                      "failed_checks": a.failed_checks,
                      # Structured rather than prose, so a channel adapter can
                      # render provenance its own way instead of parsing ours.
