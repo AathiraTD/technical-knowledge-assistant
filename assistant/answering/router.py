@@ -620,6 +620,73 @@ class Router:
         blob = " ".join(f"{h.chunk.section} {h.chunk.content}" for h in hits).lower()
         return any(t.lower() in blob for t in terms)
 
+    # The wall a compatibility question is asking about: "on cob", "over dot
+    # and dab", "onto laths".
+    _ON = re.compile(r"\b(?:on|onto|over|against)\s+(?:an?\s+|the\s+|my\s+)?"
+                     r"([a-z][a-z\- ]{2,30}?)\s*(?:walls?|surfaces?|boards?)?\s*[?.,]?$",
+                     re.I)
+
+    def _substrate_terms(self, question: str, slots: dict) -> tuple[str, list[str]]:
+        """What the evidence must name for a compatibility answer to be safe.
+
+        Separate from `_asked_by_property` and deliberately not merged into it.
+        That list is an OR — "was anything the question asked about present at
+        all" — and merging the substrate in would let a compatibility synonym
+        discharge it. The substrate is an AND: "Can I use Solo on cob walls?"
+        is satisfied by "Solo is suitable for many backgrounds" under an OR,
+        which is exactly the near-miss that shipped. Two questions, two gates.
+
+        The substrate slot is usually absent here even when the question plainly
+        names a wall, and that is deliberate upstream rather than a bug to work
+        around: `_AssertionSlots` accepts building facts only as assertions, so
+        "Can I use Solo on cob walls?" records no substrate — asking about a
+        wall is not the same as having one, and a hypothetical must not be
+        carried into the next turn as fact. The gate still has to know which
+        wall was asked about, so it reads the question directly.
+
+        Either way the wall is resolved through the vocabulary, so the caller's
+        word need not be the sheet's word: "dot and dab" is asking about
+        plasterboard and must be answered from the plasterboard sentences. A
+        wall the vocabulary does not hold keeps its own words and must be named
+        outright — a gate that protected only the enumerated walls would protect
+        the wrong half, and every wall the partnership has yet to write down is
+        in the other half.
+        """
+        if "compatibility" not in slots.get("property_asked", ""):
+            return "", []
+        named = slots.get("substrate", "")
+        if not named:
+            found = self._ON.search(question.strip())
+            if not found:
+                return "", []
+            phrase = " ".join(found.group(1).split()).lower().strip()
+            if not phrase or phrase in {"it", "this", "that", "them"}:
+                return "", []
+            named = self._known_substrate(phrase) or phrase
+        terms = list(self.slots.terms_for("substrate", named)) or [named]
+        # The published class counts as the substrate, because it is the word
+        # the sheets actually use: no Ultra document contains "brick", the
+        # product page says "most masonry and lath backgrounds", and brick is
+        # masonry by the rule in `substrate_classes`. Without this the gate
+        # refuses a question the corpus answers.
+        #
+        # It is the same map the evidence binding reads, so the bridge exists in
+        # one place and cannot drift. A substrate with no published class gets
+        # no bridge and must be named outright — which is why cob is absent from
+        # that map, and must not be added to it to make this gate quieter.
+        published = self.slots.class_of(named)
+        if published:
+            terms += list(self.slots.terms_for("substrate", published)) or [published]
+        return named, list(dict.fromkeys(terms))
+
+    def _known_substrate(self, phrase: str) -> str:
+        """The vocabulary value this wording names, if the vocabulary holds it."""
+        values = self.slots.spec.get("substrate", {}).get("values", {})
+        for value, terms in values.items():
+            if any(phrase == t.lower() for t in terms) or phrase == value:
+                return value
+        return ""
+
     # -- the ordered decision ---------------------------------------------
 
     def unsupported_terms(self, question: str, hits: list[Retrieved],
@@ -685,6 +752,20 @@ class Router:
                             f"the published material does not state {asked}"
                             " for this product",
                             "4", slots=slots, hits=hits, missing_term=asked,
+                            photograph=photo)
+
+        # Step 4b — the substrate half of the same gate. Decision 9 and check 6
+        # both say "property **or substrate**"; only the property half was
+        # enforced, so "Can I use Solo on cob walls?" printed general
+        # background guidance from a corpus that never names cob. Answering a
+        # substrate question from evidence about a different wall is the error
+        # decision 10 calls the costly one.
+        wall, wall_terms = self._substrate_terms(question, slots)
+        if wall_terms and not self._present(wall_terms, hits):
+            return Decision(Path_.REFUSE,
+                            f"the published material does not state whether "
+                            f"this product suits {wall}",
+                            "4b", slots=slots, hits=hits, missing_term=wall,
                             photograph=photo)
 
         # Everything past step 4 carries the gate's own word list, so check 6
