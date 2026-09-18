@@ -35,11 +35,16 @@ from assistant.answering.engine import (
     render,
     split_by_topic,
 )
-from assistant.model import (                                     # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Retrieved, Snapshot,
+from assistant.knowledge.model import (
+    Caveat,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Retrieved,
+    Snapshot,
 )
 from assistant.answering.router import Decision, Path_                      # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository              # noqa: E402
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"

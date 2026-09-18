@@ -37,11 +37,9 @@ from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
 from assistant.indexing.index import CHUNKING_VERSION                       # noqa: E402
-from assistant.model import (                                      # noqa: E402
-    Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
-from assistant.store.factory import open_repository                # noqa: E402
+from assistant.knowledge.model import Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository              # noqa: E402
+from assistant.knowledge.store.factory import open_repository                # noqa: E402
 from assistant.interfaces.ui import (  # noqa: E402
     Handler,
 )
@@ -302,9 +300,9 @@ def test_a_password_never_reaches_the_report(monkeypatch):
             raise RuntimeError(f"could not connect to {dsn}")
 
     import types
-    module = types.ModuleType("assistant.store.postgres")
+    module = types.ModuleType("assistant.knowledge.store.postgres")
     module.PostgresKnowledgeRepository = Unreachable
-    monkeypatch.setitem(sys.modules, "assistant.store.postgres", module)
+    monkeypatch.setitem(sys.modules, "assistant.knowledge.store.postgres", module)
 
     report = health.check(dsn=dsn)
 

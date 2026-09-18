@@ -11,7 +11,7 @@ import pytest
 from assistant.indexing import index
 from assistant.indexing.embedcache import EmbeddingCache
 from assistant.indexing.extract import Extracted
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 
 
 URL = "https://example.test/products/plaster"

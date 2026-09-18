@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.answering.answer import products_named, run_checks      # noqa: E402
-from assistant.model import Chunk, Document, Retrieved       # noqa: E402
+from assistant.knowledge.model import Chunk, Document, Retrieved       # noqa: E402
 
 NAMES = {
     "products": ["Solo Onecoat Lime Plaster", "Duro Lime Plaster Base Coat"],

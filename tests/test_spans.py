@@ -49,11 +49,15 @@ from assistant.infrastructure import observability as obs
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
-from assistant.model import TraceSpan                              # noqa: E402
-from assistant.repository import (                                 # noqa: E402
-    TRACE_PRUNE_STRIDE, TRACE_RETENTION_DAYS, TRACE_ROW_CAP,
+from assistant.knowledge.model import (  # noqa: E402
+    TraceSpan,
 )
-from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
+from assistant.knowledge.repository import (
+    TRACE_PRUNE_STRIDE,
+    TRACE_RETENTION_DAYS,
+    TRACE_ROW_CAP,
+)
+from assistant.knowledge.store import SQLiteKnowledgeRepository              # noqa: E402
 
 from test_engine import build_repo, no_ollama, quoting             # noqa: E402,F401
 from assistant.infrastructure import ollama
@@ -594,7 +598,7 @@ def test_answer_log_is_deliberately_not_pruned(repo):
     the trace and not the audit trail is the honest split; the audit table's own
     unbounded growth stays a stated open item.
     """
-    from assistant.model import AnswerLogEntry
+    from assistant.knowledge.model import AnswerLogEntry
     repo.trace_prune_stride = 1
     repo.log_answer(AnswerLogEntry(question="Asked long ago.", path_taken="extract",
                                    asked_at="2020-01-01T00:00:00+00:00"))

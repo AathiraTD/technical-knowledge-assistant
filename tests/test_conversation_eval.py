@@ -67,10 +67,15 @@ from assistant.infrastructure import ollama
 from assistant.answering.answer import PHOTO_LINE, Provenance               # noqa: E402
 from assistant.answering.engine import Assistant                            # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
-from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    Chunk,
+    Document,
+    DocumentVersion,
+    Snapshot,
+)
 from assistant.answering.router import Path_                                # noqa: E402
 from assistant.turn.session import CARRIED_SLOTS, SessionStore         # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository             # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository             # noqa: E402
 
 from eval.run import (                                            # noqa: E402
     TURN_EXPECTATIONS, Conversation, check_turn, run_conversation,

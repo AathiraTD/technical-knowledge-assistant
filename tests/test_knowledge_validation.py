@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 
 from assistant.indexing import index
-from assistant.model import DocumentUpdate
-from assistant.repository import IndexMismatch
+from assistant.knowledge.model import DocumentUpdate
+from assistant.knowledge.repository import IndexMismatch
 from test_pipeline_regressions import pipeline, URL, served_text
 from test_repository_contract import A, doc, ver, chunk, snap
 

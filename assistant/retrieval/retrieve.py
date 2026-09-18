@@ -21,8 +21,8 @@ from pathlib import Path
 
 from ..infrastructure import observability as obs
 from ..infrastructure import ollama
-from ..model import Retrieved
-from ..repository import IndexMismatch, RetrievalRequest
+from ..knowledge.model import Retrieved
+from ..knowledge.repository import IndexMismatch, RetrievalRequest
 from ..indexing.index import CHUNKING_VERSION
 from .. import paths
 

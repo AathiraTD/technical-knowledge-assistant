@@ -40,7 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.answering.answer import _diagnostic_passages, run_checks   # noqa: E402
-from assistant.model import Chunk, Document, Retrieved          # noqa: E402
+from assistant.knowledge.model import Chunk, Document, Retrieved          # noqa: E402
 from assistant.answering.router import PolicyGate, Router                 # noqa: E402
 
 
@@ -255,8 +255,11 @@ from assistant.answering.engine import (  # noqa: E402
 from assistant.indexing.index import (  # noqa: E402
     CHUNKING_VERSION,
 )
-from assistant.model import DocumentVersion, Snapshot               # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository               # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    DocumentVersion,
+    Snapshot,
+)
+from assistant.knowledge.store import SQLiteKnowledgeRepository               # noqa: E402
 
 # The three conditions that make the guard fire on a refusal, which is why the
 # fixture is built here rather than borrowed. All three hold in the real corpus

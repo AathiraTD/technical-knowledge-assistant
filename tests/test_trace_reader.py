@@ -36,8 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from assistant.infrastructure import trace as reader
-from assistant.model import TraceSpan
-from assistant.store.embedded import SQLiteKnowledgeRepository
+from assistant.knowledge.model import TraceSpan
+from assistant.knowledge.store.embedded import SQLiteKnowledgeRepository
 
 
 def span(name, span_id, parent="", *, turn="t1", trace="tr1", ms=1,

@@ -41,10 +41,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
-from assistant.model import (                                     # noqa: E402
-    Chunk, Document, DocumentUpdate, DocumentVersion, Snapshot,
+from assistant.knowledge.model import (
+    Chunk,
+    Document,
+    DocumentUpdate,
+    DocumentVersion,
+    Snapshot,
 )
-from assistant.repository import PublicationBusy                  # noqa: E402
+from assistant.knowledge.repository import PublicationBusy                  # noqa: E402
 
 DSN = os.environ.get("ASSISTANT_POSTGRES_DSN")
 pytestmark = pytest.mark.skipif(
@@ -67,7 +71,7 @@ def store():
     import psycopg
     from psycopg import sql
     from psycopg.conninfo import make_conninfo
-    from assistant.store.postgres import PostgresKnowledgeRepository
+    from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
 
     admin = psycopg.connect(DSN, autocommit=True)
     schema = "tka_lock_" + uuid.uuid4().hex
@@ -155,7 +159,7 @@ def a_delta() -> tuple[list[DocumentUpdate], Snapshot]:
 def test_a_publisher_waiting_on_a_held_lock_gives_up_with_a_diagnosis(
         store, monkeypatch):
     """The whole point: a hung publisher must fail loudly, not wait forever."""
-    from assistant.store import postgres
+    from assistant.knowledge.store import postgres
 
     # One second, not thirty: what is under test is that a bound exists and is
     # enforced, not the value chosen for production.
@@ -240,7 +244,7 @@ def test_a_failure_that_is_not_the_timeout_is_raised_as_itself(store):
     """
     import psycopg
     from psycopg.conninfo import make_conninfo
-    from assistant.store.postgres import PostgresKnowledgeRepository
+    from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
 
     # Spaces are stripped because libpq splits the `options` string on them: a
     # `search_path` echoed back as "schema, public" would silently truncate the

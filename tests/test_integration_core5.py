@@ -16,7 +16,7 @@ from assistant.turn import session
 from assistant.infrastructure import observability
 from assistant.answering.engine import Assistant
 from assistant.retrieval.retrieve import Retriever
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 
 
 class IntegrationTestCore5(unittest.TestCase):

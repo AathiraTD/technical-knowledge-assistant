@@ -52,8 +52,8 @@ from assistant.answering.answer import (
     promote_bound,
     run_checks,
 )
-from assistant.model import Chunk, Document, Retrieved           # noqa: E402
-from assistant.repository import product_matches                 # noqa: E402
+from assistant.knowledge.model import Chunk, Document, Retrieved           # noqa: E402
+from assistant.knowledge.repository import product_matches                 # noqa: E402
 from assistant.answering.router import Path_, Router                       # noqa: E402
 
 COMPOUND = ("I have a solid brick wall internally. Can I use Ultra, and what "

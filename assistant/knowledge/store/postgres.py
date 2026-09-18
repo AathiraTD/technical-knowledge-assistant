@@ -58,7 +58,7 @@ from ..model import (
     Snapshot,
     TraceSpan,
 )
-from .. import paths
+from ... import paths
 
 SCHEMA = paths.DB_DIR / "schema.postgres.sql"
 
@@ -813,7 +813,7 @@ class PostgresKnowledgeRepository:
                     self._prune_traces(cur)
                 conn.commit()
         except Exception as error:                     # noqa: BLE001
-            from ..infrastructure import observability as obs
+            from ...infrastructure import observability as obs
             obs.event("store_error", operation="record_spans",
                       error=type(error).__name__, detail=str(error))
 

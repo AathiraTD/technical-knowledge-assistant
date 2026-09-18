@@ -22,9 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.indexing.index import CHUNKING_VERSION
 from assistant.infrastructure import ollama
-from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
-from assistant.repository import RetrievalRequest               # noqa: E402
-from assistant.repository import IndexMismatch                # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    Chunk,
+    Document,
+    DocumentVersion,
+    Snapshot,
+)
+from assistant.knowledge.repository import RetrievalRequest               # noqa: E402
+from assistant.knowledge.repository import IndexMismatch                # noqa: E402
 from assistant.retrieval.retrieve import (
     DEFAULT_THRESHOLD,
     OVERFETCH,
@@ -33,7 +38,7 @@ from assistant.retrieval.retrieve import (
     _distinct,
     as_query,
 )
-from assistant.store import SQLiteKnowledgeRepository         # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository         # noqa: E402
 
 DIMS = ollama.EMBED_DIMENSIONS
 URL = "https://example/solo"

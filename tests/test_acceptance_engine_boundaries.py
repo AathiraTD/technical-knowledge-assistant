@@ -11,9 +11,9 @@ from assistant.infrastructure import ollama
 from assistant.answering.answer import Answer, Provenance
 from assistant.turn.conversation import ConversationState, FactHistory, SessionFact
 from assistant.answering.engine import Assistant
-from assistant.model import Retrieved, Snapshot
+from assistant.knowledge.model import Retrieved, Snapshot
 from assistant.answering.router import Decision, Path_
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 from test_engine import CHUNKING_VERSION, chunk, document, unit, version
 
 

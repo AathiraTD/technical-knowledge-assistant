@@ -2,15 +2,15 @@
 from dataclasses import replace
 import pytest
 
-from assistant.model import DocumentUpdate, Caveat
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.model import DocumentUpdate, Caveat
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 from test_repository_contract import A, doc, ver, chunk, snap
 from test_pipeline_regressions import pipeline, URL
 
 
 def second_connection(repo):
     if hasattr(repo, 'dsn'):
-        from assistant.store.postgres import PostgresKnowledgeRepository
+        from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
         return PostgresKnowledgeRepository(repo.dsn, apply_schema=False)
     return SQLiteKnowledgeRepository(repo.path)
 
@@ -71,7 +71,7 @@ def test_postgres_readiness_uses_live_embedded_chunks():
 
 def test_full_index_delta_against_each_backend(pipeline, repo):
     from assistant.indexing import index
-    from assistant.model import Excluded
+    from assistant.knowledge.model import Excluded
     stage, _ = pipeline
     stage()
     first = index.build(repo, False)
@@ -102,7 +102,7 @@ def test_sqlite_upgrades_legacy_crawl_columns(tmp_path):
 
 def test_postgres_missing_dependency_explains_installation(monkeypatch):
     import sys
-    from assistant.store.postgres import PostgresKnowledgeRepository
+    from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
     monkeypatch.setitem(sys.modules, 'psycopg', None)
     with pytest.raises(RuntimeError, match='psycopg is not installed'):
         PostgresKnowledgeRepository('unused')

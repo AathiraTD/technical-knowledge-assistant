@@ -51,7 +51,7 @@ from ..repository import (
     RetrievalRequest,
     product_matches,
 )
-from .. import paths
+from ... import paths
 
 SCHEMA = paths.DB_DIR / "schema.sqlite.sql"
 
@@ -831,7 +831,7 @@ class SQLiteKnowledgeRepository:
             finally:
                 writer.close()
         except Exception as error:                     # noqa: BLE001
-            from ..infrastructure import observability as obs
+            from ...infrastructure import observability as obs
             obs.event("store_error", operation="record_spans",
                       error=type(error).__name__, detail=str(error))
 

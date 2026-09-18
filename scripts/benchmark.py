@@ -45,7 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.store.factory import open_repository       # noqa: E402
+from assistant.knowledge.store.factory import open_repository       # noqa: E402
 
 # Distinct on purpose: each is asked once per run, so none of them is served
 # from the answer cache. They are also deliberately ordinary -- the questions a

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from assistant.answering.answer import AnswerEngine, run_checks, scoped_evidence
-from assistant.model import Chunk, Document, Retrieved
+from assistant.knowledge.model import Chunk, Document, Retrieved
 from assistant.answering.router import Decision, Path_
 
 

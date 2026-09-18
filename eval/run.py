@@ -71,7 +71,7 @@ from assistant.turn.conversation import TurnInput             # noqa: E402
 from assistant.answering.engine import Assistant, render          # noqa: E402
 from assistant.answering.router import Path_                      # noqa: E402
 from assistant.turn.session import SessionStore              # noqa: E402
-from assistant.store.factory import open_repository     # noqa: E402
+from assistant.knowledge.store.factory import open_repository     # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
@@ -598,8 +598,8 @@ class GoldContext:
         rather than through SQL keeps the audience filter the repository's job,
         which is the one place it belongs.
         """
-        from assistant.repository import RetrievalRequest
-        from assistant import ollama
+        from assistant.knowledge.repository import RetrievalRequest
+        from assistant.infrastructure import ollama
         vector = ollama.embed_one("lime", model=self.assistant.retriever.embed_model)
         hits = self.assistant.repo.retrieve_for(RetrievalRequest(
             embedding=vector, audiences=self.audiences,

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from assistant.answering.engine import Assistant
-from assistant.model import Snapshot
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.model import Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 from assistant.infrastructure import ollama
 from test_engine import CHUNKING_VERSION, chunk, document, unit, version
 
@@ -57,7 +57,7 @@ def assistant(tmp_path, monkeypatch):
         chunk_count=len(chunks), notes={"products": ["Ultra", "Solo", "Duro", "Bond"]})
 
     repo = SQLiteKnowledgeRepository(tmp_path / "knowledge.db")
-    from assistant.model import Retrieved
+    from assistant.knowledge.model import Retrieved
     repo.publish(docs, versions, chunks, snapshot, [])
     app = Assistant(repo, log=False)
 

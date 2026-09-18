@@ -45,7 +45,7 @@ from .extract import (
     extract_pdf,
     harvest,
 )
-from ..model import (
+from ..knowledge.model import (
     AUTHORITY,
     Caveat,
     Chunk,
@@ -56,7 +56,7 @@ from ..model import (
     Excluded,
     Snapshot,
 )
-from ..store.factory import open_repository
+from ..knowledge.store.factory import open_repository
 from .. import paths
 
 ROOT = paths.ROOT

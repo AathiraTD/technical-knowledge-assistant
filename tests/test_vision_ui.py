@@ -40,7 +40,7 @@ from assistant.infrastructure import ollama
 from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
-from assistant.store.factory import open_repository                  # noqa: E402
+from assistant.knowledge.store.factory import open_repository                  # noqa: E402
 from assistant.interfaces.ui import (  # noqa: E402
     Handler,
 )

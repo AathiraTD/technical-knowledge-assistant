@@ -22,12 +22,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.infrastructure import ollama
-from assistant.audience import parse, resolve                   # noqa: E402
+from assistant.knowledge.audience import parse, resolve                   # noqa: E402
 from assistant.answering.engine import MAX_WORDS, Assistant, cap          # noqa: E402
 from assistant.indexing.index import CHUNKING_VERSION                    # noqa: E402
-from assistant.model import Chunk, Document, DocumentVersion, Snapshot  # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    Chunk,
+    Document,
+    DocumentVersion,
+    Snapshot,
+)
 from assistant.answering.router import Path_                              # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository           # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository           # noqa: E402
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"

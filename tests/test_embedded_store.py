@@ -19,11 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.model import (                                  # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository          # noqa: E402
-from assistant.store.embedded import (                         # noqa: E402
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository          # noqa: E402
+from assistant.knowledge.store.embedded import (                         # noqa: E402
     AUTHORITY_BONUS, TIE_BAND, _f32, _unpack,
 )
 

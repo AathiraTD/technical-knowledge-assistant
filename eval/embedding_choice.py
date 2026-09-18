@@ -29,7 +29,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from assistant import ollama, use_utf8                    # noqa: E402
+from assistant.infrastructure import ollama
+from assistant import use_utf8                    # noqa: E402
 from assistant.indexing.embedcache import EmbeddingCache           # noqa: E402
 from assistant.indexing.extract import extract_html, extract_pdf   # noqa: E402
 from assistant.indexing.index import (  # noqa: E402
@@ -37,7 +38,7 @@ from assistant.indexing.index import (  # noqa: E402
     embedding_text,
     product_name,
 )
-from assistant.model import Chunk                         # noqa: E402
+from assistant.knowledge.model import Chunk                         # noqa: E402
 from assistant.retrieval.retrieve import QUERY_INSTRUCTION          # noqa: E402
 
 # Each question's answer was located in the extracted corpus before the question

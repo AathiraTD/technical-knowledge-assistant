@@ -39,7 +39,7 @@ import time
 
 from . import ollama
 from .. import use_utf8
-from ..store.factory import open_repository
+from ..knowledge.store.factory import open_repository
 from ..indexing.index import CHUNKING_VERSION
 
 # Credentials in a DSN, and nothing else. Deliberately narrow: the host, port

@@ -48,14 +48,8 @@ from assistant.answering.engine import (  # noqa: E402
 from assistant.indexing.index import (  # noqa: E402
     CHUNKING_VERSION,
 )
-from assistant.model import (  # noqa: E402
-    Caveat,
-    Chunk,
-    Document,
-    DocumentVersion,
-    Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository               # noqa: E402
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository               # noqa: E402
 
 from test_engine import DIMS, quoting, unit                         # noqa: E402
 

@@ -29,11 +29,17 @@ from assistant.answering.answer import (
     _contact_line,
     _source_rows,
 )
-from assistant.model import (                                  # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Excluded, Retrieved, Snapshot,
+from assistant.knowledge.model import (
+    Caveat,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Excluded,
+    Retrieved,
+    Snapshot,
 )
 from assistant.answering.router import Decision, Path_, Router           # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository          # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository          # noqa: E402
 
 DIMS = ollama.EMBED_DIMENSIONS
 SOLO_URL = "https://example/solo"

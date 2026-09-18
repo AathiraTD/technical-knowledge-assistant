@@ -25,11 +25,9 @@ from assistant.infrastructure import observability as obs, ollama
 from assistant.interfaces import ui
 from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
-from assistant.model import (
-    Caveat, Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository
-from assistant.store.factory import open_repository
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository
+from assistant.knowledge.store.factory import open_repository
 from assistant.turn.session import SessionStore
 from assistant.interfaces.ui import SESSION_COOKIE, Handler
 

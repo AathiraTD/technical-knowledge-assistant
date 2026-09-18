@@ -26,10 +26,8 @@ from assistant.indexing.index import CHUNKING_VERSION
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.infrastructure import health, ollama
-from assistant.model import (                                     # noqa: E402
-    Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
+from assistant.knowledge.model import Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository              # noqa: E402
 
 URL = "https://example.invalid/solo-datasheet"
 
@@ -171,7 +169,7 @@ def test_an_unreachable_store_is_reported_with_its_reason(tmp_path, monkeypatch)
     def boom(*_args, **_kwargs):
         raise RuntimeError("unable to open database file")
 
-    monkeypatch.setattr("assistant.store.SQLiteKnowledgeRepository", boom)
+    monkeypatch.setattr("assistant.knowledge.store.SQLiteKnowledgeRepository", boom)
     report = health.check(str(tmp_path / "knowledge.db"))
 
     assert report["ready"] is False
@@ -197,9 +195,9 @@ def test_a_configured_dsn_checks_postgres_instead_of_sqlite(monkeypatch, ollama_
                             chunking_version=CHUNKING_VERSION, document_count=1,
                             chunk_count=7)
 
-    module = types.ModuleType("assistant.store.postgres")
+    module = types.ModuleType("assistant.knowledge.store.postgres")
     module.PostgresKnowledgeRepository = FakePostgresRepository
-    monkeypatch.setitem(sys.modules, "assistant.store.postgres", module)
+    monkeypatch.setitem(sys.modules, "assistant.knowledge.store.postgres", module)
 
     report = health.check(dsn="postgresql://db:5432/assistant")
 
@@ -216,9 +214,9 @@ def test_a_dsn_in_the_environment_is_used_when_none_is_passed(monkeypatch, ollam
         def __init__(self, dsn, apply_schema=True):
             raise RuntimeError(f"could not connect to {dsn}")
 
-    module = types.ModuleType("assistant.store.postgres")
+    module = types.ModuleType("assistant.knowledge.store.postgres")
     module.PostgresKnowledgeRepository = Unreachable
-    monkeypatch.setitem(sys.modules, "assistant.store.postgres", module)
+    monkeypatch.setitem(sys.modules, "assistant.knowledge.store.postgres", module)
     monkeypatch.setenv("ASSISTANT_POSTGRES_DSN", "postgresql://db:5432/assistant")
 
     report = health.check()

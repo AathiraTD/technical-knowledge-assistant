@@ -26,10 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assistant.interfaces import cli
 from assistant.infrastructure import observability as obs, ollama
 from assistant.indexing.index import CHUNKING_VERSION                      # noqa: E402
-from assistant.model import (                                     # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository             # noqa: E402
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository             # noqa: E402
 
 DIMS = 1024
 SOLO = "https://example.invalid/solo"

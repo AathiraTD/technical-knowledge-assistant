@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.model import Chunk, Document, Retrieved       # noqa: E402
+from assistant.knowledge.model import Chunk, Document, Retrieved       # noqa: E402
 from assistant.answering.router import (
     Decision,
     Path_,

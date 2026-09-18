@@ -53,12 +53,12 @@ from urllib.parse import parse_qs, urlparse
 from ..infrastructure import health, metrics, observability as obs, ollama
 from .. import use_utf8
 from ..answering.answer import Provenance
-from ..audience import DEFAULT as PUBLIC_ONLY, resolve
+from ..knowledge.audience import DEFAULT as PUBLIC_ONLY, resolve
 from ..answering.engine import Assistant
-from ..repository import IndexMismatch
+from ..knowledge.repository import IndexMismatch
 from ..answering.router import Path_
 from ..turn.session import SessionStore
-from ..store.factory import open_repository, open_persisted_session_store
+from ..knowledge.store.factory import open_repository, open_persisted_session_store
 
 # Named for what it is and scoped to this server. HttpOnly because no script on
 # the page has any use for it, SameSite=Lax because a session that follows a

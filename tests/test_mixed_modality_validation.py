@@ -26,8 +26,8 @@ from assistant.answering.answer import Provenance
 from assistant.turn.conversation import ConversationState, FactStatus, TurnInput
 from assistant.answering.engine import Assistant
 from assistant.indexing.index import CHUNKING_VERSION
-from assistant.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 
 from test_engine import DIMS, quoting, unit
 

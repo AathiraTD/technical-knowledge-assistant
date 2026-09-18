@@ -66,7 +66,7 @@ from assistant.answering.engine import (  # noqa: E402
 from assistant.answering.router import (  # noqa: E402
     Path_,
 )
-from assistant.store.factory import open_repository                 # noqa: E402
+from assistant.knowledge.store.factory import open_repository                 # noqa: E402
 from assistant.interfaces.ui import (  # noqa: E402
     Handler,
     MAX_IMAGES_PER_SESSION,

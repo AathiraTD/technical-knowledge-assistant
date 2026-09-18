@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..infrastructure import observability as obs
-from ..model import Chunk, Document
+from ..knowledge.model import Chunk, Document
 
 
 @dataclass

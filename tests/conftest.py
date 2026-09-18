@@ -21,8 +21,8 @@ sys.path.insert(0, str(ROOT))
 
 from assistant.infrastructure import ollama
 from assistant.indexing.index import CHUNKING_VERSION           # noqa: E402
-from assistant.model import Snapshot                   # noqa: E402
-from assistant.store import SQLiteKnowledgeRepository  # noqa: E402
+from assistant.knowledge.model import Snapshot                   # noqa: E402
+from assistant.knowledge.store import SQLiteKnowledgeRepository  # noqa: E402
 
 TEST_POSTGRES_DSN = os.environ.get("ASSISTANT_POSTGRES_DSN")
 
@@ -46,7 +46,7 @@ def _postgres():
     import psycopg
     from psycopg import sql
     from psycopg.conninfo import make_conninfo
-    from assistant.store.postgres import PostgresKnowledgeRepository
+    from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
     admin = psycopg.connect(dsn, autocommit=True)
     schema = "tka_test_" + uuid.uuid4().hex
     admin.execute("CREATE EXTENSION IF NOT EXISTS vector")

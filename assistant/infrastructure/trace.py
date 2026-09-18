@@ -37,8 +37,8 @@ import sys
 from collections import defaultdict
 
 from .. import use_utf8
-from ..model import TraceSpan
-from ..store.factory import open_repository
+from ..knowledge.model import TraceSpan
+from ..knowledge.store.factory import open_repository
 
 # Attributes worth putting on the span's own line rather than under it. These
 # are the ones a question about a wrong answer actually turns on: what the

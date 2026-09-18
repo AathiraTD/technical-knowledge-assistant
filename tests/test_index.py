@@ -47,11 +47,13 @@ from assistant.indexing.index import (
     product_name,
     summarise,
 )
-from assistant.model import Chunk                                  # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    Chunk,
+)
 from assistant.infrastructure.ollama import (  # noqa: E402
     OllamaUnavailable,
 )
-from assistant.store import EmbeddedRepository                     # noqa: E402
+from assistant.knowledge.store import EmbeddedRepository                     # noqa: E402
 
 CACHE = ROOT / "data" / "cache"
 

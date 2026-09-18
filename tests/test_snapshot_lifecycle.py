@@ -3,8 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from assistant.model import DocumentUpdate
-from assistant.store import SQLiteKnowledgeRepository
+from assistant.knowledge.model import DocumentUpdate
+from assistant.knowledge.store import SQLiteKnowledgeRepository
 from test_repository_contract import A, doc, ver, chunk, snap
 
 
@@ -32,7 +32,7 @@ def test_read_snapshot_releases_transaction_on_error(tmp_path):
 
 
 def test_snapshot_records_membership_and_complete_crawl_outcome(repo):
-    from assistant.model import CrawlRun
+    from assistant.knowledge.model import CrawlRun
     repo.apply_delta([DocumentUpdate(doc("one"), ver("one"), [chunk("one", 0, "text", A)])], [],
                      snap("release"), crawl_run=CrawlRun("2026-01-01", documents_removed=2, snapshot_id="release"))
     assert repo.snapshot().notes["active_versions"]["one"]["version"] == 1

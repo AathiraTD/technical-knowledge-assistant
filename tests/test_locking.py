@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.store.locking import LockedRepository          # noqa: E402
+from assistant.knowledge.store.locking import LockedRepository          # noqa: E402
 
 
 class Inner:

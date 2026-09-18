@@ -22,7 +22,7 @@ from pathlib import Path
 from ..infrastructure import observability as obs
 from ..infrastructure import ollama
 from ..logging.diagnosis_capture import DiagnosisCapture
-from ..model import Retrieved
+from ..knowledge.model import Retrieved
 from .router import Decision, Path_
 
 # ---------------------------------------------------------------- the prompt

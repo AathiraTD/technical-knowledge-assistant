@@ -25,14 +25,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from assistant.model import (                                    # noqa: E402
-    AnswerLogEntry, Caveat, Chunk, CrawlRun, Document, DocumentUpdate,
-    DocumentVersion, Excluded, Snapshot, TraceSpan,
+from assistant.knowledge.model import (
+    AnswerLogEntry,
+    Caveat,
+    Chunk,
+    CrawlRun,
+    Document,
+    DocumentUpdate,
+    DocumentVersion,
+    Excluded,
+    Snapshot,
+    TraceSpan,
 )
-from assistant.repository import (                               # noqa: E402
-    KnowledgeRepository, RetrievalRequest,
-)
-from assistant.store import SQLiteKnowledgeRepository            # noqa: E402
+from assistant.knowledge.repository import KnowledgeRepository, RetrievalRequest
+from assistant.knowledge.store import SQLiteKnowledgeRepository            # noqa: E402
 
 DIMS = 1024
 
@@ -91,7 +97,7 @@ def sqlite_adapter():
 def postgres_adapter():
     """Returns an adapter against a live pgvector instance, or None."""
     try:
-        from assistant.store.postgres import PostgresKnowledgeRepository
+        from assistant.knowledge.store.postgres import PostgresKnowledgeRepository
     except ImportError:
         return None
     import os

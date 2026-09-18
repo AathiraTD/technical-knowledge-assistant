@@ -58,11 +58,9 @@ from assistant.answering.engine import (  # noqa: E402
     Assistant,
 )
 from assistant.indexing.index import CHUNKING_VERSION                       # noqa: E402
-from assistant.model import (                                      # noqa: E402
-    Caveat, Chunk, Document, DocumentVersion, Snapshot,
-)
-from assistant.store import SQLiteKnowledgeRepository              # noqa: E402
-from assistant.store.factory import open_repository                # noqa: E402
+from assistant.knowledge.model import Caveat, Chunk, Document, DocumentVersion, Snapshot
+from assistant.knowledge.store import SQLiteKnowledgeRepository              # noqa: E402
+from assistant.knowledge.store.factory import open_repository                # noqa: E402
 from assistant.turn.session import SessionStore                         # noqa: E402
 from assistant.interfaces.ui import (  # noqa: E402
     SESSION_COOKIE,

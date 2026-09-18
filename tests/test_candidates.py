@@ -27,7 +27,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from assistant.retrieval import candidates as c
-from assistant.model import Chunk, Document, Retrieved             # noqa: E402
+from assistant.knowledge.model import (  # noqa: E402
+    Chunk,
+    Document,
+    Retrieved,
+)
 from assistant.answering.router import (  # noqa: E402
     SlotDetector,
 )
@@ -325,7 +329,7 @@ def test_an_absent_rule_reads_as_unknown_and_not_as_permission(detector):
 
 
 def test_a_conditional_recommendation_when_caveats_are_published(detector):
-    from assistant.model import Caveat
+    from assistant.knowledge.model import Caveat
     url = "https://example.invalid/ultra"
     repo = FakeRepo(
         {"Ultra": [chunk("Ultra", "Backgrounds", "suitable for brick")]},

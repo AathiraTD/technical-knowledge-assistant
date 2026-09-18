@@ -23,7 +23,7 @@ from . import vision
 from .answer import (Answer, AnswerEngine, Provenance, _named_aliases,
                      _product_aliases, _requested_fields)
 from ..cache import AnswerCache
-from ..model import AnswerLogEntry
+from ..knowledge.model import AnswerLogEntry
 from ..retrieval.retrieve import Retriever
 from .router import Decision, Path_, Router, split_by_topic
 

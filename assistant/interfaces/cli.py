@@ -27,9 +27,9 @@ from ..infrastructure import observability as obs, ollama
 from .. import use_utf8
 from ..turn.conversation import TurnInput
 from ..answering.engine import Assistant, render
-from ..repository import IndexMismatch
-from ..store import EmbeddedRepository
-from ..store.factory import open_repository
+from ..knowledge.repository import IndexMismatch
+from ..knowledge.store import EmbeddedRepository
+from ..knowledge.store.factory import open_repository
 
 BANNER = """Lime Green technical assistant
 Answers only from Lime Green's published material, cites every source, and
