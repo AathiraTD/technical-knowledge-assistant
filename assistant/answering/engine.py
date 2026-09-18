@@ -64,6 +64,11 @@ DISTINCTIVE_CAP = 6
 # specific published fact, not widening the evidence base. Three is the same
 # bound the targeted coverage lookup uses.
 GATE_SECOND_CHANCE = 3
+# How many named products get their own retrieval window. Two covers the
+# comparison the corpus actually invites ("Ultra or Solo?"); the bound exists so
+# that a question listing every product on the site cannot turn one answer into
+# a scan of the corpus.
+PRODUCTS_RETRIEVED_SEPARATELY = 3
 
 # How many recovered passages may join the ranked ones. Small on purpose: this
 # is a repair for a specific miss, not a second retrieval, and the five ranked
@@ -1115,7 +1120,35 @@ class Assistant:
                     else Provenance.ASSUMED)
         products = explicit or ([named] if named else [])
         query = f"{named}: {part}" if named and not explicit else part
-        hits = self.retriever.search(query, audiences=audiences, product=named)
+        if len(explicit) > 1:
+            # A question naming two products needs evidence about two products,
+            # and one window of five cannot hold it. Asked to compare Ultra and
+            # Solo, similarity returned four Ultra passages and Solo *Primer* --
+            # the real Solo ranked 6th, 7th and 10th, just below the cut, and the
+            # passage carrying its per-background thicknesses ranked 14th. The
+            # products were detected (`explicit` holds both) and then discarded
+            # one line later, because `named` is empty when several are named and
+            # the search went out unscoped.
+            #
+            # Retrieving per product spends the same budget per side instead of
+            # letting the better-represented product take the window. Bounded,
+            # because a question naming six products must not fetch thirty
+            # passages; beyond the bound this falls back to the single unscoped
+            # search, which is what it always did.
+            hits, seen = [], set()
+            for product in explicit[:PRODUCTS_RETRIEVED_SEPARATELY]:
+                for hit in self.retriever.search(part, audiences=audiences,
+                                                 product=product):
+                    key = (hit.chunk.canonical_url, hit.chunk.chunk_index)
+                    if key not in seen:
+                        seen.add(key)
+                        hits.append(hit)
+            hits.sort(key=lambda h: h.score, reverse=True)
+            obs.event("per_product_retrieval", products=len(explicit),
+                      retrieved=len(hits),
+                      reason="the question names more than one product")
+        else:
+            hits = self.retriever.search(query, audiences=audiences, product=named)
         # A quantity question embeds as a question about quantity, so the
         # coverage figure it needs may not be in the top five at all — and a
         # path that only re-sorts what it was given cannot recover from that.
