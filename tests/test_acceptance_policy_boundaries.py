@@ -17,7 +17,7 @@ from assistant.router import PolicyGate, split_by_topic
 from test_engine import build_repo, unit
 
 
-with (ROOT / "eval" / "evalset" / "lime_green_ui_acceptance_tests.csv").open(
+with (ROOT / "eval" / "evalset" / "Set 1" / "lime_green_ui_acceptance_tests.csv").open(
     encoding="utf-8-sig", newline=""
 ) as stream:
     ACCEPTANCE = {row["test_id"]: row["question"] for row in csv.DictReader(stream)}
